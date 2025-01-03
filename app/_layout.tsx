@@ -126,7 +126,7 @@ export default function RootLayout() {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContainer}>
               <Image
-                source={require("../assets/images/pikachu_happy.pngModal ")}
+                source={require("../assets/images/pikachu_happy.png")}
                 style={styles.modalImage}
               />
               <Text style={styles.modalTitle}>Atualização Completa!</Text>
