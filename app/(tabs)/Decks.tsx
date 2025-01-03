@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   View,
   Text,
@@ -63,6 +64,8 @@ export default function DecksScreen() {
   const [editPokemons, setEditPokemons] = useState<CardLine[]>([]);
   const [editTrainers, setEditTrainers] = useState<CardLine[]>([]);
   const [editEnergies, setEditEnergies] = useState<CardLine[]>([]);
+  const router = useRouter();
+  const currentDeckName = deckName; // Supondo que o objeto deck contém o nome
 
   // Função para calcular o total de cartas em um array de CardLine[]
   const calculateTotalFromCards = (cards: CardLine[]): number => {
@@ -556,7 +559,7 @@ export default function DecksScreen() {
             <Text style={styles.label}>Nome do Deck</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ex: Gholdengo Attack"
+              placeholder="Ex: Gholdengo"
               placeholderTextColor="#aaa"
               value={deckName}
               onChangeText={setDeckName}
@@ -569,7 +572,7 @@ export default function DecksScreen() {
             <TextInput
               style={[styles.input, { height: 80 }]}
               multiline
-              placeholder="Pokémon: 10\n1 Togepi...\nTreinador: 18\n1 Energy Search...\nEnergia: 8\n1 Basic..."
+              placeholder="Pokémon: 10 Togepi... Treinador: 18 Energy Search... Energia: 8 Basic..."
               placeholderTextColor="#aaa"
               value={deckContent}
               onChangeText={setDeckContent}
@@ -865,6 +868,26 @@ export default function DecksScreen() {
               onPress={() => addLine("ENERGY")}
             >
               <Text style={styles.buttonText}>+ Energia</Text>
+            </TouchableOpacity>
+
+            {/* Botão para ver o deck */}
+            <TouchableOpacity
+              style={[
+                styles.buttonSmall,
+                { backgroundColor: "#E3350D", marginTop: 20 },
+              ]}
+              onPress={() => {
+                if (!deckName) {
+                  Alert.alert(
+                    "Erro",
+                    "Por favor, insira ou selecione um deck primeiro."
+                  );
+                  return;
+                }
+                router.push(`/DeckViewer?deck=${deckName}`); // Usa diretamente `deckName`
+              }}
+            >
+              <Text style={styles.buttonText}>Ver Deck</Text>
             </TouchableOpacity>
 
             <View style={styles.modalButtons}>
