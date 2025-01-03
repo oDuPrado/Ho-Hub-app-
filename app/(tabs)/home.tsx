@@ -10,7 +10,7 @@ import {
   Easing,
   Alert,
   ActivityIndicator,
-  Linking, // Import para abrir link de doação
+  Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -18,6 +18,7 @@ import { signOut } from "firebase/auth";
 
 import { auth, db } from "../../lib/firebaseConfig";
 import { collectionGroup, getDocs, doc, getDoc } from "firebase/firestore";
+import { useFocusEffect } from "@react-navigation/native";
 
 interface MatchData {
   player1_id: string;
@@ -26,13 +27,6 @@ interface MatchData {
   outcome: string;
 }
 
-/**
- * Tela Home com tema baseado em uma Pokébola:
- * - Fundo BRANCO
- * - Destaques em VERMELHO e PRETO
- * - Botão de Doar e Logout
- * - Estatísticas de vitórias, derrotas, empates, maior rival etc.
- */
 export default function HomeScreen() {
   const router = useRouter();
 
@@ -46,28 +40,23 @@ export default function HomeScreen() {
   const [biggestRival, setBiggestRival] = useState("...");
   const [matchesTotal, setMatchesTotal] = useState(0);
 
-  // Animações
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     (async () => {
       try {
-        // Lê do AsyncStorage
         const storedId = await AsyncStorage.getItem("@userId");
         const storedName = await AsyncStorage.getItem("@userName");
         if (!storedId) {
-          // Se não estiver logado, redireciona
           router.replace("/(auth)/login");
           return;
         }
         setUserId(storedId);
         setUserName(storedName || "Jogador");
 
-        // Carrega estatísticas do Firestore
         await loadStats(storedId);
 
-        // Animações de fade e loop no scale
         Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 1,
@@ -100,9 +89,24 @@ export default function HomeScreen() {
     })();
   }, [fadeAnim, scaleAnim]);
 
-  /** Carrega todas as matches do usuário e computa estatísticas. */
+  useFocusEffect(
+    React.useCallback(() => {
+      const fetchData = async () => {
+        const storedId = await AsyncStorage.getItem("@userId");
+        if (storedId) {
+          setLoading(true);
+          await loadStats(storedId);
+          setLoading(false);
+        }
+      };
+
+      fetchData();
+
+      return () => {};
+    }, [router])
+  );
+
   async function loadStats(uId: string) {
-    // Perfomance: se houver muitos torneios, poderia usar index/queries mais refinadas
     const matchesRef = collectionGroup(db, "matches");
     const snap = await getDocs(matchesRef);
 
@@ -112,12 +116,10 @@ export default function HomeScreen() {
       arrMatches.push(m);
     });
 
-    // Filtra do user
     let userMatches = arrMatches.filter(
       (m) => m.player1_id === uId || m.player2_id === uId
     );
 
-    // Conta vitórias, derrotas, empates, e maior rival
     let w = 0,
       l = 0,
       d = 0;
@@ -142,7 +144,6 @@ export default function HomeScreen() {
         if (isP2) w++;
         else if (isP1) l++;
       } else if (outcomeNumber === 10) {
-        // Derrota dupla => conta como "derrota" (ou ignora, a critério)
         l++;
       }
     });
@@ -152,7 +153,6 @@ export default function HomeScreen() {
     setDrawCount(d);
     setMatchesTotal(userMatches.length);
 
-    // Acha o rival
     let max = 0;
     let rivalMax = "";
     for (let rid of Object.keys(rivalCount)) {
@@ -164,7 +164,6 @@ export default function HomeScreen() {
     if (!rivalMax) {
       setBiggestRival("Nenhum rival encontrado");
     } else {
-      // Carrega nome do rival
       const docSnap = await getDoc(doc(db, "players", rivalMax));
       if (!docSnap.exists()) {
         setBiggestRival(`Jogador ${rivalMax} (${max} partidas)`);
@@ -196,25 +195,21 @@ export default function HomeScreen() {
     );
   }
 
-  // Calcula WinRate
   const total = matchesTotal;
   const wr = total > 0 ? ((winsCount / total) * 100).toFixed(1) : "0";
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {/* Logo animada */}
       <Animated.Image
         source={require("../../assets/images/pokemon_ms_logo.jpg")}
         style={[styles.logo, { transform: [{ scale: scaleAnim }] }]}
         resizeMode="contain"
       />
 
-      {/* Título animado */}
       <Animated.Text style={[styles.title, { opacity: fadeAnim }]}>
         Bem-vindo, {userName}!
       </Animated.Text>
 
-      {/* Estatísticas */}
       <View style={styles.statsSection}>
         <Text style={styles.sectionTitle}>Suas Estatísticas</Text>
 
@@ -250,7 +245,6 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Botões */}
       <View style={styles.buttonsContainer}>
         <TouchableOpacity
           style={styles.donateButton}
@@ -269,11 +263,11 @@ export default function HomeScreen() {
   );
 }
 
-const BACKGROUND = "#1E1E1E"; // Fundo escuro para visual competitivo
-const PRIMARY = "#E3350D"; // Vermelho intenso
-const SECONDARY = "#FFFFFF"; // Branco para contraste
-const ACCENT = "#FF6F61"; // Vermelho mais claro para detalhes
-const CARD_BORDER = "#4D4D4D"; // Cinza metálico para bordas
+const BACKGROUND = "#1E1E1E";
+const PRIMARY = "#E3350D";
+const SECONDARY = "#FFFFFF";
+const ACCENT = "#FF6F61";
+const CARD_BORDER = "#4D4D4D";
 
 const styles = StyleSheet.create({
   loaderContainer: {
@@ -300,13 +294,13 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
     marginVertical: 20,
-    textTransform: "uppercase", // Deixa o título em maiúsculas
+    textTransform: "uppercase",
   },
   statsSection: {
     width: "100%",
     padding: 15,
-    backgroundColor: "#2A2A2A", // Cinza escuro para destacar
-    borderRadius: 8, // Bordas mais discretas
+    backgroundColor: "#2A2A2A",
+    borderRadius: 8,
     borderWidth: 1.5,
     borderColor: CARD_BORDER,
     marginBottom: 20,
@@ -320,11 +314,11 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: "row",
-    justifyContent: "space-between", // Espaçamento uniforme
+    justifyContent: "space-between",
     marginVertical: 10,
   },
   statCard: {
-    backgroundColor: "#292929", // Fundo mais escuro
+    backgroundColor: "#292929",
     borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 15,
@@ -339,7 +333,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   statLabel: {
-    color: "#D9D9D9", // Cinza claro para descrição
+    color: "#D9D9D9",
     fontSize: 14,
     textAlign: "center",
     marginTop: 5,
@@ -363,10 +357,10 @@ const styles = StyleSheet.create({
   buttonsContainer: {
     flexDirection: "row",
     marginTop: 20,
-    justifyContent: "space-between", // Mantém os botões afastados
+    justifyContent: "space-between",
   },
   donateButton: {
-    backgroundColor: SECONDARY, // Branco
+    backgroundColor: SECONDARY,
     paddingVertical: 12,
     paddingHorizontal: 25,
     borderRadius: 8,
@@ -380,7 +374,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   logoutButton: {
-    backgroundColor: PRIMARY, // Vermelho intenso
+    backgroundColor: PRIMARY,
     paddingVertical: 12,
     paddingHorizontal: 25,
     borderRadius: 8,
@@ -389,7 +383,7 @@ const styles = StyleSheet.create({
     borderColor: SECONDARY,
   },
   logoutText: {
-    color: SECONDARY, // Branco
+    color: SECONDARY,
     fontWeight: "bold",
     fontSize: 16,
   },
