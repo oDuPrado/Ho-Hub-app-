@@ -887,7 +887,7 @@ export default function DecksScreen() {
                 router.push(`/DeckViewer?deck=${deckName}`); // Usa diretamente `deckName`
               }}
             >
-              <Text style={styles.buttonText}>Ver Deck</Text>
+              <Text style={styles.buttonText}>Em breve</Text>
             </TouchableOpacity>
 
             <View style={styles.modalButtons}>
