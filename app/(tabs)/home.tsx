@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
+  Modal,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -25,6 +26,24 @@ interface MatchData {
   player2_id: string;
   outcomeNumber: number;
   outcome: string;
+}
+
+interface CollectionData {
+  id: string;
+  name: string;
+  series: string;
+  printedTotal: number;
+  total: number;
+  legalities: {
+    standard?: string;
+  };
+  ptcgoCode: string;
+  releaseDate: string;
+  images: {
+    symbol: string;
+    logo: string;
+  };
+  rotationDate?: string; // Adicionando a propriedade opcional
 }
 
 export default function HomeScreen() {
@@ -42,6 +61,12 @@ export default function HomeScreen() {
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
+  const [validCollections, setValidCollections] = useState<CollectionData[]>(
+    []
+  );
+  const [loadingCollections, setLoadingCollections] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -187,6 +212,75 @@ export default function HomeScreen() {
     }
   }
 
+  async function loadValidCollections() {
+    setLoadingCollections(true);
+    try {
+      const response = await fetch("https://api.pokemontcg.io/v2/sets");
+      const data = await response.json();
+
+      if (data && data.data) {
+        const validSets = data.data.filter(
+          (set: CollectionData) => set.legalities?.standard === "Legal"
+        );
+
+        const setsWithRotation = validSets.map((set: CollectionData) => {
+          try {
+            if (!set.releaseDate) {
+              console.warn(`releaseDate ausente para o set: ${set.name}`);
+              return { ...set, rotationDate: "Indefinida" };
+            }
+
+            const [year, month, day] = set.releaseDate.split("/").map(Number);
+            if (!year || !month || !day) {
+              console.warn(`Data inválida para o set: ${set.name}`);
+              return { ...set, rotationDate: "Indefinida" };
+            }
+
+            const releaseDateFormatted = `${day
+              .toString()
+              .padStart(2, "0")}/${month.toString().padStart(2, "0")}/${year}`;
+
+            // Calcula o ano da rotação: 2 anos para janeiro, 3 anos para os demais
+            const rotationYear = month === 1 ? year + 2 : year + 3;
+
+            return {
+              ...set,
+              releaseDate: releaseDateFormatted,
+              rotationDate: `${rotationYear}`,
+            };
+          } catch (error) {
+            console.error(
+              `Erro ao calcular rotação para o set: ${set.name}`,
+              error
+            );
+            return { ...set, rotationDate: "Erro" };
+          }
+        });
+
+        setValidCollections(setsWithRotation);
+      }
+    } catch (error) {
+      console.error("Erro ao carregar coleções válidas:", error);
+    } finally {
+      setLoadingCollections(false);
+    }
+  }
+
+  function openCollectionModal() {
+    setCollectionsModalVisible(true);
+    loadValidCollections();
+  }
+
+  function closeCollectionModal() {
+    setCollectionsModalVisible(false);
+  }
+
+  function openCollectionPage(name: string) {
+    const formattedName = name.replace(/\s+/g, "-");
+    const url = `https://www.pokellector.com/${formattedName}-Expansion/`;
+    Linking.openURL(url);
+  }
+
   if (loading) {
     return (
       <View style={styles.loaderContainer}>
@@ -247,38 +341,83 @@ export default function HomeScreen() {
 
       <View style={styles.buttonsContainer}>
         <TouchableOpacity
-          style={styles.donateButton}
-          onPress={() =>
-            Linking.openURL("https://picpay.me/marco.macedo10/0.5")
-          }
+          style={styles.collectionsButton}
+          onPress={openCollectionModal}
         >
-          <Text style={styles.donateText}>Doar</Text>
+          <Text style={styles.collectionsButtonText}>Coleções Válidas</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Sair</Text>
-        </TouchableOpacity>
+        <View style={styles.bottomButtonsRow}>
+          <TouchableOpacity
+            style={styles.donateButton}
+            onPress={() =>
+              Linking.openURL("https://picpay.me/marco.macedo10/0.5")
+            }
+          >
+            <Text style={styles.donateText}>Doar</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Text style={styles.logoutText}>Sair</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {/* Modal de Coleções */}
+      <Modal visible={collectionsModalVisible} animationType="slide">
+        <ScrollView contentContainerStyle={styles.modalContainer}>
+          <Text style={styles.modalTitle}>Coleções Válidas</Text>
+          {loadingCollections ? (
+            <ActivityIndicator size="large" color="#E3350D" />
+          ) : (
+            validCollections.map((set) => (
+              <TouchableOpacity
+                key={set.id}
+                style={styles.collectionCard}
+                onPress={() => openCollectionPage(set.name)}
+              >
+                <View style={styles.collectionHeader}>
+                  <Image
+                    source={{ uri: set.images.symbol }}
+                    style={styles.collectionImage}
+                  />
+                  <Text style={styles.collectionName}>{set.name}</Text>
+                </View>
+                <Text style={styles.collectionSeries}>Série: {set.series}</Text>
+                <Text style={styles.collectionTotal}>
+                  Total de Cartas: {set.total}
+                </Text>
+                <Text style={styles.collectionReleaseDate}>
+                  Lançamento: {set.releaseDate}
+                </Text>
+                <Text style={styles.collectionRotationDate}>
+                  Rotação: {set.rotationDate}
+                </Text>
+              </TouchableOpacity>
+            ))
+          )}
+          <TouchableOpacity
+            style={styles.modalCloseButton}
+            onPress={closeCollectionModal}
+          >
+            <Text style={styles.modalCloseButtonText}>Fechar</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </Modal>
     </ScrollView>
   );
 }
 
-const BACKGROUND = "#1E1E1E";
-const PRIMARY = "#E3350D";
-const SECONDARY = "#FFFFFF";
-const ACCENT = "#FF6F61";
-const CARD_BORDER = "#4D4D4D";
-
 const styles = StyleSheet.create({
   loaderContainer: {
     flex: 1,
-    backgroundColor: BACKGROUND,
+    backgroundColor: "#1E1E1E",
     justifyContent: "center",
     alignItems: "center",
   },
   container: {
     flexGrow: 1,
-    backgroundColor: BACKGROUND,
+    backgroundColor: "#1E1E1E",
     alignItems: "center",
     padding: 20,
   },
@@ -289,7 +428,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   title: {
-    color: PRIMARY,
+    color: "#E3350D",
     fontSize: 28,
     fontWeight: "bold",
     textAlign: "center",
@@ -302,11 +441,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#2A2A2A",
     borderRadius: 8,
     borderWidth: 1.5,
-    borderColor: CARD_BORDER,
+    borderColor: "#4D4D4D",
     marginBottom: 20,
   },
   sectionTitle: {
-    color: SECONDARY,
+    color: "#FFFFFF",
     fontSize: 22,
     fontWeight: "bold",
     marginBottom: 10,
@@ -325,10 +464,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: 90,
     borderWidth: 1.5,
-    borderColor: PRIMARY,
+    borderColor: "#E3350D",
   },
   statNumber: {
-    color: SECONDARY,
+    color: "#FFFFFF",
     fontSize: 20,
     fontWeight: "bold",
   },
@@ -343,48 +482,145 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   rivalLabel: {
-    color: SECONDARY,
+    color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "bold",
     textAlign: "center",
   },
   rivalValue: {
-    color: PRIMARY,
+    color: "#E3350D",
     fontSize: 16,
     marginTop: 5,
     textAlign: "center",
   },
   buttonsContainer: {
-    flexDirection: "row",
+    alignItems: "center",
     marginTop: 20,
-    justifyContent: "space-between",
+    width: "100%",
   },
-  donateButton: {
-    backgroundColor: SECONDARY,
+  collectionsButton: {
+    backgroundColor: "#4CAF50",
     paddingVertical: 12,
     paddingHorizontal: 25,
     borderRadius: 8,
-    marginHorizontal: 10,
     borderWidth: 1.5,
-    borderColor: PRIMARY,
+    borderColor: "#FFF",
+    marginBottom: 10, // Espaçamento entre Coleções e os outros botões
+  },
+  collectionsButtonText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  bottomButtonsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    paddingHorizontal: 20, // Espaçamento nas laterais
+  },
+  donateButton: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginRight: 10,
+    borderWidth: 1.5,
+    borderColor: "#E3350D",
+    alignItems: "center",
   },
   donateText: {
-    color: PRIMARY,
+    color: "#E3350D",
     fontWeight: "bold",
     fontSize: 16,
   },
   logoutButton: {
-    backgroundColor: PRIMARY,
+    flex: 1,
+    backgroundColor: "#E3350D",
     paddingVertical: 12,
-    paddingHorizontal: 25,
     borderRadius: 8,
-    marginHorizontal: 10,
+    marginLeft: 10,
     borderWidth: 1.5,
-    borderColor: SECONDARY,
+    borderColor: "#FFFFFF",
+    alignItems: "center",
   },
   logoutText: {
-    color: SECONDARY,
+    color: "#FFFFFF",
     fontWeight: "bold",
     fontSize: 16,
+  },
+  modalContainer: {
+    flexGrow: 1,
+    backgroundColor: "#1E1E1E",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalTitle: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginVertical: 20,
+  },
+  collectionCard: {
+    backgroundColor: "#333",
+    width: "100%", // Garantir que os cards fiquem com o mesmo tamanho
+    padding: 20,
+    borderRadius: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 5,
+    elevation: 3,
+    marginBottom: 15,
+  },
+  collectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  collectionImage: {
+    width: 40,
+    height: 40,
+    marginRight: 10,
+  },
+  collectionName: {
+    fontSize: 18,
+    color: "#FFF",
+    fontWeight: "bold",
+    flex: 1, // Ajusta para ocupar o espaço restante
+    textAlign: "left",
+  },
+  collectionDetails: {
+    marginTop: 10,
+  },
+  collectionSeries: {
+    color: "#CCC",
+    fontSize: 14,
+  },
+  collectionTotal: {
+    color: "#CCC",
+    fontSize: 14,
+  },
+  collectionReleaseDate: {
+    color: "#CCC",
+    fontSize: 14,
+  },
+  collectionRotationDate: {
+    color: "#4CAF50",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  modalCloseButton: {
+    backgroundColor: "#E3350D",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 20,
+    alignSelf: "center",
+  },
+  modalCloseButtonText: {
+    color: "#FFF",
+    textAlign: "center",
+    fontWeight: "bold",
   },
 });
