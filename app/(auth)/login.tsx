@@ -27,13 +27,13 @@ import {
   signOut,
   User,
 } from "firebase/auth";
-import { doc, setDoc, getDoc, collection, Firestore } from "firebase/firestore";
-
-import { Ionicons } from "@expo/vector-icons"; // expo install react-native-vector-icons
+import { doc, setDoc, getDoc } from "firebase/firestore";
+import { Ionicons } from "@expo/vector-icons";
 
 import { auth, db } from "../../lib/firebaseConfig";
 
-/** Avalia força da senha e retorna: Fraca, Média, Forte, Muito Forte */
+// --------------- Funções Auxiliares (validação) ---------------
+
 function checkPasswordStrength(password: string) {
   let score = 0;
   if (/[A-Z]/.test(password)) score++;
@@ -53,49 +53,37 @@ function getPasswordStrengthColor(strength: string): string {
   if (strength === "Fraca") return "#E3350D"; // Vermelho
   if (strength === "Média") return "#FFC107"; // Amarelo
   if (strength === "Forte") return "#4CAF50"; // Verde
-  if (strength === "Muito Forte") return "#4CAF50"; // Verde Escuro (ou outra cor, se preferir)
-  return SECONDARY; // Cor padrão
+  if (strength === "Muito Forte") return "#009688"; // Verde mais escuro
+  return SECONDARY;
 }
 
-/** Valida form de e-mail minimamente */
 function validateEmail(mail: string): boolean {
   const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return regex.test(mail);
 }
-/** Verificação mínima se a senha tem 8 chars etc. */
 function validatePassword(pw: string): boolean {
+  // Ao menos 1 maiúscula, 1 minúscula, 1 dígito, 1 especial, >=8 chars
   const upper = /[A-Z]/.test(pw);
   const lower = /[a-z]/.test(pw);
   const digit = /\d/.test(pw);
   const special = /[^A-Za-z0-9]/.test(pw);
-  return pw.length >= 8 && upper && lower && digit && special;
+  return upper && lower && digit && special && pw.length >= 8;
 }
 
-const { width, height } = Dimensions.get("window");
-
-const BACKGROUND = "#1E1E1E";
-const PRIMARY = "#E3350D"; // Vermelho “Pokébola”
-const SECONDARY = "#FFFFFF";
-const INPUT_BG = "#292929";
-const INPUT_BORDER = "#4D4D4D";
-const SWITCH_TRACK = "#555555";
-const SWITCH_THUMB = PRIMARY;
-const ACCENT = "#FF6F61";
-
-/** Componente principal de Login/Cadastro */
+// --------------- Componente Principal ---------------
 export default function LoginScreen() {
   const router = useRouter();
 
-  // Modo => login ou signup
   const [mode, setMode] = useState<"login" | "signup">("login");
 
   // Campos do formulário
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [playerId, setPlayerId] = useState(""); // somente para signup
-  const [pin, setPin] = useState(""); // somente para signup
-  const [stayLogged, setStayLogged] = useState(false);
+  const [playerId, setPlayerId] = useState(""); // só no signup
+  const [pin, setPin] = useState(""); // só no signup
+  const [playerName, setPlayerName] = useState(""); // NOVO: nome do jogador
 
+  const [stayLogged, setStayLogged] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showPin, setShowPin] = useState(false);
 
@@ -103,9 +91,10 @@ export default function LoginScreen() {
   const [passwordStrength, setPasswordStrength] = useState("Fraca");
   const [loading, setLoading] = useState(false);
 
-  // Animação do logo
+  // Animação de logotipo
   const logoScale = useRef(new Animated.Value(1)).current;
 
+  // --------------- Efeito de animação ---------------
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -125,67 +114,70 @@ export default function LoginScreen() {
     ).start();
   }, [logoScale]);
 
-  // Observa user logado
+  // --------------- Observa estado do Auth ---------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
-        console.log("onAuthStateChanged -> user logado:", user.uid);
+        // Está logado => buscar doc "login/{uid}"
         setLoading(true);
         const docRef = doc(db, "login", user.uid);
         const snap = await getDoc(docRef);
         if (!snap.exists()) {
-          // Se doc login/{uid} não existe => recusa
           Alert.alert(
             "Aviso",
-            "Nenhum registro de playerId/pin encontrado. Conta incompleta."
+            "Seu login não possui dados de playerId/pin. Conta incompleta."
           );
-          // Desloga e sai
           await signOut(auth);
           setLoading(false);
           return;
         }
         const data = snap.data();
-        // Se faltar playerId ou pin => recusa
         if (!data.playerId || !data.pin) {
           Alert.alert(
             "Aviso",
-            "Documento de login sem playerId/pin. Contate o suporte."
+            "Documento sem playerId/pin. Contate o suporte."
           );
           await signOut(auth);
           setLoading(false);
           return;
         }
 
-        // Passou => salva local e vai p/ home
+        // Se tiver "name", ótimo. Senão, fallback.
+        const docName = data.name || "Jogador";
+
+        // Salva no AsyncStorage para que as outras telas funcionem igual antes
         await AsyncStorage.setItem("@userId", data.playerId);
         await AsyncStorage.setItem("@userPin", data.pin);
+        await AsyncStorage.setItem("@userName", docName);
 
-        Alert.alert(
-          "Bem-vindo",
-          `Bem-vindo, ${data.name || "Mestre Pokémon"}!`
-        );
+        // Exemplo de feedback
+        Alert.alert("Bem-vindo", `Olá, ${docName}!`);
 
+        // Ir para a Home (tabs)
         router.push("/(tabs)/home");
         setLoading(false);
       } else {
-        console.log("onAuthStateChanged -> sem user logado");
+        console.log("Sem user logado");
       }
     });
     return () => unsubscribe();
   }, [router]);
 
-  // Observa password p/ medir força
+  // --------------- Observa password p/ medir força (em signup) ---------------
   useEffect(() => {
     if (mode === "signup") {
-      const str = checkPasswordStrength(password);
-      setPasswordStrength(str);
+      const s = checkPasswordStrength(password);
+      setPasswordStrength(s);
     }
   }, [mode, password]);
 
-  /** Cria conta => createUserWithEmailAndPassword => doc login/{uid} */
+  // --------------- Ações ---------------
   async function handleSignUp() {
-    if (!email || !password || !playerId || !pin) {
-      Alert.alert("Erro", "Preencha todos os campos (email, senha, ID, PIN).");
+    if (!email || !password || !playerId || !pin || !playerName) {
+      Alert.alert(
+        "Erro",
+        "Preencha todos os campos (Nome, E-mail, Senha, ID e PIN)."
+      );
       return;
     }
     if (!validateEmail(email)) {
@@ -195,7 +187,7 @@ export default function LoginScreen() {
     if (!validatePassword(password)) {
       Alert.alert(
         "Senha Fraca",
-        "A senha deve ter 1 maiúscula, 1 minúscula, 1 número, 1 especial e >=8 caracteres."
+        "Sua senha deve ter ao menos 1 maiúscula, 1 minúscula, 1 número, 1 especial e 8 caracteres."
       );
       return;
     }
@@ -204,27 +196,26 @@ export default function LoginScreen() {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       console.log("Conta criada, UID=", cred.user.uid);
 
-      // Cria doc "login/{uid}" com playerId/pin
+      // Salva doc "login/{uid}"
       const docRef = doc(db, "login", cred.user.uid);
       await setDoc(docRef, {
         email,
         playerId,
         pin,
+        name: playerName, // Fundamental para as outras telas
         createdAt: new Date().toISOString(),
       });
 
       Alert.alert("Sucesso", `Conta criada. ID=${playerId}, PIN=${pin}`);
-      // onAuthStateChanged() redireciona
+      // onAuthStateChanged redireciona
     } catch (err: any) {
-      console.log("Erro createUserWithEmailAndPassword:", err);
+      console.log("Erro no SignUp:", err);
       Alert.alert("Erro", err.message || "Não foi possível criar conta.");
     } finally {
       setLoading(false);
     }
   }
 
-  /** Entra => signInWithEmailAndPassword => checa doc login/{uid} */
-  /** Entra => signInWithEmailAndPassword => checa doc login/{uid} */
   async function handleSignIn() {
     if (!email || !password) {
       Alert.alert("Erro", "Informe e-mail e senha.");
@@ -232,40 +223,32 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      console.log("Login efetuado. user=", cred.user.uid);
-
-      // A verificação do doc login/{uid} é feita no onAuthStateChanged
+      await signInWithEmailAndPassword(auth, email, password);
+      // A onAuthStateChanged fará o resto
     } catch (err: any) {
-      console.log("Erro no signInWithEmailAndPassword:", err);
-
-      // Trata erros específicos do Firebase
-      let errorMessage = "Erro ao tentar entrar. Usuario ou senha incorretos.";
-      if (err.code === "auth/user-not-found") {
-        errorMessage = "Usuário não encontrado. Verifique o e-mail.";
-      } else if (err.code === "auth/wrong-password") {
-        errorMessage = "Senha incorreta. Tente novamente.";
-      } else if (err.code === "auth/invalid-email") {
-        errorMessage = "E-mail inválido. Verifique e tente novamente.";
+      console.log("Erro no SignIn:", err);
+      let msg = "Não foi possível entrar.";
+      if (err.code === "auth/wrong-password") {
+        msg = "Senha incorreta. Tente novamente.";
+      } else if (err.code === "auth/user-not-found") {
+        msg = "Usuário não encontrado. Verifique o e-mail.";
       }
-
-      Alert.alert("Erro", errorMessage);
+      Alert.alert("Erro", msg);
     } finally {
       setLoading(false);
     }
   }
 
-  /** Redefinir senha => via e-mail (Firebase Auth) */
   async function handleResetPassword() {
     if (!email) {
-      Alert.alert("Atenção", "Informe seu e-mail primeiro.");
+      Alert.alert("Atenção", "Informe seu e-mail para redefinir a senha.");
       return;
     }
     try {
       await sendPasswordResetEmail(auth, email);
       Alert.alert(
-        "E-mail enviado",
-        "Verifique sua caixa de entrada para redefinir a senha."
+        "Verifique seu e-mail",
+        "Um link de redefinição foi enviado para seu e-mail."
       );
     } catch (err: any) {
       console.log("Erro ao resetar senha:", err);
@@ -273,7 +256,7 @@ export default function LoginScreen() {
     }
   }
 
-  // Se está carregando
+  // --------------- Render ---------------
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -337,7 +320,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Link de Esqueceu a Senha */}
+          {/* Esqueci Senha (apenas login) */}
           {mode === "login" && (
             <TouchableOpacity
               style={{ marginTop: 10, alignSelf: "flex-end" }}
@@ -347,21 +330,30 @@ export default function LoginScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Indicador de força (apenas em signup) */}
+          {/* Se for signup, mostra força da senha */}
           {mode === "signup" && (
             <Text
               style={[
                 styles.passwordHint,
-                { color: getPasswordStrengthColor(passwordStrength) }, // Define a cor dinamicamente
+                { color: getPasswordStrengthColor(passwordStrength) },
               ]}
             >
               Força da senha: {passwordStrength}
             </Text>
           )}
 
-          {/* ID & PIN só no modo signup */}
+          {/* ID e PIN, e NOME caso signup */}
           {mode === "signup" && (
             <>
+              <Text style={styles.label}>Nome do Jogador</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Ex: Ash Ketchum"
+                placeholderTextColor={INPUT_BORDER}
+                value={playerName}
+                onChangeText={setPlayerName}
+              />
+
               <Text style={styles.label}>ID do Jogador</Text>
               <TextInput
                 style={styles.input}
@@ -397,7 +389,7 @@ export default function LoginScreen() {
             </>
           )}
 
-          {/* Switch: ficar conectado */}
+          {/* Switch: Continuar Conectado */}
           <View style={styles.switchRow}>
             <Text style={styles.switchText}>Continuar Conectado</Text>
             <Switch
@@ -408,7 +400,7 @@ export default function LoginScreen() {
             />
           </View>
 
-          {/* Botão principal: Entrar ou Cadastrar */}
+          {/* Botão principal */}
           {mode === "signup" ? (
             <TouchableOpacity
               style={styles.signupButton}
@@ -422,14 +414,14 @@ export default function LoginScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Link para trocar modo (Entrar <-> Criar Conta) */}
+          {/* Link p/ trocar de modo */}
           {mode === "signup" ? (
             <TouchableOpacity
               style={{ marginTop: 20 }}
               onPress={() => setMode("login")}
             >
               <Text style={{ color: SECONDARY }}>
-                Já tem conta? <Text style={styles.underline}>Entrar</Text>
+                Já tem conta? <Text style={styles.underline}>Entre Aqui</Text>
               </Text>
             </TouchableOpacity>
           ) : (
@@ -448,7 +440,17 @@ export default function LoginScreen() {
   );
 }
 
-/** ------------------- STYLES ------------------- */
+// --------------- ESTILOS ---------------
+const { width, height } = Dimensions.get("window");
+const BACKGROUND = "#1E1E1E";
+const PRIMARY = "#E3350D";
+const SECONDARY = "#FFFFFF";
+const INPUT_BG = "#292929";
+const INPUT_BORDER = "#4D4D4D";
+const SWITCH_TRACK = "#555555";
+const SWITCH_THUMB = PRIMARY;
+const ACCENT = "#FF6F61";
+
 const styles = StyleSheet.create({
   safeContainer: {
     flex: 1,
@@ -528,22 +530,6 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 3,
   },
-  buttonText: {
-    color: SECONDARY,
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  underline: {
-    color: ACCENT,
-    textDecorationLine: "underline",
-  },
-  // Novas propriedades adicionadas:
-  passwordHint: {
-    fontSize: 14,
-    marginTop: 8,
-    alignSelf: "center", // Centralizado
-  },
-
   signupButton: {
     backgroundColor: ACCENT,
     paddingVertical: 12,
@@ -556,11 +542,25 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 3,
   },
+  buttonText: {
+    color: SECONDARY,
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  underline: {
+    color: ACCENT,
+    textDecorationLine: "underline",
+  },
   forgotText: {
     color: ACCENT,
     fontSize: 14,
     textDecorationLine: "underline",
-    alignSelf: "center", // Centraliza o texto horizontalmente
-    marginTop: 10, // Adiciona espaço acima (opcional)
+    alignSelf: "center",
+    marginTop: 10,
+  },
+  passwordHint: {
+    fontSize: 14,
+    marginTop: 8,
+    alignSelf: "center",
   },
 });

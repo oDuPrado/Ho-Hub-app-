@@ -6,98 +6,70 @@ import {
   TouchableOpacity,
   Alert,
   SafeAreaView,
-  ScrollView,
-  Modal,
   TextInput,
-  Switch,
-  Image,
   FlatList,
+  Image,
   Dimensions,
+  Modal,
+  ScrollView,
 } from "react-native";
 import {
   collection,
   doc,
-  setDoc,
-  getDoc,
-  getDocs,
   onSnapshot,
-  query,
-  where,
-  orderBy,
-  limit,
+  deleteDoc,
   updateDoc,
   arrayUnion,
-  deleteDoc,
 } from "firebase/firestore";
-import moment from "moment";
-import "moment/locale/pt-br";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import moment from "moment";
 import { db } from "../../lib/firebaseConfig";
 
 const { width } = Dimensions.get("window");
-const CARD_WIDTH = (width - 48) / 2; // 2 colunas c/ margin
+const CARD_WIDTH = (width - 48) / 2;
 
 interface TradePost {
   id: string;
   cardName: string;
   cardImage: string;
-  type: "sale" | "trade";
-  price: string; // ex. "R$ 15,00" ou "Liga - 10%"
+  type: "sale" | "trade" | "want";
+  price: string;
   obs: string;
   ownerId: string;
   ownerName: string;
-  interested: string[]; // array de user IDs
-  createdAt: number; // epoch ms
+  interested: string[];
+  createdAt: number;
 }
 
-/** Componente principal: feed de trocas/vendas */
 export default function UserTradeFeed() {
   const [playerId, setPlayerId] = useState("");
-  const [playerName, setPlayerName] = useState("Jogador"); // ou busque do Firestore
   const [posts, setPosts] = useState<TradePost[]>([]);
-  const [filterType, setFilterType] = useState<"sale" | "trade" | "all">("all");
   const [searchText, setSearchText] = useState("");
+  const [filterType, setFilterType] = useState<
+    "all" | "sale" | "trade" | "want"
+  >("all");
+  const [onlyMine, setOnlyMine] = useState(false);
 
-  // Modal de criação/edição
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [editCardName, setEditCardName] = useState("");
-  const [editCardImage, setEditCardImage] = useState("");
-  const [editType, setEditType] = useState<"sale" | "trade">("sale");
-  const [editPriceMode, setEditPriceMode] = useState<"manual" | "liga">(
-    "manual"
-  );
-  const [editPriceValue, setEditPriceValue] = useState(""); // ex "R$ 10,00"
-  const [editLigaPercent, setEditLigaPercent] = useState("5%"); // ex. "5%", "10%", ...
-  const [editObs, setEditObs] = useState("");
-
-  // Modal de detalhes do card
+  // Modal de detalhes
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailPost, setDetailPost] = useState<TradePost | null>(null);
 
   useEffect(() => {
     moment.locale("pt-br");
 
-    // Carrega do AsyncStorage ou do Firestore
     (async () => {
       const pid = await AsyncStorage.getItem("@userId");
-      const pname = await AsyncStorage.getItem("@userName");
       if (pid) setPlayerId(pid);
-      if (pname) setPlayerName(pname);
     })();
 
-    // Observa a coleção global "trade" ou "trade/<uid>/cards"
     const collRef = collection(db, "trade");
-    // Se quiser por user, seria: collection(db, "trade", playerId, "cards")
-
-    const unsub = onSnapshot(collRef, (snapshot) => {
+    const unsub = onSnapshot(collRef, (snap) => {
       const arr: TradePost[] = [];
       const now = Date.now();
-      snapshot.forEach((ds) => {
+      snap.forEach((ds) => {
         const data = ds.data();
-        // Filtra docs antigos (3 dias = 259200000 ms)
-        if (data.createdAt && now - data.createdAt > 259200000) {
-          // Ignora (ou poderia deletar auto)
+        // remove velhos (+3 dias)
+        if (data.createdAt && now - data.createdAt > 3 * 86400000) {
           return;
         }
         arr.push({
@@ -108,26 +80,21 @@ export default function UserTradeFeed() {
           price: data.price,
           obs: data.obs || "",
           ownerId: data.ownerId,
-          ownerName: data.ownerName,
+          ownerName: data.ownerName || "Jogador",
           interested: data.interested || [],
           createdAt: data.createdAt,
         });
       });
-      // Ordena por createdAt desc
       arr.sort((a, b) => b.createdAt - a.createdAt);
       setPosts(arr);
     });
-
     return () => unsub();
   }, []);
 
-  /** Filtro final de exibição, aplicando "filterType" e "searchText" */
   function getFilteredPosts(): TradePost[] {
     return posts.filter((p) => {
-      // se filterType != "all", filtra p.type
+      if (onlyMine && p.ownerId !== playerId) return false;
       if (filterType !== "all" && p.type !== filterType) return false;
-
-      // se searchText presente, filtra por cardName (case-insensitive)
       if (searchText.trim()) {
         const txt = searchText.trim().toLowerCase();
         if (!p.cardName.toLowerCase().includes(txt)) return false;
@@ -136,134 +103,34 @@ export default function UserTradeFeed() {
     });
   }
 
-  // --------------- CRIAR/EDITAR ---------------
-  async function openCreateModal() {
-    // Verifica se user tem < 5 posts
-    const userPostsCount = posts.filter((p) => p.ownerId === playerId).length;
-    if (userPostsCount >= 5) {
-      Alert.alert("Limite atingido", "Você só pode ter 5 cartas ativas.");
-      return;
-    }
-    setEditId(null);
-    setEditCardName("");
-    setEditCardImage("");
-    setEditType("sale");
-    setEditPriceMode("manual");
-    setEditPriceValue("");
-    setEditLigaPercent("5%");
-    setEditObs("");
-    setModalVisible(true);
+  function openDetailModal(post: TradePost) {
+    setDetailPost(post);
+    setDetailModalVisible(true);
+  }
+  function closeDetailModal() {
+    setDetailPost(null);
+    setDetailModalVisible(false);
   }
 
-  function openEditModal(post: TradePost) {
-    setEditId(post.id);
-    setEditCardName(post.cardName);
-    setEditCardImage(post.cardImage);
-    setEditType(post.type);
-    // Se price começa com "Liga -", assume editPriceMode = "liga"
-    if (post.price.startsWith("Liga -")) {
-      setEditPriceMode("liga");
-      setEditLigaPercent(post.price.replace("Liga - ", "") || "5%");
-      setEditPriceValue("");
-    } else {
-      setEditPriceMode("manual");
-      setEditPriceValue(post.price);
-      setEditLigaPercent("5%");
-    }
-    setEditObs(post.obs);
-    setModalVisible(true);
-  }
-
-  async function handleSavePost() {
+  async function handleInterest(post: TradePost) {
     if (!playerId) {
-      Alert.alert("Erro", "Você não está logado ou sem playerId.");
+      Alert.alert("Erro", "Você não está logado");
       return;
     }
-    if (!editCardName.trim()) {
-      Alert.alert("Erro", "Informe o nome da carta.");
+    if (post.ownerId === playerId) {
+      Alert.alert("Aviso", "Você é dono deste card.");
       return;
     }
-    if (!editCardImage.trim()) {
-      Alert.alert("Erro", "Informe a URL da imagem da carta.");
-      return;
-    }
-    // Monta o price final
-    let finalPrice = "";
-    if (editType === "sale") {
-      if (editPriceMode === "manual") {
-        if (!editPriceValue.trim()) {
-          Alert.alert("Erro", "Informe o valor manual.");
-          return;
-        }
-        finalPrice = editPriceValue.trim();
-      } else {
-        // "liga"
-        finalPrice = `Liga - ${editLigaPercent}`;
-      }
-    } else {
-      // se é "trade", não precisa de price
-      finalPrice = "Troca";
-    }
-
-    // Se for user sub-col, poderia ser doc(db, "trade", playerId, "cards", ???)
-    const collRef = collection(db, "trade"); // colecao global
-
-    try {
-      if (editId) {
-        // update
-        const docRef = doc(collRef, editId);
-        const snapshot = await getDoc(docRef);
-        if (!snapshot.exists()) {
-          Alert.alert("Erro", "Documento não existe mais.");
-          setModalVisible(false);
-          return;
-        }
-        // Se dono != playerId, proíbe
-        const ownerIdCheck = snapshot.data().ownerId;
-        if (ownerIdCheck !== playerId) {
-          Alert.alert("Erro", "Você não é dono deste post.");
-          setModalVisible(false);
-          return;
-        }
-        await updateDoc(docRef, {
-          cardName: editCardName.trim(),
-          cardImage: editCardImage.trim(),
-          type: editType,
-          price: finalPrice,
-          obs: editObs.trim(),
-        });
-      } else {
-        // create
-        const userPostsCount = posts.filter(
-          (p) => p.ownerId === playerId
-        ).length;
-        if (userPostsCount >= 5) {
-          Alert.alert("Limite atingido", "Você só pode ter 5 cartas ativas.");
-          setModalVisible(false);
-          return;
-        }
-        await setDoc(doc(collRef), {
-          cardName: editCardName.trim(),
-          cardImage: editCardImage.trim(),
-          type: editType,
-          price: finalPrice,
-          obs: editObs.trim(),
-          ownerId: playerId,
-          ownerName: playerName,
-          interested: [],
-          createdAt: Date.now(),
-        });
-      }
-      setModalVisible(false);
-    } catch (error) {
-      console.log("Erro ao salvar post:", error);
-      Alert.alert("Erro", "Falha ao salvar post.");
-    }
+    const collRef = collection(db, "trade");
+    const docRef = doc(collRef, post.id);
+    await updateDoc(docRef, {
+      interested: arrayUnion(playerId),
+    });
+    Alert.alert("Interesse registrado", "O dono recebeu a notificação.");
   }
 
-  // --------------- EXCLUIR ---------------
   async function handleDeletePost(post: TradePost) {
-    Alert.alert("Confirmar", `Deseja excluir "${post.cardName}"?`, [
+    Alert.alert("Confirmar", `Excluir "${post.cardName}"?`, [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Excluir",
@@ -271,51 +138,17 @@ export default function UserTradeFeed() {
         onPress: async () => {
           try {
             const collRef = collection(db, "trade");
-            const docRef = doc(collRef, post.id);
-            await deleteDoc(docRef);
-            Alert.alert("Sucesso", "Post excluído!");
+            await deleteDoc(doc(collRef, post.id));
+            Alert.alert("Excluído", "Card removido do feed.");
           } catch (err) {
-            console.log("Erro ao excluir post:", err);
-            Alert.alert("Erro", "Falha ao excluir post.");
+            console.log("Erro ao excluir card:", err);
+            Alert.alert("Erro", "Falha ao excluir.");
           }
         },
       },
     ]);
   }
 
-  // --------------- Detalhes do Card (Modal) ---------------
-  function openDetailModal(post: TradePost) {
-    setDetailPost(post);
-    setDetailModalVisible(true);
-  }
-
-  function closeDetailModal() {
-    setDetailPost(null);
-    setDetailModalVisible(false);
-  }
-
-  // Se for dono do post, mostra interessados
-  // Se não for dono, mostra "Tenho Interesse"
-  async function handleInterest(post: TradePost) {
-    if (!playerId) {
-      Alert.alert("Erro", "Você não está logado.");
-      return;
-    }
-    if (post.ownerId === playerId) {
-      // Ele é o dono -> exibe "você é dono"
-      return;
-    }
-    // Adiciona no array interested
-    const collRef = collection(db, "trade");
-    const docRef = doc(collRef, post.id);
-    await updateDoc(docRef, {
-      interested: arrayUnion(playerId),
-    });
-    Alert.alert("Ok", "Interesse registrado!");
-  }
-
-  // --------------- Render do feed ---------------
-  /** Render do item no FlatList em 2 colunas */
   function renderItem({ item }: { item: TradePost }) {
     return (
       <TouchableOpacity
@@ -333,9 +166,17 @@ export default function UserTradeFeed() {
         <Text style={styles.postCardOwner} numberOfLines={1}>
           {item.ownerName}
         </Text>
-        <Text style={styles.postCardPrice} numberOfLines={1}>
-          {item.type === "sale" ? item.price : "Para Troca"}
-        </Text>
+        {item.type === "want" ? (
+          <Text style={[styles.postCardPrice, { color: "#FDC30B" }]}>
+            Deseja
+          </Text>
+        ) : item.type === "sale" ? (
+          <Text style={styles.postCardPrice} numberOfLines={1}>
+            {item.price}
+          </Text>
+        ) : (
+          <Text style={styles.postCardPrice}>Troca</Text>
+        )}
       </TouchableOpacity>
     );
   }
@@ -344,16 +185,20 @@ export default function UserTradeFeed() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Trocas e Vendas</Text>
-        <TouchableOpacity style={styles.createBtn} onPress={openCreateModal}>
-          <Text style={styles.createBtnText}>+Novo</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.headerTitle}>Área de Trocas/Vendas</Text>
+        <TouchableOpacity
+          style={[styles.switchMyCards, onlyMine && styles.switchMyCardsActive]}
+          onPress={() => setOnlyMine((prev) => !prev)}
+        >
+          <Text style={styles.switchMyCardsText}>
+            {onlyMine ? "Meus" : "Todos"}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Barra de busca + switch de filter */}
-      <View style={styles.searchContainer}>
+      {/* Filtros */}
+      <View style={styles.filterContainer}>
         <TextInput
           style={styles.searchInput}
           placeholder="Buscar carta..."
@@ -361,7 +206,6 @@ export default function UserTradeFeed() {
           value={searchText}
           onChangeText={setSearchText}
         />
-        {/* Botões de filtrar: all/trade/sale */}
         <View style={styles.filterRow}>
           <TouchableOpacity
             style={[
@@ -390,150 +234,28 @@ export default function UserTradeFeed() {
           >
             <Text style={styles.filterButtonText}>Venda</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterButton,
+              filterType === "want" && styles.filterButtonActive,
+            ]}
+            onPress={() => setFilterType("want")}
+          >
+            <Text style={styles.filterButtonText}>Quero</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Lista em 2 colunas */}
       <FlatList
         data={displayedPosts}
         keyExtractor={(item) => item.id}
         numColumns={2}
         columnWrapperStyle={{ justifyContent: "space-between", padding: 8 }}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: 80 }}
+        contentContainerStyle={{ paddingBottom: 60 }}
       />
 
-      {/* Modal CRIAR/EDITAR */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>
-              {editId ? "Editar Publicação" : "Nova Publicação"}
-            </Text>
-
-            <Text style={styles.modalLabel}>Nome da Carta</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editCardName}
-              onChangeText={setEditCardName}
-              placeholder="Ex: Pikachu VMAX"
-              placeholderTextColor="#888"
-            />
-
-            <Text style={styles.modalLabel}>URL da Imagem</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editCardImage}
-              onChangeText={setEditCardImage}
-              placeholder="http://..."
-              placeholderTextColor="#888"
-            />
-
-            <Text style={styles.modalLabel}>Tipo</Text>
-            <View style={{ flexDirection: "row", marginBottom: 10 }}>
-              <TouchableOpacity
-                style={[
-                  styles.switchTypeButton,
-                  editType === "sale" && styles.switchTypeButtonActive,
-                ]}
-                onPress={() => setEditType("sale")}
-              >
-                <Text style={styles.switchTypeText}>Venda</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.switchTypeButton,
-                  editType === "trade" && styles.switchTypeButtonActive,
-                ]}
-                onPress={() => setEditType("trade")}
-              >
-                <Text style={styles.switchTypeText}>Troca</Text>
-              </TouchableOpacity>
-            </View>
-
-            {editType === "sale" && (
-              <>
-                <Text style={styles.modalLabel}>Preço</Text>
-                <View style={{ flexDirection: "row", marginBottom: 12 }}>
-                  <TouchableOpacity
-                    style={[
-                      styles.switchTypeButton,
-                      editPriceMode === "manual" &&
-                        styles.switchTypeButtonActive,
-                    ]}
-                    onPress={() => setEditPriceMode("manual")}
-                  >
-                    <Text style={styles.switchTypeText}>Manual</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.switchTypeButton,
-                      editPriceMode === "liga" && styles.switchTypeButtonActive,
-                    ]}
-                    onPress={() => setEditPriceMode("liga")}
-                  >
-                    <Text style={styles.switchTypeText}>Liga - %</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {editPriceMode === "manual" ? (
-                  <TextInput
-                    style={styles.modalInput}
-                    value={editPriceValue}
-                    onChangeText={setEditPriceValue}
-                    placeholder="Ex: R$ 15,00"
-                    placeholderTextColor="#888"
-                  />
-                ) : (
-                  <View style={{ flexDirection: "row" }}>
-                    {["5%", "10%", "15%", "20%"].map((opt) => (
-                      <TouchableOpacity
-                        key={opt}
-                        style={[
-                          styles.switchTypeButton,
-                          editLigaPercent === opt &&
-                            styles.switchTypeButtonActive,
-                        ]}
-                        onPress={() => setEditLigaPercent(opt)}
-                      >
-                        <Text style={styles.switchTypeText}>{opt}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
-              </>
-            )}
-
-            <Text style={styles.modalLabel}>Observações</Text>
-            <TextInput
-              style={[styles.modalInput, { height: 60 }]}
-              multiline
-              value={editObs}
-              onChangeText={setEditObs}
-              placeholder="Detalhes sobre a condição, idioma, etc..."
-              placeholderTextColor="#888"
-            />
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.button, { backgroundColor: "#999" }]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.buttonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.button} onPress={handleSavePost}>
-                <Text style={styles.buttonText}>Salvar</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-
-      {/* Modal de Detalhes */}
+      {/* Modal Detalhes */}
       <Modal
         visible={detailModalVisible}
         animationType="slide"
@@ -550,59 +272,54 @@ export default function UserTradeFeed() {
                   resizeMode="contain"
                 />
               </View>
-
-              <Text style={styles.modalLabel}>
-                Tipo: {detailPost.type === "sale" ? "Venda" : "Troca"}
-              </Text>
-              {detailPost.type === "sale" && (
-                <Text style={styles.modalLabel}>Preço: {detailPost.price}</Text>
+              {detailPost.type === "want" ? (
+                <Text style={[styles.modalLabel, { color: "#FDC30B" }]}>
+                  O jogador deseja esta carta
+                </Text>
+              ) : detailPost.type === "sale" ? (
+                <Text style={styles.modalLabel}>Venda: {detailPost.price}</Text>
+              ) : (
+                <Text style={styles.modalLabel}>Disponível para troca</Text>
               )}
               <Text style={styles.modalLabel}>
                 Dono: {detailPost.ownerName}
               </Text>
               <Text style={styles.modalLabel}>
-                Obs: {detailPost.obs || "-"}
+                Observações: {detailPost.obs || "(Nenhuma)"}
               </Text>
 
-              {/* Se for dono, exibe interessados + botões editar/excluir */}
               {detailPost.ownerId === playerId ? (
                 <>
-                  <Text style={[styles.modalLabel, { marginTop: 10 }]}>
+                  <Text style={[styles.modalLabel, { marginTop: 8 }]}>
                     Interessados:
                   </Text>
                   {detailPost.interested.length === 0 ? (
-                    <Text style={{ color: "#ccc" }}>Ninguém interessado.</Text>
+                    <Text style={{ color: "#ccc" }}>
+                      Ninguém se interessou ainda
+                    </Text>
                   ) : (
                     detailPost.interested.map((iid) => (
                       <Text key={iid} style={{ color: "#fff" }}>
-                        {iid} (aqui idealmente mapeia p/ nome)
+                        PlayerId: {iid}
                       </Text>
                     ))
                   )}
 
-                  <View style={styles.modalButtons}>
-                    <TouchableOpacity
-                      style={[styles.button, { backgroundColor: "#777" }]}
-                      onPress={() => {
-                        closeDetailModal();
-                        openEditModal(detailPost);
-                      }}
-                    >
-                      <Text style={styles.buttonText}>Editar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.button, { backgroundColor: "#FF3333" }]}
-                      onPress={() => {
-                        closeDetailModal();
-                        handleDeletePost(detailPost);
-                      }}
-                    >
-                      <Text style={styles.buttonText}>Excluir</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {/* Dono pode excluir (ou editar) */}
+                  <TouchableOpacity
+                    style={[
+                      styles.button,
+                      { backgroundColor: "#FF5555", marginTop: 20 },
+                    ]}
+                    onPress={() => {
+                      closeDetailModal();
+                      handleDeletePost(detailPost);
+                    }}
+                  >
+                    <Text style={styles.buttonText}>Excluir Card</Text>
+                  </TouchableOpacity>
                 </>
               ) : (
-                // Se não é dono, exibe "Tenho Interesse"
                 <TouchableOpacity
                   style={[styles.button, { marginTop: 20 }]}
                   onPress={() => {
@@ -617,7 +334,7 @@ export default function UserTradeFeed() {
               <TouchableOpacity
                 style={[
                   styles.button,
-                  { marginTop: 20, backgroundColor: "#999" },
+                  { backgroundColor: "#999", marginTop: 16 },
                 ]}
                 onPress={closeDetailModal}
               >
@@ -631,7 +348,6 @@ export default function UserTradeFeed() {
   );
 }
 
-/** Estilos */
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
@@ -642,29 +358,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: DARK,
   },
-  header: {
+  headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     padding: 16,
   },
   headerTitle: {
-    fontSize: 20,
     color: SECONDARY,
+    fontSize: 20,
     fontWeight: "bold",
   },
-  createBtn: {
-    backgroundColor: PRIMARY,
+  switchMyCards: {
+    backgroundColor: "#444",
     borderRadius: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  createBtnText: {
+  switchMyCardsActive: {
+    backgroundColor: "#666",
+  },
+  switchMyCardsText: {
     color: SECONDARY,
     fontWeight: "bold",
   },
-  searchContainer: {
+  filterContainer: {
     paddingHorizontal: 16,
+    marginBottom: 4,
   },
   searchInput: {
     backgroundColor: GRAY,
@@ -675,8 +395,7 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: "row",
-    justifyContent: "flex-start",
-    marginBottom: 10,
+    marginBottom: 8,
   },
   filterButton: {
     backgroundColor: "#444",
@@ -701,8 +420,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   postCardImage: {
-    width: CARD_WIDTH * 0.8,
-    height: CARD_WIDTH * 1.1,
+    width: CARD_WIDTH * 0.75,
+    height: CARD_WIDTH * 1.05,
     marginBottom: 6,
   },
   postCardName: {
@@ -725,8 +444,8 @@ const styles = StyleSheet.create({
     backgroundColor: DARK,
   },
   modalTitle: {
-    fontSize: 20,
     color: SECONDARY,
+    fontSize: 20,
     fontWeight: "bold",
     textAlign: "center",
     marginBottom: 20,
@@ -734,49 +453,21 @@ const styles = StyleSheet.create({
   modalLabel: {
     color: SECONDARY,
     fontSize: 14,
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  modalInput: {
-    backgroundColor: "#444",
-    color: SECONDARY,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  modalButtons: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    marginTop: 20,
-  },
-  button: {
-    backgroundColor: PRIMARY,
-    borderRadius: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  buttonText: {
-    color: SECONDARY,
-    fontWeight: "bold",
-  },
-  switchTypeButton: {
-    backgroundColor: "#444",
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginRight: 8,
-  },
-  switchTypeButtonActive: {
-    backgroundColor: "#666",
-  },
-  switchTypeText: {
-    color: SECONDARY,
-    fontWeight: "bold",
+    marginVertical: 5,
   },
   detailImage: {
     width: 180,
     height: 240,
-    marginBottom: 10,
+  },
+  button: {
+    backgroundColor: PRIMARY,
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignSelf: "center",
+  },
+  buttonText: {
+    color: SECONDARY,
+    fontWeight: "bold",
   },
 });

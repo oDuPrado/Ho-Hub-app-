@@ -1,4 +1,3 @@
-// app/(tabs)/jogador.tsx
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -14,12 +13,21 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import { doc, getDoc, collectionGroup, getDocs } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  getDocs,
+  collectionGroup,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+} from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
-
-// Importa o types e o array de títulos
 import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 
+/** Estrutura p/ dados de partidas. */
 interface MatchData {
   id: string;
   outcomeNumber?: number;
@@ -27,15 +35,41 @@ interface MatchData {
   player2_id?: string;
 }
 
-/** Exemplo de página Jogador: sem histórico completo, mas com títulos e exibição básica */
+/** Estrutura p/ histórico de torneios (subcoleção `places`). */
+interface TournamentHistoryItem {
+  tournamentId: string;
+  tournamentName: string;
+  place: number;
+  totalPlayers: number;
+  roundCount: number;
+}
+
+/** Estrutura p/ dados de jogador ao buscar no Firestore. */
+interface PlayerInfo {
+  userid: string;
+  fullname: string;
+}
+
+/** Estrutura p/ rivalidade. */
+interface RivalryData {
+  matchesCount: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  rivalryFactor: number;
+  rivalName: string;
+}
+
 export default function PlayerScreen() {
   const router = useRouter();
 
+  // ID e Nome do usuário
   const [userId, setUserId] = useState("");
   const [userName, setUserName] = useState("Jogador");
+
   const [loading, setLoading] = useState(true);
 
-  // Agora PlayerStats terá **todos** os campos do titlesConfig.ts:
+  // Estatísticas
   const [stats, setStats] = useState<PlayerStats>({
     wins: 0,
     losses: 0,
@@ -61,26 +95,34 @@ export default function PlayerScreen() {
     firstAchieved: false,
   });
 
-  // Rival
-  const [mainRivalName, setMainRivalName] = useState("");
-  // Busca "VS Jogador"
-  const [searchId, setSearchId] = useState("");
-  const [modalVisible, setModalVisible] = useState(false);
-  const [confrontationData, setConfrontationData] = useState({
-    total: 0,
-    wins: 0,
-    losses: 0,
-    draws: 0,
-    rivalName: "",
-  });
+  // Sequência de vitórias (matches) e derrotas (matches)
+  const [winStreak, setWinStreak] = useState(0);
+  const [lossStreak, setLossStreak] = useState(0);
 
   // Títulos
   const [unlockedTitles, setUnlockedTitles] = useState<TitleItem[]>([]);
 
+  // Modal de histórico
+  const [historyModalVisible, setHistoryModalVisible] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyData, setHistoryData] = useState<TournamentHistoryItem[]>([]);
+
+  // Barra de busca de jogador
+  const [searchText, setSearchText] = useState("");
+  const [playersResult, setPlayersResult] = useState<PlayerInfo[]>([]);
+  // Modal Rival
+  const [rivalModalVisible, setRivalModalVisible] = useState(false);
+  const [rivalData, setRivalData] = useState<RivalryData | null>(null);
+
+  // ===========================
+  // Montagem da tela
+  // ===========================
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
+
+        // Carrega do AsyncStorage
         const storedId = await AsyncStorage.getItem("@userId");
         const storedName = await AsyncStorage.getItem("@userName");
         if (!storedId) {
@@ -90,47 +132,43 @@ export default function PlayerScreen() {
         setUserId(storedId);
         setUserName(storedName ?? "Jogador");
 
-        // Carrega estatísticas
-        const loadedStats = await loadStats(storedId);
-        setStats(loadedStats);
+        // Carrega matches e computa stats
+        const allMatches = await fetchAllMatches();
+        const userMatches = allMatches.filter(
+          (m) => m.player1_id === storedId || m.player2_id === storedId
+        );
 
-        // Rival principal
-        const rivalNm = await findMainRival(storedId);
-        setMainRivalName(rivalNm ?? "Nenhum Rival");
+        const computedStats = computeBasicStats(storedId, userMatches);
+        setStats(computedStats);
+
+        // Computa streaks (uma abordagem simplificada)
+        const { wStreak, lStreak } = computeMatchStreaks(storedId, userMatches);
+        setWinStreak(wStreak);
+        setLossStreak(lStreak);
 
         // Títulos
-        const titlesUnlocked = computeTitles(loadedStats);
+        const titlesUnlocked = computeTitles(computedStats);
         setUnlockedTitles(titlesUnlocked);
-      } catch (e) {
-        console.log("Erro jogador init:", e);
+      } catch (err) {
+        console.log("Erro init:", err);
       } finally {
         setLoading(false);
       }
     })();
   }, [router]);
 
-  /** 1) Carrega as Matches no Firestore e computa Stats */
-  async function loadStats(uId: string): Promise<PlayerStats> {
-    const arrMatches = await fetchAllMatches();
-    const userMatches = arrMatches.filter(
-      (m) => m.player1_id === uId || m.player2_id === uId
-    );
-    return computeBasicStats(uId, userMatches);
-  }
-
+  // ===========================
+  // BUSCA DE MATCHES / STATS
+  // ===========================
   async function fetchAllMatches(): Promise<MatchData[]> {
     const snap = await getDocs(collectionGroup(db, "matches"));
     const arr: MatchData[] = [];
-    snap.forEach((d) => {
-      arr.push({ id: d.id, ...d.data() } as MatchData);
+    snap.forEach((docSnap) => {
+      arr.push({ id: docSnap.id, ...docSnap.data() } as MatchData);
     });
     return arr;
   }
 
-  /**
-   * 2) Com base nas matches do usuário, preenche "todos" os campos do PlayerStats.
-   *    Se alguns campos não são calculados, define 0 ou valor default.
-   */
   function computeBasicStats(
     uId: string,
     userMatches: MatchData[]
@@ -138,36 +176,19 @@ export default function PlayerScreen() {
     let w = 0,
       l = 0,
       d = 0;
-    let oppSet = new Set<string>();
+    const oppSet = new Set<string>();
 
-    // Exemplos de contadores extras p/ titles:
-    let cWins = 0;
-    let flawlessWins = 0;
-    let regWins = 0;
-    let bigWins = 0;
-    let helpBeg = 0;
-    let luckW = 0;
-    let memeW = 0;
-    let afterMid = 0;
-    let afterMidW = 0;
-    let ownedTitles = 0;
-    let beatAll = 0;
-    let firstTw = false;
+    userMatches.forEach((mm) => {
+      if (!mm.outcomeNumber) return;
+      const isP1 = mm.player1_id === uId;
+      const rivalId = isP1 ? mm.player2_id : mm.player1_id;
+      if (rivalId && rivalId !== "N/A") oppSet.add(rivalId);
 
-    userMatches.forEach((match) => {
-      const { outcomeNumber, player1_id, player2_id } = match;
-      if (!outcomeNumber) return;
-      const isP1 = player1_id === uId;
-      const rivalId = isP1 ? player2_id : player1_id;
-      if (rivalId && rivalId !== "N/A") {
-        oppSet.add(rivalId);
-      }
-
-      switch (outcomeNumber) {
-        case 1: // Vit p1
+      switch (mm.outcomeNumber) {
+        case 1:
           isP1 ? w++ : l++;
           break;
-        case 2: // Vit p2
+        case 2:
           isP1 ? l++ : w++;
           break;
         case 3:
@@ -179,7 +200,6 @@ export default function PlayerScreen() {
       }
     });
 
-    // Preenche PlayerStats completo
     return {
       wins: w,
       losses: l,
@@ -187,98 +207,226 @@ export default function PlayerScreen() {
       matchesTotal: userMatches.length,
       uniqueOpponents: oppSet.size,
 
-      // Campos que não calculamos ainda -> 0 ou false
       tournamentsPlayed: 0,
       top8Count: 0,
       positiveStreak: 0,
       negativeStreak: 0,
-      comebackWins: cWins,
-      flawlessTournamentWins: flawlessWins,
-      regionalWins: regWins,
-      bigTournamentWins: bigWins,
-      helpedBeginners: helpBeg,
-      luckyWins: luckW,
-      memeDeckWins: memeW,
-      matchesAfterMidnight: afterMid,
-      matchesAfterMidnightWins: afterMidW,
-      ownedTitlesCount: ownedTitles,
-      beatAllPlayersInTournament: beatAll,
-      firstTournamentWinner: firstTw,
+      comebackWins: 0,
+      flawlessTournamentWins: 0,
+      regionalWins: 0,
+      bigTournamentWins: 0,
+      helpedBeginners: 0,
+      luckyWins: 0,
+      memeDeckWins: 0,
+      matchesAfterMidnight: 0,
+      matchesAfterMidnightWins: 0,
+      ownedTitlesCount: 0,
+      beatAllPlayersInTournament: 0,
+      firstTournamentWinner: false,
       firstAchieved: false,
     };
   }
 
-  /** 3) Busca Rival principal */
-  async function findMainRival(uId: string): Promise<string | null> {
-    const arrMatches = await fetchAllMatches();
-    const userMatches = arrMatches.filter(
-      (m) => m.player1_id === uId || m.player2_id === uId
-    );
-    const countMap: Record<string, number> = {};
-    let topRival = "";
-    let topCount = 0;
+  /**
+   * Computa uma “sequência” de vitórias/derrotas simplificada.
+   * Sem data/hora, faremos:
+   *  - Ordena userMatches pelo id (não é ideal, mas exemplifica).
+   *  - Varre e soma consecutivos.
+   */
+  function computeMatchStreaks(uId: string, userMatches: MatchData[]) {
+    // Ordena “arbitrariamente” pelo ID da match
+    userMatches.sort((a, b) => (a.id < b.id ? -1 : 1));
 
-    for (let m of userMatches) {
-      const rid = m.player1_id === uId ? m.player2_id : m.player1_id;
-      if (rid && rid !== "N/A") {
-        countMap[rid] = (countMap[rid] ?? 0) + 1;
-        if (countMap[rid] > topCount) {
-          topCount = countMap[rid];
-          topRival = rid;
-        }
+    let bestWin = 0,
+      bestLoss = 0;
+    let currWin = 0,
+      currLoss = 0;
+
+    for (const mm of userMatches) {
+      if (!mm.outcomeNumber) continue;
+      const isP1 = mm.player1_id === uId;
+      let isWin = false;
+      if (mm.outcomeNumber === 1 && isP1) isWin = true;
+      else if (mm.outcomeNumber === 2 && !isP1) isWin = true;
+
+      if (isWin) {
+        currWin++;
+        bestWin = Math.max(bestWin, currWin);
+        // Assim que vence, zera sequência de derrotas
+        currLoss = 0;
+      } else {
+        currLoss++;
+        bestLoss = Math.max(bestLoss, currLoss);
+        // Assim que perde, zera sequência de vitórias
+        currWin = 0;
       }
     }
-    if (!topRival) return null;
-    const docRef = doc(db, "players", topRival);
-    const snapRival = await getDoc(docRef);
-    if (!snapRival.exists()) return null;
-    const d = snapRival.data();
-    return d.fullname ?? `ID ${topRival}`;
+
+    return { wStreak: bestWin, lStreak: bestLoss };
   }
 
-  /** 4) Computa títulos */
   function computeTitles(ps: PlayerStats): TitleItem[] {
-    const unlocked: TitleItem[] = [];
+    const result: TitleItem[] = [];
     for (let t of titles) {
-      if (t.condition(ps)) {
-        unlocked.push(t);
-      }
+      if (t.condition(ps)) result.push(t);
     }
-    return unlocked;
+    return result;
   }
 
-  /** 5) Buscar Confronto vs outro ID (Modal) */
-  async function handleSearch() {
-    if (!searchId) {
-      Alert.alert("Erro", "Digite um ID");
+  // ===========================
+  // HISTÓRICO DE TORNEIOS
+  // ===========================
+  const [historyError, setHistoryError] = useState("");
+
+  async function handleShowHistory() {
+    setHistoryModalVisible(true);
+    setHistoryLoading(true);
+    try {
+      const arr = await fetchTournamentPlaces(userId);
+      setHistoryData(arr);
+      if (arr.length === 0) {
+        setHistoryError("Nenhum torneio encontrado para você.");
+      } else {
+        setHistoryError("");
+      }
+    } catch (err) {
+      console.log("Erro handleShowHistory:", err);
+      setHistoryError("Falha ao carregar histórico.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function fetchTournamentPlaces(
+    uId: string
+  ): Promise<TournamentHistoryItem[]> {
+    const placesDocs = await getDocs(collectionGroup(db, "places"));
+    const userPlaces = placesDocs.docs.filter((docSnap) => {
+      const d = docSnap.data();
+      return d.userid === uId; // se for do user
+    });
+
+    const results: TournamentHistoryItem[] = [];
+
+    // Monta info p/ cada doc
+    for (const docSnap of userPlaces) {
+      const data = docSnap.data();
+      const placeNum = parseInt(docSnap.id, 10) || 0;
+
+      // path: "tournaments/{tId}/places/{docId}"
+      const pathParts = docSnap.ref.path.split("/");
+      const tId = pathParts[1]; // doc tournaments/tId
+
+      // Tenta nome do torneio
+      let tournamentName = tId;
+      // se doc principal tiver "nome"
+      try {
+        const tDoc = await getDoc(doc(db, "tournaments", tId));
+        if (tDoc.exists()) {
+          const tData = tDoc.data();
+          if (tData.name) tournamentName = tData.name;
+        }
+      } catch {
+        // ignora
+      }
+
+      // totalPlayers = count "places"
+      const totalPlayers = await countPlacesInTournament(tId);
+      // roundCount = count "rounds"
+      const roundCount = await countRoundsInTournament(tId);
+
+      results.push({
+        tournamentId: tId,
+        tournamentName,
+        place: placeNum,
+        totalPlayers,
+        roundCount,
+      });
+    }
+
+    // Ordena por place ASC
+    results.sort((a, b) => a.place - b.place);
+
+    return results;
+  }
+
+  async function countPlacesInTournament(tId: string): Promise<number> {
+    try {
+      const snap = await getDocs(collection(db, "tournaments", tId, "places"));
+      return snap.size;
+    } catch {
+      return 0;
+    }
+  }
+  async function countRoundsInTournament(tId: string): Promise<number> {
+    try {
+      const snap = await getDocs(collection(db, "tournaments", tId, "rounds"));
+      return snap.size;
+    } catch {
+      return 0;
+    }
+  }
+
+  // ===========================
+  // BUSCA DE JOGADOR p/ Rival
+  // ===========================
+  const [playerSearchLoading, setPlayerSearchLoading] = useState(false);
+
+  async function handleSearchPlayers() {
+    if (!searchText.trim()) {
+      Alert.alert("Digite algo para buscar.");
       return;
     }
     try {
-      const pRef = doc(db, "players", searchId);
-      const pSnap = await getDoc(pRef);
-      if (!pSnap.exists()) {
-        Alert.alert("Erro", "Jogador não encontrado");
-        return;
+      setPlayerSearchLoading(true);
+      // Faz query em "players" p/ fullname contendo searchText
+      // ex.: where("fullname", ">=", searchText).where("fullname", "<=", searchText + "\uf8ff")
+      // Mas se no Firestore não tiver index, dá erro. Faremos algo simples: pegamos tudo e filtramos local.
+      // *Ou* se volume for grande, é melhor exibir aviso.
+      const all = await getDocs(collection(db, "players"));
+      const arr: PlayerInfo[] = [];
+      all.forEach((ds) => {
+        const d = ds.data();
+        const full = d.fullname || ds.id;
+        if (full.toLowerCase().includes(searchText.toLowerCase())) {
+          arr.push({ userid: ds.id, fullname: full });
+        }
+      });
+      setPlayersResult(arr);
+      if (arr.length === 0) {
+        Alert.alert("Busca", "Nenhum jogador encontrado.");
       }
-      const rivalData = pSnap.data();
-      const rivalName = rivalData.fullname ?? `ID ${searchId}`;
+    } catch (err) {
+      console.log("Erro handleSearchPlayers:", err);
+      Alert.alert("Erro", "Falha na busca de jogadores.");
+    } finally {
+      setPlayerSearchLoading(false);
+    }
+  }
 
-      const arrMatches = await fetchAllMatches();
-      const directMatches = arrMatches.filter(
-        (m) =>
-          (m.player1_id === userId && m.player2_id === searchId) ||
-          (m.player2_id === userId && m.player1_id === searchId)
+  // Rival modal
+  const [rivalError, setRivalError] = useState("");
+
+  async function handleCheckRival(userid: string, fullname: string) {
+    try {
+      setRivalModalVisible(true);
+      setRivalData(null);
+      setRivalError("");
+
+      const allMatches = await fetchAllMatches();
+      const userMatches = allMatches.filter(
+        (m) => m.player1_id === userId || m.player2_id === userId
       );
-
-      if (directMatches.length === 0) {
-        Alert.alert("Confronto", `Nenhum jogo contra ${rivalName}`);
-        return;
-      }
+      const direct = userMatches.filter(
+        (m) =>
+          (m.player1_id === userId && m.player2_id === userid) ||
+          (m.player2_id === userId && m.player1_id === userid)
+      );
 
       let w = 0,
         l = 0,
-        dr = 0;
-      directMatches.forEach((mm) => {
+        d = 0;
+      direct.forEach((mm) => {
         if (!mm.outcomeNumber) return;
         const isP1 = mm.player1_id === userId;
         switch (mm.outcomeNumber) {
@@ -289,7 +437,7 @@ export default function PlayerScreen() {
             isP1 ? l++ : w++;
             break;
           case 3:
-            dr++;
+            d++;
             break;
           case 10:
             l++;
@@ -297,20 +445,27 @@ export default function PlayerScreen() {
         }
       });
 
-      setConfrontationData({
-        total: directMatches.length,
+      const matchesEntreEles = direct.length;
+      const totalMatchesUser = userMatches.length;
+      const rivalryFactor = 100 * (matchesEntreEles / (totalMatchesUser + 1));
+
+      setRivalData({
+        matchesCount: matchesEntreEles,
         wins: w,
         losses: l,
-        draws: dr,
-        rivalName,
+        draws: d,
+        rivalryFactor,
+        rivalName: fullname,
       });
-      setModalVisible(true);
     } catch (err) {
-      console.log("handleSearch error:", err);
-      Alert.alert("Erro", "Falha na busca");
+      console.log("Erro handleCheckRival:", err);
+      setRivalError("Falha ao calcular rivalidade.");
     }
   }
 
+  // ===========================
+  // RENDER
+  // ===========================
   if (loading) {
     return (
       <View style={styles.loaderContainer}>
@@ -319,34 +474,50 @@ export default function PlayerScreen() {
     );
   }
 
-  // Exemplo de WinRate
+  const totalMatches = stats.matchesTotal;
   const wr =
-    stats.matchesTotal > 0
-      ? ((stats.wins / stats.matchesTotal) * 100).toFixed(1)
-      : "0";
+    totalMatches > 0 ? ((stats.wins / totalMatches) * 100).toFixed(1) : "0";
 
   return (
-    <ScrollView style={styles.mainContainer}>
-      {/* MODAL (Confronto) */}
+    <View style={styles.mainContainer}>
+      {/* HISTÓRICO */}
       <Modal
-        visible={modalVisible}
+        visible={historyModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => setHistoryModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              VS {confrontationData.rivalName}
-            </Text>
-            <Text style={styles.modalStats}>
-              Partidas: {confrontationData.total} | Vitórias:{" "}
-              {confrontationData.wins} | Derrotas: {confrontationData.losses} |
-              Empates: {confrontationData.draws}
-            </Text>
+            <Text style={styles.modalTitle}>Histórico de Torneios</Text>
+            {historyLoading ? (
+              <ActivityIndicator size="large" color={RED} />
+            ) : (
+              <>
+                {historyError ? (
+                  <Text style={styles.modalSub}>{historyError}</Text>
+                ) : (
+                  <ScrollView style={{ maxHeight: 400 }}>
+                    {historyData.map((item, idx) => (
+                      <View key={idx} style={styles.historyCard}>
+                        <Text style={styles.historyCardTitle}>
+                          {item.tournamentName}
+                        </Text>
+                        <Text style={styles.historyCardText}>
+                          Posição: {item.place} / {item.totalPlayers}
+                        </Text>
+                        <Text style={styles.historyCardText}>
+                          Rodadas: {item.roundCount}
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
+              </>
+            )}
             <Pressable
               style={styles.closeModalBtn}
-              onPress={() => setModalVisible(false)}
+              onPress={() => setHistoryModalVisible(false)}
             >
               <Text style={styles.closeModalText}>Fechar</Text>
             </Pressable>
@@ -354,68 +525,141 @@ export default function PlayerScreen() {
         </View>
       </Modal>
 
-      <Text style={styles.title}>{userName}</Text>
+      {/* RIVALIDADE */}
+      <Modal
+        visible={rivalModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setRivalModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Rivalidade</Text>
+            {!rivalData && !rivalError && (
+              <ActivityIndicator size="large" color={RED} />
+            )}
+            {rivalError ? (
+              <Text style={styles.modalSub}>{rivalError}</Text>
+            ) : rivalData ? (
+              <>
+                <Text style={styles.modalSub}>
+                  Confronto vs {rivalData.rivalName}
+                </Text>
+                <Text style={styles.modalSub}>
+                  Partidas: {rivalData.matchesCount} | Vitórias:{" "}
+                  {rivalData.wins} | Derrotas: {rivalData.losses} | Empates:{" "}
+                  {rivalData.draws}
+                </Text>
+                <Text style={styles.modalSub}>
+                  Fator de Rivalidade: {rivalData.rivalryFactor.toFixed(1)}%
+                </Text>
+              </>
+            ) : null}
 
-      {/* Stats */}
-      <View style={styles.statsBox}>
-        <Text style={styles.lineText}>Vitórias: {stats.wins}</Text>
-        <Text style={styles.lineText}>Derrotas: {stats.losses}</Text>
-        <Text style={styles.lineText}>Empates: {stats.draws}</Text>
-        <Text style={styles.lineText}>Partidas: {stats.matchesTotal}</Text>
-        <Text style={styles.lineText}>WinRate: {wr}%</Text>
-        <Text style={styles.lineText}>
-          Oponentes Únicos: {stats.uniqueOpponents}
-        </Text>
-        <Text style={styles.lineText}>Rival: {mainRivalName}</Text>
-      </View>
+            <Pressable
+              style={styles.closeModalBtn}
+              onPress={() => setRivalModalVisible(false)}
+            >
+              <Text style={styles.closeModalText}>Fechar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
-      {/* Buscar Confronto */}
-      <View style={styles.searchBox}>
-        <Text style={styles.searchTitle}>Buscar VS Jogador</Text>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="ID do outro jogador"
-          placeholderTextColor="#999"
-          value={searchId}
-          onChangeText={setSearchId}
-        />
-        <TouchableOpacity style={styles.searchBtn} onPress={handleSearch}>
-          <Text style={styles.searchBtnText}>Buscar</Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 60 }}
+      >
+        <Text style={styles.title}>{userName}</Text>
 
-      {/* Títulos */}
-      <View style={styles.titlesBox}>
-        <Text style={styles.titlesHeader}>Títulos Desbloqueados</Text>
-        {unlockedTitles.length === 0 ? (
-          <Text style={styles.emptyTitles}>
-            Nenhum título desbloqueado ainda.
+        {/* Estatísticas */}
+        <View style={styles.statsBox}>
+          <Text style={styles.statLine}>Vitórias (Matches): {stats.wins}</Text>
+          <Text style={styles.statLine}>
+            Derrotas (Matches): {stats.losses}
           </Text>
-        ) : (
-          <ScrollView
-            style={styles.titlesScroll}
-            contentContainerStyle={styles.titlesContainer}
-          >
-            {unlockedTitles.map((t) => (
+          <Text style={styles.statLine}>Empates (Matches): {stats.draws}</Text>
+          <Text style={styles.statLine}>
+            Partidas Totais: {stats.matchesTotal}
+          </Text>
+          <Text style={styles.statLine}>WinRate: {wr}%</Text>
+          <Text style={styles.statLine}>
+            Sequência Vitórias (Matches): {winStreak}
+          </Text>
+          <Text style={styles.statLine}>
+            Sequência Derrotas (Matches): {lossStreak}
+          </Text>
+        </View>
+
+        {/* Botão p/ ver histórico de torneios */}
+        <TouchableOpacity
+          style={styles.historyButton}
+          onPress={handleShowHistory}
+        >
+          <Text style={styles.historyButtonText}>
+            Ver Histórico de Torneios
+          </Text>
+        </TouchableOpacity>
+
+        {/* Títulos */}
+        <View style={styles.titlesBox}>
+          <Text style={styles.titlesHeader}>Títulos Desbloqueados</Text>
+          {unlockedTitles.length === 0 ? (
+            <Text style={styles.emptyTitles}>Nenhum título ainda.</Text>
+          ) : (
+            unlockedTitles.map((t) => (
               <View key={t.id} style={styles.titleCard}>
                 <Text style={styles.titleCardName}>{t.title}</Text>
                 <Text style={styles.titleCardDesc}>{t.description}</Text>
               </View>
-            ))}
-          </ScrollView>
-        )}
-      </View>
-    </ScrollView>
+            ))
+          )}
+        </View>
+
+        {/* BUSCA JOGADOR */}
+        <View style={styles.searchBox}>
+          <Text style={styles.searchTitle}>Buscar Jogador p/ Rivalidade</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Digite parte do nome..."
+            placeholderTextColor="#999"
+            value={searchText}
+            onChangeText={setSearchText}
+          />
+          <TouchableOpacity
+            style={styles.searchBtn}
+            onPress={handleSearchPlayers}
+          >
+            <Text style={styles.searchBtnText}>Buscar</Text>
+          </TouchableOpacity>
+          {playerSearchLoading && (
+            <ActivityIndicator size="small" color={RED} />
+          )}
+          {playersResult.map((pl) => (
+            <TouchableOpacity
+              key={pl.userid}
+              style={styles.playerItem}
+              onPress={() => handleCheckRival(pl.userid, pl.fullname)}
+            >
+              <Text style={styles.playerItemText}>
+                {pl.fullname} (ID: {pl.userid})
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
-// ===================== STYLES ========================
-const DARK_BG = "#1E1E1E"; // Fundo escuro
-const PRIMARY = "#E3350D"; // Vermelho intenso
-const SECONDARY = "#FFFFFF"; // Texto claro
-const CARD_BG = "#292929"; // Fundo dos cards
-const BORDER_COLOR = "#4D4D4D"; // Cor das bordas
-const RED = "#E3350D"; // Vermelho pokébola
+// =========================
+// ESTILOS
+// =========================
+const DARK_BG = "#1E1E1E";
+const CARD_BG = "#292929";
+const BORDER_COLOR = "#4D4D4D";
+const RED = "#E3350D";
+const WHITE = "#FFFFFF";
 
 const styles = StyleSheet.create({
   loaderContainer: {
@@ -427,115 +671,139 @@ const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
     backgroundColor: DARK_BG,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   title: {
-    color: PRIMARY,
+    color: RED,
     fontSize: 26,
     fontWeight: "bold",
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 16,
     textTransform: "uppercase",
   },
+
+  // Stats
   statsBox: {
     backgroundColor: CARD_BG,
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: BORDER_COLOR,
   },
-  lineText: {
-    color: SECONDARY,
-    fontSize: 16,
+  statLine: {
+    color: WHITE,
+    fontSize: 15,
     marginBottom: 4,
   },
 
-  titlesScroll: {
-    maxHeight: 300, // Define uma altura máxima para o scroll de títulos
-    marginTop: 10,
+  // History Button
+  historyButton: {
+    backgroundColor: RED,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginVertical: 10,
   },
-  titlesContainer: {
-    paddingBottom: 10,
+  historyButtonText: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 16,
   },
 
+  // Títulos
   titlesBox: {
     backgroundColor: CARD_BG,
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
+    borderRadius: 8,
+    padding: 12,
     borderWidth: 1,
     borderColor: BORDER_COLOR,
+    marginBottom: 20,
   },
   titlesHeader: {
-    color: PRIMARY,
+    color: RED,
     fontSize: 18,
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 8,
     textAlign: "center",
   },
   emptyTitles: {
-    color: SECONDARY,
+    color: WHITE,
     fontSize: 14,
     textAlign: "center",
   },
   titleCard: {
     backgroundColor: DARK_BG,
-    borderColor: PRIMARY,
     borderWidth: 1,
+    borderColor: RED,
     borderRadius: 8,
     padding: 10,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   titleCardName: {
-    color: PRIMARY,
+    color: RED,
     fontSize: 16,
     fontWeight: "bold",
-    marginBottom: 5,
+    marginBottom: 4,
   },
   titleCardDesc: {
-    color: SECONDARY,
+    color: WHITE,
     fontSize: 14,
   },
+
+  // Busca
   searchBox: {
     backgroundColor: CARD_BG,
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: BORDER_COLOR,
+    padding: 12,
+    marginBottom: 20,
   },
   searchTitle: {
-    color: PRIMARY,
+    color: RED,
     fontSize: 18,
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 6,
     textAlign: "center",
   },
   searchInput: {
-    borderColor: PRIMARY,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    color: SECONDARY,
     backgroundColor: DARK_BG,
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 8,
+    color: WHITE,
+    padding: 10,
     marginBottom: 10,
   },
   searchBtn: {
-    backgroundColor: PRIMARY,
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: RED,
+    borderRadius: 6,
+    paddingVertical: 10,
     alignItems: "center",
+    marginBottom: 8,
   },
   searchBtnText: {
-    color: SECONDARY,
+    color: WHITE,
+    fontSize: 14,
     fontWeight: "bold",
-    fontSize: 16,
   },
+  playerItem: {
+    backgroundColor: "#444",
+    borderRadius: 6,
+    padding: 8,
+    marginVertical: 4,
+  },
+  playerItemText: {
+    color: WHITE,
+    fontSize: 14,
+  },
+
   // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
+    backgroundColor: "rgba(0,0,0,0.65)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -543,33 +811,54 @@ const styles = StyleSheet.create({
     width: "85%",
     backgroundColor: CARD_BG,
     borderRadius: 12,
-    padding: 20,
+    padding: 16,
     borderWidth: 1,
     borderColor: BORDER_COLOR,
   },
   modalTitle: {
-    color: PRIMARY,
+    color: RED,
     fontSize: 20,
     fontWeight: "bold",
+    textAlign: "center",
     marginBottom: 10,
-    textAlign: "center",
   },
-  modalStats: {
-    color: SECONDARY,
-    fontSize: 16,
-    marginBottom: 20,
+  modalSub: {
+    color: WHITE,
+    fontSize: 14,
     textAlign: "center",
+    marginBottom: 12,
   },
   closeModalBtn: {
-    backgroundColor: PRIMARY,
-    borderRadius: 8,
-    paddingVertical: 10,
+    backgroundColor: RED,
+    borderRadius: 6,
+    paddingVertical: 8,
     paddingHorizontal: 20,
     alignSelf: "center",
+    marginTop: 10,
   },
   closeModalText: {
-    color: SECONDARY,
+    color: WHITE,
     fontWeight: "bold",
+    fontSize: 14,
+  },
+
+  // Cards do histórico
+  historyCard: {
+    backgroundColor: DARK_BG,
+    borderWidth: 1,
+    borderColor: BORDER_COLOR,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  historyCardTitle: {
+    color: RED,
     fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  historyCardText: {
+    color: WHITE,
+    fontSize: 14,
   },
 });
