@@ -11,6 +11,7 @@ import TrocasScreen from "./trocas";
 import EstatisticasScreen from "./Decks";
 import JogadorScreen from "./jogador";
 import CartasScreen from "./Cartas";
+import AnalyticsScreen from "./Analise";
 
 const Drawer = createDrawerNavigator();
 
@@ -62,6 +63,18 @@ function DrawerLayout() {
           ),
         }}
       />
+
+      <Drawer.Screen
+        name="IApikachu"
+        component={AnalyticsScreen}
+        options={{
+          title: "IApikachu",
+          drawerIcon: ({ color }) => (
+            <Ionicons name="analytics-outline" size={20} color={color} />
+          ),
+        }}
+      />
+
       <Drawer.Screen
         name="Cartas"
         component={CartasScreen}
