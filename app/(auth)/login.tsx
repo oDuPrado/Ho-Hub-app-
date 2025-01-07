@@ -390,15 +390,17 @@ export default function LoginScreen() {
           )}
 
           {/* Switch: Continuar Conectado */}
-          <View style={styles.switchRow}>
-            <Text style={styles.switchText}>Continuar Conectado</Text>
-            <Switch
-              value={stayLogged}
-              onValueChange={setStayLogged}
-              trackColor={{ false: SWITCH_TRACK, true: PRIMARY }}
-              thumbColor={stayLogged ? SWITCH_THUMB : "#ccc"}
-            />
-          </View>
+          {/*
+            <View style={styles.switchRow}>
+              <Text style={styles.switchText}>Continuar Conectado</Text>
+              <Switch
+                value={stayLogged}
+                onValueChange={setStayLogged}
+                trackColor={{ false: SWITCH_TRACK, true: PRIMARY }}
+                thumbColor={stayLogged ? SWITCH_THUMB : "#ccc"}
+              />
+            </View>
+            Funçao  a ser implementada */}
 
           {/* Botão principal */}
           {mode === "signup" ? (
@@ -447,8 +449,8 @@ const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
 const INPUT_BG = "#292929";
 const INPUT_BORDER = "#4D4D4D";
-const SWITCH_TRACK = "#555555";
-const SWITCH_THUMB = PRIMARY;
+/*const SWITCH_TRACK = "#555555";
+const SWITCH_THUMB = PRIMARY;*/
 const ACCENT = "#FF6F61";
 
 const styles = StyleSheet.create({
