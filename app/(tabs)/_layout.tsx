@@ -12,6 +12,7 @@ import EstatisticasScreen from "./Decks";
 import JogadorScreen from "./jogador";
 import CartasScreen from "./Cartas";
 import AnalyticsScreen from "./Analise";
+import NoticiasScreen from "./Noticias";
 
 const Drawer = createDrawerNavigator();
 
@@ -65,12 +66,23 @@ function DrawerLayout() {
       />
 
       <Drawer.Screen
+        name="Noticias"
+        component={NoticiasScreen}
+        options={{
+          title: "Noticias",
+          drawerIcon: ({ color }) => (
+            <Ionicons name="newspaper-outline" size={20} color={color} />
+          ),
+        }}
+      />
+
+      <Drawer.Screen
         name="IApikachu"
         component={AnalyticsScreen}
         options={{
           title: "IApikachu",
           drawerIcon: ({ color }) => (
-            <Ionicons name="analytics-outline" size={20} color={color} />
+            <Ionicons name="bulb-outline" size={20} color={color} />
           ),
         }}
       />
