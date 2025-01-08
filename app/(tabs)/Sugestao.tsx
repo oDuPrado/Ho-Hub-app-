@@ -40,7 +40,7 @@ export default function SuggestionScreen() {
 
   const handleSendEmail = async () => {
     if (!message.trim()) {
-      Alert.alert("Erro", "A mensagem não pode estar vazia.");
+      Alert.alert("Erro", "A mensagem não pode estar vazias.");
       return;
     }
 
