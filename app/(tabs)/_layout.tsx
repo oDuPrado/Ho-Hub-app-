@@ -13,6 +13,7 @@ import JogadorScreen from "./jogador";
 import CartasScreen from "./Cartas";
 import AnalyticsScreen from "./Analise";
 import NoticiasScreen from "./Noticias";
+import SugestaoScreen from "./Sugestao";
 
 const Drawer = createDrawerNavigator();
 
@@ -128,6 +129,17 @@ function DrawerLayout() {
           ),
         }}
       />
+
+      <Drawer.Screen
+              name="Sugestão"
+              component={SugestaoScreen}
+              options={{
+                title: "Sugestão",
+                drawerIcon: ({ color }) => (
+                  <Ionicons name="bulb-outline" size={20} color={color} />
+                ),
+              }}
+            />
     </Drawer.Navigator>
   );
 }
