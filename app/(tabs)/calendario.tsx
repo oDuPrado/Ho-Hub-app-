@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { PokemonTCG } from "pokemon-tcg-sdk-typescript";
 import {
   View,
   Text,
@@ -11,7 +10,6 @@ import {
   ScrollView,
   Modal,
   TextInput,
-  Platform,
   Image,
   ActivityIndicator,
 } from "react-native";
@@ -25,11 +23,13 @@ import {
   query,
   setDoc,
   getDoc,
-  orderBy,
   where,
+  serverTimestamp,
 } from "firebase/firestore";
+
 import moment from "moment";
 import "moment/locale/pt-br";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db } from "../../lib/firebaseConfig";
 
@@ -49,6 +49,8 @@ interface Torneio {
   createdBy: string;
   judge: string;
   headJudge: string;
+  eventType: string; // Cup, Challenger, Pre-release, Liguinha, Evento Especial
+  judgeAccepted?: boolean; // se o juiz confirmou a função
 }
 
 /** Estrutura de Inscrição */
@@ -65,9 +67,6 @@ interface DeckData {
   playerId: string;
 }
 
-/** Estrutura p/ sub-tela do modal Detalhes (Host) */
-type DetalhesTab = "inscricoes" | "decks";
-
 export default function CalendarScreen() {
   const [playerId, setPlayerId] = useState("");
   const [isHost, setIsHost] = useState(false);
@@ -75,11 +74,11 @@ export default function CalendarScreen() {
   const [torneios, setTorneios] = useState<Torneio[]>([]);
   const [currentMonth, setCurrentMonth] = useState(moment());
 
-  // ------------- Dicionários para lookup de nomes -------------
+  // Lookup de nomes
   const [judgeMap, setJudgeMap] = useState<Record<string, string>>({});
   const [headJudgeMap, setHeadJudgeMap] = useState<Record<string, string>>({});
 
-  // ------------- Modal CRIAR/EDITAR -------------
+  // Modal CRIAR/EDITAR
   const [modalVisible, setModalVisible] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -87,30 +86,23 @@ export default function CalendarScreen() {
   const [editTime, setEditTime] = useState("");
   const [editJudge, setEditJudge] = useState("");
   const [editHeadJudge, setEditHeadJudge] = useState("");
+  const [editEventType, setEditEventType] = useState("Cup");
 
-  // ------------- Para exibir Juiz/HeadJudge (picker) -------------
-  const [judgeOptions, setJudgeOptions] = useState<
-    { userId: string; fullname: string }[]
-  >([]);
-  const [headJudgeOptions, setHeadJudgeOptions] = useState<
-    { userId: string; fullname: string }[]
-  >([]);
-
-  // ------------- Modal DETALHES (Host) -------------
+  // Modal DETALHES
   const [detalhesModalVisible, setDetalhesModalVisible] = useState(false);
   const [detalhesTorneio, setDetalhesTorneio] = useState<Torneio | null>(null);
-  const [detalhesTab, setDetalhesTab] = useState<DetalhesTab>("inscricoes");
-  const [inscricoes, setInscricoes] = useState<Inscricao[]>([]);
-  const [deckNameMap, setDeckNameMap] = useState<Record<string, string>>({}); // deckId -> deckName
-  const [playerNameMap, setPlayerNameMap] = useState<Record<string, string>>(
-    {}
-  ); // userId -> fullname
 
-  // Sub-Modal p/ exibir deck "em PDF"
+  // Sub-modal INSCRIÇÕES (para exibir lista de inscrições e decks) - **Novo** approach
+  const [inscricoesModalVisible, setInscricoesModalVisible] = useState(false);
+  const [inscricoes, setInscricoes] = useState<Inscricao[]>([]);
+  const [deckNameMap, setDeckNameMap] = useState<Record<string, string>>({});
+  const [playerNameMap, setPlayerNameMap] = useState<Record<string, string>>({});
+
+  // Sub-modal de PDF do Deck
   const [deckPdfModalVisible, setDeckPdfModalVisible] = useState(false);
   const [selectedDeckIdForPdf, setSelectedDeckIdForPdf] = useState("");
 
-  // ------------- Modal INSCRIÇÃO (usuário) -------------
+  // Modal INSCRIÇÃO (usuário)
   const [inscricaoModalVisible, setInscricaoModalVisible] = useState(false);
   const [inscricaoTorneioId, setInscricaoTorneioId] = useState<string | null>(
     null
@@ -118,7 +110,23 @@ export default function CalendarScreen() {
   const [userDecks, setUserDecks] = useState<DeckData[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState("");
 
-  // ============ Efeito: carrega playerId e carrega judge/headJudge info ============
+  // Para armazenar cartas do deck atual
+  const [deckCards, setDeckCards] = useState<
+    {
+      category: string;
+      quantity: number;
+      name: string;
+      expansion?: string;
+      cardNumber?: string;
+    }[]
+  >([]);
+  const [cardImages, setCardImages] = useState<Record<string, string>>({});
+  const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
+  const [loadingImages, setLoadingImages] = useState<boolean>(false);
+
+  // ------------------------------------------------------------------
+  // Efeito Inicial: Carrega playerId, roles, e SetIdMap
+  // ------------------------------------------------------------------
   useEffect(() => {
     moment.locale("pt-br");
 
@@ -135,45 +143,52 @@ export default function CalendarScreen() {
 
       // Carrega Juiz
       const jArray = await fetchHostsInfo(JUDGE_PLAYER_IDS);
-      setJudgeOptions(jArray);
-      const jMap: Record<string, string> = {};
+      const jMapObj: Record<string, string> = {};
       jArray.forEach((j) => {
-        jMap[j.userId] = j.fullname;
+        jMapObj[j.userId] = j.fullname;
       });
-      setJudgeMap(jMap);
+      setJudgeOptions(jArray);
+      setJudgeMap(jMapObj);
 
       // Carrega HeadJudge
       const hjArray = await fetchHostsInfo(HEAD_JUDGE_PLAYER_IDS);
-      setHeadJudgeOptions(hjArray);
-      const hjMap: Record<string, string> = {};
+      const hjMapObj: Record<string, string> = {};
       hjArray.forEach((hj) => {
-        hjMap[hj.userId] = hj.fullname;
+        hjMapObj[hj.userId] = hj.fullname;
       });
-      setHeadJudgeMap(hjMap);
+      setHeadJudgeOptions(hjArray);
+      setHeadJudgeMap(hjMapObj);
+
+      // Carrega mapping de ptcgoCode => set.id
+      loadSetIdMap();
     })();
   }, []);
 
-  // ============ Efeito: Carregar torneios do Firestore para o mês atual ============
+  // ------------------------------------------------------------------
+  // Efeito: Carregar torneios do Firestore p/ mês atual
+  // ------------------------------------------------------------------
   useEffect(() => {
     const colRef = collection(db, "calendar", "torneios", "list");
     const unsub = onSnapshot(colRef, (snap) => {
-      const items: Torneio[] = [];
-      snap.forEach((ds) => {
-        const data = ds.data();
-        items.push({
-          id: ds.id,
-          name: data.name,
-          date: data.date, // dd/mm/aaaa
-          time: data.time, // hh:mm
-          createdBy: data.createdBy,
-          judge: data.judge || "",
-          headJudge: data.headJudge || "",
+      const arr: Torneio[] = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data();
+        arr.push({
+          id: docSnap.id,
+          name: d.name,
+          date: d.date,
+          time: d.time,
+          createdBy: d.createdBy,
+          judge: d.judge || "",
+          headJudge: d.headJudge || "",
+          eventType: d.eventType || "Cup",
+          judgeAccepted: d.judgeAccepted || false,
         });
       });
       // filtra por mes
       const start = currentMonth.clone().startOf("month");
       const end = currentMonth.clone().endOf("month");
-      const filtered = items.filter((t) => {
+      const filtered = arr.filter((t) => {
         const dt = moment(t.date, "DD/MM/YYYY");
         return dt.isBetween(start, end, undefined, "[]");
       });
@@ -182,7 +197,46 @@ export default function CalendarScreen() {
     return () => unsub();
   }, [currentMonth]);
 
-  // ============ Mudar mês ============
+  // ------------------------------------------------------------------
+  // Função: loadSetIdMap() - carrega sets p/ fetch de imagens
+  // ------------------------------------------------------------------
+  async function loadSetIdMap() {
+    try {
+      const response = await fetch("https://api.pokemontcg.io/v2/sets");
+      const data = await response.json();
+      if (data && data.data) {
+        const map: Record<string, string> = {};
+        // Agrupa sets
+        const groupedSets: Record<string, any[]> = {};
+        data.data.forEach((s: any) => {
+          const code = s.ptcgoCode?.toUpperCase();
+          if (!code) return;
+          if (!groupedSets[code]) groupedSets[code] = [];
+          groupedSets[code].push(s);
+        });
+        // Seleciona best set
+        Object.keys(groupedSets).forEach((code) => {
+          const sets = groupedSets[code];
+          const bestSet = sets.reduce((prev, curr) =>
+            curr.total > prev.total ? curr : prev
+          );
+          map[code] = bestSet.id;
+        });
+        setSetIdMap(map);
+      }
+    } catch (err) {
+      console.log("Erro loadSetIdMap:", err);
+    }
+  }
+
+  // ====================== CREATE / EDIT TOURNAMENT ===========================
+  const [judgeOptions, setJudgeOptions] = useState<
+    { userId: string; fullname: string }[]
+  >([]);
+  const [headJudgeOptions, setHeadJudgeOptions] = useState<
+    { userId: string; fullname: string }[]
+  >([]);
+
   function handlePrevMonth() {
     setCurrentMonth((prev) => prev.clone().subtract(1, "month"));
   }
@@ -190,7 +244,6 @@ export default function CalendarScreen() {
     setCurrentMonth((prev) => prev.clone().add(1, "month"));
   }
 
-  // ============ Abrir modal CRIAR torneio ============
   function openCreateModal() {
     setEditId(null);
     setEditName("");
@@ -198,10 +251,10 @@ export default function CalendarScreen() {
     setEditTime("10:00");
     setEditJudge("");
     setEditHeadJudge("");
+    setEditEventType("Cup");
     setModalVisible(true);
   }
 
-  // ============ Abrir modal EDITAR torneio ============
   function openEditModal(t: Torneio) {
     setEditId(t.id);
     setEditName(t.name);
@@ -209,10 +262,10 @@ export default function CalendarScreen() {
     setEditTime(t.time);
     setEditJudge(t.judge);
     setEditHeadJudge(t.headJudge);
+    setEditEventType(t.eventType);
     setModalVisible(true);
   }
 
-  // ============ Salvar torneio (criar ou editar) ============
   async function handleSaveTorneio() {
     if (!editName.trim()) {
       Alert.alert("Erro", "Nome do torneio não pode estar vazio.");
@@ -225,32 +278,62 @@ export default function CalendarScreen() {
     try {
       const colRef = collection(db, "calendar", "torneios", "list");
       if (editId) {
+        // Edit
         const docRef = doc(colRef, editId);
         await updateDoc(docRef, {
           name: editName.trim(),
           date: editDate,
           time: editTime,
           judge: editJudge,
+          judgeAccepted: false, // zera caso troque de juiz
           headJudge: editHeadJudge,
+          eventType: editEventType,
         });
       } else {
-        await addDoc(colRef, {
+        // Create
+        const docRef = await addDoc(colRef, {
           name: editName.trim(),
           date: editDate,
           time: editTime,
           createdBy: playerId,
           judge: editJudge,
           headJudge: editHeadJudge,
+          eventType: editEventType,
+          judgeAccepted: false,
         });
+        // Notifica juiz, se existir
+        if (editJudge) {
+          sendNotificationToJudge(editJudge, docRef.id, editName.trim());
+        }
       }
       setModalVisible(false);
-    } catch (error) {
-      console.log("Erro ao salvar torneio:", error);
+    } catch (err) {
+      console.log("Erro handleSaveTorneio:", err);
       Alert.alert("Erro", "Falha ao salvar torneio.");
     }
   }
 
-  // ============ Excluir torneio ============
+  async function sendNotificationToJudge(
+    judgeId: string,
+    torneioId: string,
+    torneioName: string
+  ) {
+    try {
+      const notifRef = doc(collection(db, "players", judgeId, "notifications"));
+      await setDoc(notifRef, {
+        type: "judge_invite",
+        torneioId,
+        torneioName,
+        message: `Você foi escolhido como juiz do torneio "${torneioName}"`,
+        timestamp: serverTimestamp(),
+      });
+      console.log("Notificação enviada ao juiz:", judgeId);
+    } catch (err) {
+      console.log("Erro ao notificar juiz:", err);
+    }
+  }
+
+  // ==================== DELETE TORN. ====================
   async function handleDeleteTorneio(t: Torneio) {
     Alert.alert("Confirmar", `Excluir torneio ${t.name}?`, [
       { text: "Cancelar", style: "cancel" },
@@ -262,8 +345,8 @@ export default function CalendarScreen() {
             const colRef = collection(db, "calendar", "torneios", "list");
             const docRef = doc(colRef, t.id);
             await deleteDoc(docRef);
-          } catch (error) {
-            console.log("Erro ao excluir torneio:", error);
+          } catch (err) {
+            console.log("Erro handleDeleteTorneio:", err);
             Alert.alert("Erro", "Falha ao excluir torneio.");
           }
         },
@@ -271,32 +354,27 @@ export default function CalendarScreen() {
     ]);
   }
 
-  // ============ Inscrever-se (usuário) ============
+  // ==================== INSCRIÇÃO ====================
   async function handleInscrever(t: Torneio) {
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
 
-    // Carregar decks do user
-    const colRef = collection(db, "decks");
-    const unsub = onSnapshot(
-      query(colRef, where("playerId", "==", playerId)),
-      (snap) => {
-        const arr: DeckData[] = [];
-        snap.forEach((ds) => {
-          arr.push({
-            id: ds.id,
-            name: ds.data().name || `Deck ${ds.id}`,
-            playerId: ds.data().playerId,
-          });
+    // Carrega decks do user
+    const decksRef = collection(db, "decks");
+    onSnapshot(query(decksRef, where("playerId", "==", playerId)), (snap) => {
+      const arr: DeckData[] = [];
+      snap.forEach((docSnap) => {
+        arr.push({
+          id: docSnap.id,
+          name: docSnap.data().name || `Deck ${docSnap.id}`,
+          playerId: docSnap.data().playerId,
         });
-        setUserDecks(arr);
-      }
-    );
-
+      });
+      setUserDecks(arr);
+    });
     setInscricaoModalVisible(true);
   }
 
-  // ============ Salvar inscrição com deckId ============
   async function handleSalvarInscricao() {
     if (!inscricaoTorneioId) return;
     if (!selectedDeckId) {
@@ -320,27 +398,27 @@ export default function CalendarScreen() {
       });
       Alert.alert("Sucesso", "Inscrição realizada!");
       setInscricaoModalVisible(false);
-    } catch (error) {
-      console.log("Erro ao inscrever:", error);
+    } catch (err) {
+      console.log("Erro handleSalvarInscricao:", err);
       Alert.alert("Erro", "Falha ao se inscrever.");
     }
   }
 
-  // ============ Abrir modal DETALHES p/ Host (inscrições + decks) ============
+  // ==================== DETALHES (HOST/JUIZ) ====================
   async function handleOpenDetalhes(t: Torneio) {
     setDetalhesTorneio(t);
-    setDetalhesTab("inscricoes");
+    setDetalhesModalVisible(true);
+  }
+  function closeDetalhes() {
+    setDetalhesModalVisible(false);
+    setDetalhesTorneio(null);
+  }
 
-    // Buscar subcoleção "inscricoes"
-    const colRef = collection(
-      db,
-      "calendar",
-      "torneios",
-      "list",
-      t.id,
-      "inscricoes"
-    );
-    const unsub = onSnapshot(colRef, (snap) => {
+  // ============ Sub-Modal: Inscrições + Decks (mais responsivo) ============
+  async function openInscricoesModal(t: Torneio) {
+    // Carrega a subcoleção “inscricoes”
+    const colRef = collection(db, "calendar", "torneios", "list", t.id, "inscricoes");
+    onSnapshot(colRef, (snap) => {
       const arr: Inscricao[] = [];
       snap.forEach((ds) => {
         arr.push({
@@ -349,11 +427,11 @@ export default function CalendarScreen() {
           createdAt: ds.data().createdAt || "",
         });
       });
-      // Ordena por createdAt
+      // Ordena
       arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
       setInscricoes(arr);
 
-      // Montar um set de deckIds e userIds
+      // Montar userIDs e deckIDs
       const deckIdsSet = new Set<string>();
       const userIdsSet = new Set<string>();
       arr.forEach((i) => {
@@ -361,13 +439,12 @@ export default function CalendarScreen() {
         userIdsSet.add(i.userId);
       });
 
-      // Buscar no Firestore para deckName e userName
       deckIdsSet.forEach(async (dkId) => {
         const dRef = doc(db, "decks", dkId);
         const dSnap = await getDoc(dRef);
         if (dSnap.exists()) {
-          const name = dSnap.data().name || `Deck ${dkId}`;
-          setDeckNameMap((prev) => ({ ...prev, [dkId]: name }));
+          const nm = dSnap.data().name || `Deck ${dkId}`;
+          setDeckNameMap((prev) => ({ ...prev, [dkId]: nm }));
         }
       });
       userIdsSet.forEach(async (uId) => {
@@ -380,401 +457,165 @@ export default function CalendarScreen() {
       });
     });
 
-    setDetalhesModalVisible(true);
+    setInscricoesModalVisible(true);
   }
-
-  // ============ Fechar modal DETALHES  ============
-  function closeDetalhes() {
-    setDetalhesModalVisible(false);
-    setDetalhesTorneio(null);
+  function closeInscricoesModal() {
+    setInscricoesModalVisible(false);
     setInscricoes([]);
   }
 
-  // ============ Ao clicar em um deck (na aba "decks"), exibe sub-modal (PDF) ============
-  function handleOpenDeckPdf(deckId: string) {
-    setSelectedDeckIdForPdf(deckId);
-    loadDeckCards(deckId); // Carrega as cartas do deck antes de abrir o modal
-    setDeckPdfModalVisible(true);
-  }
-
-  function closeDeckPdfModal() {
-    setDeckPdfModalVisible(false);
-    setSelectedDeckIdForPdf("");
-  }
-
-  // ============ Render de um "card" de torneio (listagem principal) ============
-  function renderCard(t: Torneio) {
-    // Converte data p/ moment e descobre se é futuro ou passado
-    const dt = moment(t.date, "DD/MM/YYYY");
-    const isFuture = dt.isSameOrAfter(moment(), "day");
-
-    // Substituir IDs por nomes
-    const judgeName = judgeMap[t.judge] || "(Sem juiz)";
-    const headJudgeName = headJudgeMap[t.headJudge] || "(Sem head judge)";
-
-    return (
-      <View style={styles.card} key={`t-${t.id}`}>
-        <Text style={styles.cardTitle}>{t.name}</Text>
-        <Text style={styles.cardSub}>
-          {/* Data e Hora (dd/mm/aaaa hh:mm) */}
-          {t.date} às {t.time}
-        </Text>
-        <Text style={styles.cardSub}>
-          Juiz: {judgeName}, Head Judge: {headJudgeName}
-        </Text>
-
-        {isHost && (
-          <View style={{ flexDirection: "row", marginTop: 6 }}>
-            <TouchableOpacity
-              style={[styles.buttonSmall, { marginRight: 8 }]}
-              onPress={() => openEditModal(t)}
-            >
-              <Text style={styles.buttonSmallText}>Editar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
-              onPress={() => handleDeleteTorneio(t)}
-            >
-              <Text style={styles.buttonSmallText}>Excluir</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {isFuture ? (
-          <TouchableOpacity
-            style={[styles.inscreverButton, { marginTop: 8 }]}
-            onPress={() =>
-              isHost ? handleOpenDetalhes(t) : handleInscrever(t)
-            }
-          >
-            <Text style={styles.inscreverButtonText}>
-              {isHost ? "Ver Detalhes" : "Inscrever-se"}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[
-              styles.inscreverButton,
-              { backgroundColor: "#777", marginTop: 8 },
-            ]}
-            onPress={() => isHost && handleOpenDetalhes(t)}
-          >
-            <Text style={styles.inscreverButtonText}>
-              {isHost ? "Ver Detalhes" : "Já ocorreu"}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  }
-
-  // ============ Render do modal DETALHES p/ Host ============
-  function renderDetalhesModal() {
-    if (!detalhesTorneio) return null;
-
-    // formata data e hora
-    const dtObj = moment(detalhesTorneio.date, "DD/MM/YYYY");
-    const dataFormatada = dtObj.format("DD/MM/YYYY");
-    return (
-      <Modal
-        visible={detalhesModalVisible}
-        animationType="slide"
-        onRequestClose={closeDetalhes}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <Text style={styles.modalTitle}>{detalhesTorneio.name}</Text>
-          <Text style={{ color: "#ccc", textAlign: "center" }}>
-            Data/Hora: {dataFormatada} às {detalhesTorneio.time}
-          </Text>
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "center",
-              marginTop: 10,
-            }}
-          >
-            <TouchableOpacity
-              style={[
-                styles.tabButton,
-                detalhesTab === "inscricoes" && { backgroundColor: "#666" },
-              ]}
-              onPress={() => setDetalhesTab("inscricoes")}
-            >
-              <Text style={styles.tabButtonText}>Inscrições</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.tabButton,
-                detalhesTab === "decks" && { backgroundColor: "#666" },
-              ]}
-              onPress={() => setDetalhesTab("decks")}
-            >
-              <Text style={styles.tabButtonText}>Decks</Text>
-            </TouchableOpacity>
-          </View>
-
-          {detalhesTab === "inscricoes" && (
-            <ScrollView style={{ margin: 16 }}>
-              {inscricoes.map((i) => (
-                <View style={styles.inscricaoItem} key={`ins-${i.userId}`}>
-                  <Text style={styles.inscricaoItemText}>
-                    Jogador: {playerNameMap[i.userId] || i.userId}
-                  </Text>
-                  <Text style={styles.inscricaoItemText}>
-                    Data/Hora: {formatIsoDate(i.createdAt)}
-                  </Text>
-                  <Text style={styles.inscricaoItemText}>
-                    Deck:{" "}
-                    {i.deckId
-                      ? deckNameMap[i.deckId] || `(Deck ${i.deckId})`
-                      : "(Sem deck)"}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-          )}
-
-          {detalhesTab === "decks" && (
-            <ScrollView style={{ margin: 16 }}>
-              {inscricoes.map((i) => (
-                <TouchableOpacity
-                  style={styles.inscricaoItem}
-                  key={`deckRef-${i.userId}`}
-                  onPress={() => {
-                    if (i.deckId) {
-                      handleOpenDeckPdf(i.deckId);
-                    }
-                  }}
-                >
-                  <Text style={styles.inscricaoItemText}>
-                    Jogador: {playerNameMap[i.userId] || i.userId}
-                  </Text>
-                  <Text style={styles.inscricaoItemText}>
-                    Deck:{" "}
-                    {i.deckId
-                      ? deckNameMap[i.deckId] || `(Deck ${i.deckId})`
-                      : "(Sem deck)"}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-
-          <TouchableOpacity
-            style={[styles.button, { margin: 16 }]}
-            onPress={closeDetalhes}
-          >
-            <Text style={styles.buttonText}>Fechar</Text>
-          </TouchableOpacity>
-        </SafeAreaView>
-
-        {/* Sub-modal do PDF (ou visualização) */}
-      </Modal>
-    );
-  }
-
-  // ============ Sub-modal PDF do deck =============
-  const [deckCards, setDeckCards] = useState<
-    {
-      category: string;
-      quantity: number;
-      name: string;
-      expansion?: string;
-      cardNumber?: string;
-    }[]
-  >([]);
-
-  const [cardImages, setCardImages] = useState<Record<string, string>>({});
-  const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
-  const [loadingImages, setLoadingImages] = useState<boolean>(false);
-
-  // Função para carregar o mapeamento de ptcgoCode para id
-  async function loadSetIdMap() {
+  // ==================== Juiz Pendente: confirm / recusar ====================
+  async function confirmJudge(t: Torneio) {
     try {
-      const response = await fetch("https://api.pokemontcg.io/v2/sets");
-      const data = await response.json();
-      if (data && data.data) {
-        const map: Record<string, string> = {};
-
-        // Agrupa sets por ptcgoCode e seleciona o que possui maior "total"
-        const groupedSets: Record<string, any[]> = {};
-        data.data.forEach((set: any) => {
-          const code = set.ptcgoCode?.toUpperCase();
-          if (!code) return;
-          if (!groupedSets[code]) groupedSets[code] = [];
-          groupedSets[code].push(set);
-        });
-
-        // Seleciona o set com maior "total" para cada ptcgoCode
-        Object.keys(groupedSets).forEach((code) => {
-          const sets = groupedSets[code];
-          const bestSet = sets.reduce((prev, curr) =>
-            curr.total > prev.total ? curr : prev
-          );
-          map[code] = bestSet.id; // Mapeia o ID do melhor conjunto
-        });
-
-        setSetIdMap(map);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar mapeamento de sets:", error);
+      const colRef = collection(db, "calendar", "torneios", "list");
+      const docRef = doc(colRef, t.id);
+      await updateDoc(docRef, { judgeAccepted: true });
+      Alert.alert("Sucesso", `Você confirmou como Juiz de ${t.name}.`);
+      sendNotifToHost(t.createdBy, t.id, t.name, "O Juiz confirmou a função!");
+    } catch (err) {
+      console.log("Erro confirmJudge:", err);
+      Alert.alert("Erro", "Não foi possível confirmar.");
+    }
+  }
+  async function declineJudge(t: Torneio) {
+    try {
+      const colRef = collection(db, "calendar", "torneios", "list");
+      const docRef = doc(colRef, t.id);
+      await updateDoc(docRef, { judge: "", judgeAccepted: false });
+      Alert.alert("Aviso", `Você recusou ser Juiz de ${t.name}.`);
+      sendNotifToHost(t.createdBy, t.id, t.name, "O Juiz recusou a função.");
+    } catch (err) {
+      console.log("Erro declineJudge:", err);
+      Alert.alert("Erro", "Não foi possível recusar.");
     }
   }
 
-  // Carrega o mapeamento de sets ao inicializar
-  useEffect(() => {
-    loadSetIdMap();
-  }, []);
+  /** Notifica o host */
+  async function sendNotifToHost(
+    hostId: string,
+    torneioId: string,
+    torneioName: string,
+    message: string
+  ) {
+    if (!hostId) return;
+    try {
+      const notifRef = doc(collection(db, "players", hostId, "notifications"));
+      await setDoc(notifRef, {
+        type: "judge_response",
+        torneioId,
+        torneioName,
+        message,
+        timestamp: serverTimestamp(),
+      });
+      console.log("Notificou host:", hostId);
+    } catch (err) {
+      console.log("Erro ao notificar host:", err);
+    }
+  }
 
-  // Função para buscar a imagem de uma carta
+  // ============ Carregar Deck p/ sub-modal PDF ============
+  async function loadDeckCards(deckId: string) {
+    try {
+      const deckRef = doc(db, "decks", deckId);
+      const deckSnap = await getDoc(deckRef);
+      if (!deckSnap.exists()) {
+        console.log("Deck inexistente:", deckId);
+        setDeckCards([]);
+        return;
+      }
+      const deckData = deckSnap.data();
+      const cards: {
+        category: string;
+        quantity: number;
+        name: string;
+        expansion?: string;
+        cardNumber?: string;
+      }[] = [];
+
+      deckData.pokemons?.forEach((c: any) =>
+        cards.push({ category: "Pokémon", ...c })
+      );
+      deckData.trainers?.forEach((c: any) =>
+        cards.push({ category: "Treinador", ...c })
+      );
+      deckData.energies?.forEach((c: any) =>
+        cards.push({ category: "Energia", ...c })
+      );
+
+      setDeckCards(cards);
+      setLoadingImages(true);
+
+      // Exemplo fetch de imagens:
+      const imagePromises = cards.map(async (card) => {
+        const imageUrl = await fetchCardImage(
+          card.name,
+          card.expansion,
+          card.cardNumber
+        );
+        return {
+          key: `${card.name}__${card.expansion}__${card.cardNumber}`,
+          url: imageUrl,
+        };
+      });
+
+      const imageResults = await Promise.all(imagePromises);
+      const newCardImages: Record<string, string> = {};
+      imageResults.forEach((result) => {
+        if (result.url) newCardImages[result.key] = result.url;
+      });
+
+      setCardImages(newCardImages);
+      setLoadingImages(false);
+    } catch (err) {
+      console.log("Erro loadDeckCards:", err);
+      setDeckCards([]);
+      setLoadingImages(false);
+    }
+  }
   async function fetchCardImage(
     cardName: string,
     expansion?: string,
     cardNumber?: string
   ): Promise<string | null> {
     try {
-      // Remove "PH" do nome da carta, se existir
-      const sanitizedCardName = cardName.replace(/\bPH\b/g, "").trim();
-
-      // Transforma o ptcgoCode em id se disponível
+      const sanitized = cardName.replace(/\bPH\b/g, "").trim();
       const setId = expansion ? setIdMap[expansion.toUpperCase()] : undefined;
-
-      // Monta a query
-      const queryParts: string[] = [];
-      queryParts.push(`name:"${encodeURIComponent(sanitizedCardName)}"`);
+      const queryParts: string[] = [`name:"${encodeURIComponent(sanitized)}"`];
       if (setId) queryParts.push(`set.id:"${setId}"`);
       if (cardNumber) queryParts.push(`number:"${cardNumber}"`);
-
       const query = queryParts.join("%20");
       const url = `https://api.pokemontcg.io/v2/cards?q=${query}`;
-      console.log("URL usada para consulta:", url);
-
-      const response = await fetch(url, {
+      console.log("Consultando:", url);
+      const resp = await fetch(url, {
         headers: {
           "X-Api-Key": "8d293a2a-4949-4d04-a06c-c20672a7a12c",
         },
       });
-
-      const data = await response.json();
+      const data = await resp.json();
       if (data && data.data && data.data.length > 0) {
         return data.data[0].images.small || null;
       }
       return null;
-    } catch (error) {
-      console.error(`Erro ao buscar imagem para ${cardName}:`, error);
+    } catch (err) {
+      console.log("Erro fetchCardImage:", err);
       return null;
     }
   }
 
-  // Função para processar o nome da carta
-  function processCardName(cardName: string): string {
-    const energyMap: Record<string, string> = {
-      G: "Grass",
-      F: "Fire",
-      W: "Water",
-      L: "Lightning",
-      P: "Psychic",
-      D: "Darkness",
-      M: "Metal",
-      C: "Colorless",
-      R: "Fighting", // Rock
-    };
-
-    let sanitizedCardName = cardName.replace(/\bPH\b/g, "").trim();
-    sanitizedCardName = sanitizedCardName.replace(
-      /\{([A-Za-z]+)\}/g,
-      (_, match) => {
-        const energyName = energyMap[match.toUpperCase()] || `{${match}}`;
-        return energyName;
-      }
-    );
-
-    sanitizedCardName = sanitizedCardName.replace(
-      /\b(Energy)\b.*?\b(Energy)\b/i,
-      "$1"
-    );
-
-    return sanitizedCardName;
-  }
-
-  // Função para carregar cartas do deck
-  async function loadDeckCards(deckId: string) {
-    try {
-      const deckRef = doc(db, "decks", deckId);
-      const deckSnap = await getDoc(deckRef);
-
-      if (deckSnap.exists()) {
-        const deckData = deckSnap.data();
-        const cards: {
-          category: string;
-          quantity: number;
-          name: string;
-          expansion?: string;
-          cardNumber?: string;
-        }[] = [];
-
-        deckData.pokemons?.forEach((card: any) =>
-          cards.push({ category: "Pokémon", ...card })
-        );
-
-        deckData.trainers?.forEach((card: any) =>
-          cards.push({ category: "Treinador", ...card })
-        );
-
-        deckData.energies?.forEach((card: any) =>
-          cards.push({ category: "Energia", ...card })
-        );
-
-        setDeckCards(cards);
-
-        setLoadingImages(true);
-        const imagePromises = cards.map(async (card) => {
-          const imageUrl = await fetchCardImage(
-            card.name,
-            card.expansion,
-            card.cardNumber
-          );
-          return {
-            key: `${card.name}__${card.expansion}__${card.cardNumber}`,
-            url: imageUrl,
-          };
-        });
-
-        const imageResults = await Promise.all(imagePromises);
-        const newCardImages: Record<string, string> = {};
-        imageResults.forEach((result) => {
-          if (result.url) newCardImages[result.key] = result.url;
-        });
-
-        setCardImages(newCardImages);
-        setLoadingImages(false);
-      } else {
-        console.log("Deck não encontrado.");
-        setDeckCards([]);
-      }
-    } catch (error) {
-      console.log("Erro ao carregar deck:", error);
-      setDeckCards([]);
-      setLoadingImages(false);
-    }
-  }
-
-  // Render do sub-modal do PDF do deck
+  // Sub-modal PDF do deck
   function renderDeckPdfModal() {
     return (
       <Modal
         visible={deckPdfModalVisible}
         animationType="slide"
-        onRequestClose={closeDeckPdfModal}
+        onRequestClose={() => setDeckPdfModalVisible(false)}
       >
         <SafeAreaView style={styles.modalContainer}>
           <Text style={styles.modalTitle}>Detalhes do Deck</Text>
-          <Text
-            style={{ color: "#ccc", textAlign: "center", marginBottom: 20 }}
-          >
-            Deck:{" "}
-            {deckNameMap[selectedDeckIdForPdf] || `ID ${selectedDeckIdForPdf}`}
+          <Text style={{ color: "#ccc", textAlign: "center", marginBottom: 20 }}>
+            Deck: {deckNameMap[selectedDeckIdForPdf] || `ID ${selectedDeckIdForPdf}`}
           </Text>
+
           <ScrollView style={{ marginHorizontal: 16 }}>
             {deckCards.length > 0 ? (
               deckCards.map((card, index) => {
@@ -785,7 +626,7 @@ export default function CalendarScreen() {
                     <View style={styles.cardContent}>
                       <View style={styles.cardText}>
                         <Text style={styles.cardTitle}>
-                          {card.category}: {processCardName(card.name)}
+                          {card.category}: {card.name}
                         </Text>
                         <Text style={styles.cardSub}>Qtd: {card.quantity}</Text>
                         {card.expansion && (
@@ -825,7 +666,7 @@ export default function CalendarScreen() {
 
           <TouchableOpacity
             style={[styles.button, { margin: 16 }]}
-            onPress={closeDeckPdfModal}
+            onPress={() => setDeckPdfModalVisible(false)}
           >
             <Text style={styles.buttonText}>Fechar</Text>
           </TouchableOpacity>
@@ -834,32 +675,242 @@ export default function CalendarScreen() {
     );
   }
 
-  // -------------- Render principal --------------
-  const monthDisplay = currentMonth.format("MMMM [de] YYYY");
+  // -------------- Render do card principal --------------
+  function renderCard(t: Torneio) {
+    const dt = moment(t.date, "DD/MM/YYYY");
+    const isFuture = dt.isSameOrAfter(moment(), "day");
+    const eventLabel = t.eventType || "Cup";
 
+    const judgeName = judgeMap[t.judge] || "(Sem juiz)";
+    const headJudgeName = headJudgeMap[t.headJudge] || "(Sem head judge)";
+
+    const isThisJudgePending = t.judge === playerId && t.judgeAccepted === false;
+    const canAccessDetails =
+      isHost || (t.judge === playerId && t.judgeAccepted === true);
+
+    return (
+      <View style={styles.card} key={`t-${t.id}`}>
+        <Text style={styles.cardTitle}>{t.name}</Text>
+        <Text style={styles.cardSub}>
+          {t.date} às {t.time} | [{eventLabel}]
+        </Text>
+        <Text style={styles.cardSub}>
+          Criador: {t.createdBy}
+          {"\n"}
+          Juiz: {judgeName}
+          {t.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
+          {"\n"}
+          Head Judge: {headJudgeName}
+        </Text>
+
+        {isThisJudgePending && (
+          <View style={{ flexDirection: "row", marginTop: 8 }}>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { marginRight: 8 }]}
+              onPress={() => confirmJudge(t)}
+            >
+              <Text style={styles.buttonSmallText}>Confirmar Juiz</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
+              onPress={() => declineJudge(t)}
+            >
+              <Text style={styles.buttonSmallText}>Recusar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isHost && (
+          <View style={{ flexDirection: "row", marginTop: 6 }}>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { marginRight: 8 }]}
+              onPress={() => openEditModal(t)}
+            >
+              <Text style={styles.buttonSmallText}>Editar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
+              onPress={() => handleDeleteTorneio(t)}
+            >
+              <Text style={styles.buttonSmallText}>Excluir</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isFuture ? (
+          <View style={{ flexDirection: "row", marginTop: 8 }}>
+            {canAccessDetails && (
+              <TouchableOpacity
+                style={[styles.inscreverButton, { marginRight: 8 }]}
+                onPress={() => handleOpenDetalhes(t)}
+              >
+                <Text style={styles.inscreverButtonText}>Ver Detalhes</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.inscreverButton}
+              onPress={() => handleInscrever(t)}
+            >
+              <Text style={styles.inscreverButtonText}>Inscrever-se</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.inscreverButton, { backgroundColor: "#777", marginTop: 8 }]}
+            onPress={() => (canAccessDetails ? handleOpenDetalhes(t) : null)}
+          >
+            <Text style={styles.inscreverButtonText}>
+              {canAccessDetails ? "Ver Detalhes" : "Já ocorreu"}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }
+
+  // -------------- Render da Tela de Detalhes --------------
+  function renderDetalhesModal() {
+    if (!detalhesTorneio) return null;
+
+    return (
+      <Modal
+        visible={detalhesModalVisible}
+        animationType="slide"
+        onRequestClose={closeDetalhes}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>Detalhes do Torneio</Text>
+
+            <Text style={styles.modalLabel}>Nome</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.name}</Text>
+
+            <Text style={styles.modalLabel}>Data</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.date}</Text>
+
+            <Text style={styles.modalLabel}>Hora</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.time}</Text>
+
+            <Text style={styles.modalLabel}>Tipo de Evento</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.eventType}</Text>
+
+            <Text style={styles.modalLabel}>Juiz</Text>
+            <Text style={styles.modalInput}>
+              {judgeMap[detalhesTorneio.judge] || "Sem juiz"}
+              {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
+            </Text>
+
+            <Text style={styles.modalLabel}>Head Judge</Text>
+            <Text style={styles.modalInput}>
+              {headJudgeMap[detalhesTorneio.headJudge] || "Sem head judge"}
+            </Text>
+
+            {/* Botão para abrir outro modal com Inscrições e Decks */}
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 20 }]}
+              onPress={() => openInscricoesModal(detalhesTorneio)}
+            >
+              <Text style={styles.buttonText}>Ver Inscrições/Decks</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
+              onPress={closeDetalhes}
+            >
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  // -------------- Sub-modal para mostrar INSCRIÇÕES E DECKS --------------
+  function renderInscricoesModal() {
+    return (
+      <Modal
+        visible={inscricoesModalVisible}
+        animationType="slide"
+        onRequestClose={closeInscricoesModal}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>Inscrições / Decks</Text>
+
+            {inscricoes.length === 0 ? (
+              <Text style={{ color: "#ccc", marginVertical: 10 }}>
+                Nenhuma inscrição encontrada.
+              </Text>
+            ) : (
+              inscricoes.map((ins, idx) => (
+                <TouchableOpacity
+                  key={`ins-${idx}`}
+                  style={styles.inscricaoItem}
+                  onPress={() =>
+                    ins.deckId
+                      ? (setSelectedDeckIdForPdf(ins.deckId),
+                        loadDeckCards(ins.deckId),
+                        setDeckPdfModalVisible(true))
+                      : null
+                  }
+                >
+                  <Text style={styles.inscricaoItemText}>
+                    Jogador: {playerNameMap[ins.userId] || ins.userId}
+                  </Text>
+                  <Text style={styles.inscricaoItemText}>
+                    Deck:{" "}
+                    {ins.deckId
+                      ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})`
+                      : "Sem deck"}
+                  </Text>
+                  <Text style={styles.inscricaoItemText}>
+                    Data/Hora: {formatIsoDate(ins.createdAt)}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            )}
+
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 20 }]}
+              onPress={closeInscricoesModal}
+            >
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  // --------------------------------- RENDER FINAL ---------------------------------
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Cabeçalho: Troca de mês */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handlePrevMonth}>
           <Text style={styles.headerButton}>{"<"}</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{monthDisplay}</Text>
+        <Text style={styles.headerTitle}>
+          {currentMonth.format("MMMM [de] YYYY")}
+        </Text>
         <TouchableOpacity onPress={handleNextMonth}>
           <Text style={styles.headerButton}>{">"}</Text>
         </TouchableOpacity>
       </View>
 
+      {/* Se for Host, exibe botão de Criar Torneio */}
       {isHost && (
         <TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
           <Text style={styles.createButtonText}>+ Criar Torneio</Text>
         </TouchableOpacity>
       )}
 
+      {/* Lista de torneios */}
       <ScrollView style={{ flex: 1, marginTop: 10 }}>
         {torneios.map((t) => renderCard(t))}
       </ScrollView>
 
-      {/* Modal CRIAR/EDITAR TORN. */}
+      {/* Modal: CRIAR/EDITAR TORNEIO */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -892,13 +943,26 @@ export default function CalendarScreen() {
               onChangeText={setEditTime}
             />
 
+            <Text style={styles.modalLabel}>Tipo de Evento</Text>
+            <Picker
+              selectedValue={editEventType}
+              onValueChange={(v) => setEditEventType(v)}
+              style={[styles.modalInput, { color: "#fff" }]}
+            >
+              <Picker.Item label="Cup" value="Cup" />
+              <Picker.Item label="Challenger" value="Challenger" />
+              <Picker.Item label="Pre-release" value="Pre-release" />
+              <Picker.Item label="Liguinha" value="Liguinha" />
+              <Picker.Item label="Evento Especial" value="Evento Especial" />
+            </Picker>
+
             <Text style={styles.modalLabel}>Juiz</Text>
             <Picker
               selectedValue={editJudge}
               onValueChange={(v) => setEditJudge(v)}
               style={[styles.modalInput, { color: "#fff" }]}
             >
-              <Picker.Item label="Selecione..." value="" />
+              <Picker.Item label="Nenhum (Player comum)" value="" />
               {judgeOptions.map((j) => (
                 <Picker.Item
                   key={`judge-${j.userId}`}
@@ -914,7 +978,7 @@ export default function CalendarScreen() {
               onValueChange={(v) => setEditHeadJudge(v)}
               style={[styles.modalInput, { color: "#fff" }]}
             >
-              <Picker.Item label="Selecione..." value="" />
+              <Picker.Item label="Nenhum" value="" />
               {headJudgeOptions.map((hj) => (
                 <Picker.Item
                   key={`headjudge-${hj.userId}`}
@@ -931,10 +995,7 @@ export default function CalendarScreen() {
               >
                 <Text style={styles.buttonText}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.button}
-                onPress={handleSaveTorneio}
-              >
+              <TouchableOpacity style={styles.button} onPress={handleSaveTorneio}>
                 <Text style={styles.buttonText}>Salvar</Text>
               </TouchableOpacity>
             </View>
@@ -942,13 +1003,16 @@ export default function CalendarScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* Modal DETALHES (Host) */}
-      {renderDetalhesModal()}
+      {/* Modal DETALHES (host/juiz) */}
+      {detalhesModalVisible && renderDetalhesModal()}
+
+      {/* Sub-modal INSCRIÇÕES / DECKS (mais otimizado) */}
+      {renderInscricoesModal()}
 
       {/* Sub-modal do PDF do deck */}
       {renderDeckPdfModal()}
 
-      {/* Modal Inscrição c/ deck */}
+      {/* Modal INSCRIÇÃO (Deck) */}
       <Modal
         visible={inscricaoModalVisible}
         animationType="slide"
@@ -972,7 +1036,7 @@ export default function CalendarScreen() {
                 onPress={() => setSelectedDeckId(dk.id)}
               >
                 <Text style={styles.deckOptionText}>
-                  Jogador: {dk.playerId} | Deck: {dk.name}
+                  {dk.playerId} | {dk.name}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -984,10 +1048,7 @@ export default function CalendarScreen() {
               >
                 <Text style={styles.buttonText}>Cancelar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.button}
-                onPress={handleSalvarInscricao}
-              >
+              <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
                 <Text style={styles.buttonText}>Enviar</Text>
               </TouchableOpacity>
             </View>
@@ -1118,17 +1179,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   buttonText: {
-    color: SECONDARY,
-    fontWeight: "bold",
-  },
-  tabButton: {
-    backgroundColor: "#444",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 6,
-    marginHorizontal: 4,
-  },
-  tabButtonText: {
     color: SECONDARY,
     fontWeight: "bold",
   },

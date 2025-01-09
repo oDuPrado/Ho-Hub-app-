@@ -3,8 +3,8 @@ import { collection, doc, getDoc } from "firebase/firestore";
 import { db } from "../lib/firebaseConfig";
 
 // Listas estáticas de playerId
-export const HOST_PLAYER_IDS = ["4893989", "1234567"];
-export const JUDGE_PLAYER_IDS = ["4893989", "2345678"];
+export const HOST_PLAYER_IDS = ["4893989", "2289116"];
+export const JUDGE_PLAYER_IDS = ["4893989", "2289116"];
 export const HEAD_JUDGE_PLAYER_IDS = ["3456789", "4567890"];
 
 /**
