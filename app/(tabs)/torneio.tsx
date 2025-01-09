@@ -1,5 +1,4 @@
 // app/(tabs)/torneio.tsx
-
 import React, { useEffect, useState, useRef } from "react";
 import {
   View,
@@ -17,6 +16,20 @@ import { useRouter } from "expo-router";
 // Expo Notifications
 import * as Notifications from "expo-notifications";
 
+// Configura como as notificações serão tratadas mesmo em segundo plano
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,    // exibe banner/alerta
+    shouldPlaySound: true,    // reproduz som
+    shouldSetBadge: false,    // não altera badge
+  }),
+});
+
+/**
+ * Componente principal da tela de Torneio.
+ * Faz polling no servidor a cada 10s p/ descobrir se há nova rodada,
+ * notifica o jogador se surgir uma nova e exibe dados básicos (mesa, oponente).
+ */
 export default function TorneioScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -27,14 +40,17 @@ export default function TorneioScreen() {
   const [linkReport, setLinkReport] = useState<string | null>(null);
   const [opponentName, setOpponentName] = useState<string | null>(null);
 
-  const intervalRef = useRef<any>(null); // Para limpar o setInterval
+  // Para controlar o polling
+  const intervalRef = useRef<any>(null);
   const [fetchCount, setFetchCount] = useState(0);
 
+  // -------------------------------------------------
+  // Efeito inicial: p/ pedir permissões e iniciar poll
+  // -------------------------------------------------
   useEffect(() => {
-    // Solicita permissões para notificações ao montar
     requestNotificationPermission();
 
-    // Primeiro fetch imediato
+    // Faz o primeiro fetch imediato
     fetchTournamentData();
 
     // Polling a cada 10 segundos
@@ -49,12 +65,17 @@ export default function TorneioScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---------------------------------------------
+  // Efeito: toda vez que fetchCount mudar, refaz fetch
+  // ---------------------------------------------
   useEffect(() => {
-    // Sempre que fetchCount mudar, faz um fetch
     fetchTournamentData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchCount]);
 
+  // -------------------------
+  // Pedir permissão de notificação
+  // -------------------------
   async function requestNotificationPermission() {
     try {
       const { status: existingStatus } =
@@ -72,6 +93,9 @@ export default function TorneioScreen() {
     }
   }
 
+  // -------------------------
+  // fetchTournamentData: busca dados do servidor (main_2)
+  // -------------------------
   async function fetchTournamentData() {
     try {
       setLoading(true);
@@ -144,7 +168,7 @@ export default function TorneioScreen() {
 
       // Dispara notificação somente se a mesa foi encontrada
       if (foundMesa) {
-        await checkRoundAndNotify(maxRound);
+        await checkRoundAndNotify(maxRound, foundMesa, foundOpponent);
       }
 
       setLoading(false);
@@ -154,19 +178,30 @@ export default function TorneioScreen() {
     }
   }
 
-  /** Checa se esse round é novo e dispara notificação apenas 1x */
-  async function checkRoundAndNotify(rnd: number) {
+  // -------------------------------------------------
+  // checkRoundAndNotify: compara round com o local e notifica se novo
+  // -------------------------------------------------
+  async function checkRoundAndNotify(
+    rnd: number,
+    mesa: string,
+    oppName: string | null
+  ) {
     try {
       // Lê round notificado anteriormente
       const storedRound = await AsyncStorage.getItem("@lastNotifiedRound");
       const lastNotifiedRound = storedRound ? parseInt(storedRound, 10) : 0;
 
       if (rnd > lastNotifiedRound) {
-        // Notifica
+        // Notifica com estilo e cores do projeto
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: `Nova Rodada: ${rnd}`,
-            body: `Você está na Mesa ${mesaNumber}. Boa sorte!`,
+            title: `Rodada Lançada! (Rodada ${rnd})`,
+            body: oppName
+              ? `Você está na mesa ${mesa}, enfrentando ${oppName}. Boa sorte!`
+              : `Você está na mesa ${mesa}. Boa sorte!`,
+            // Em Android, podemos forçar cor do LED / smallIcon etc. se desejar
+            // "color" define a cor do ícone em alguns launchers
+            data: { screen: "TorneioScreen" }, // Ao clicar, abre o app nessa tela
           },
           trigger: null, // dispara imediatamente
         });
@@ -178,6 +213,9 @@ export default function TorneioScreen() {
     }
   }
 
+  // -------------------------
+  // handleOpenReport: abre link da mesa p/ report
+  // -------------------------
   function handleOpenReport() {
     if (!linkReport) {
       Alert.alert("Aviso", "Não foi encontrada uma mesa para você.");
@@ -189,6 +227,9 @@ export default function TorneioScreen() {
     });
   }
 
+  // -------------------------
+  // Render principal
+  // -------------------------
   if (loading) {
     return (
       <View style={styles.loader}>
@@ -232,7 +273,8 @@ export default function TorneioScreen() {
   );
 }
 
-const RED = "#E3350D"; // Vermelho intenso
+// -------------------- ESTILOS --------------------
+const RED = "#E3350D"; // Vermelho intenso do projeto
 const BLACK = "#1E1E1E"; // Fundo escuro
 const WHITE = "#FFFFFF"; // Texto claro
 const DARK_GRAY = "#292929"; // Fundo dos cards
@@ -288,22 +330,5 @@ const styles = StyleSheet.create({
   actions: {
     marginVertical: 20,
     alignItems: "center",
-  },
-  button: {
-    backgroundColor: RED,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  buttonText: {
-    color: WHITE,
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
   },
 });
