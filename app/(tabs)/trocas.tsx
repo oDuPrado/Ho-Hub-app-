@@ -110,7 +110,7 @@ export default function UserTradeFeed() {
     if (post.interested.length > 0) {
       try {
         for (const playerId of post.interested) {
-          const userDocRef = doc(db, "users", playerId); // Ajuste conforme a estrutura da sua coleção de usuários
+          const userDocRef = doc(db, "players", playerId); // Ajuste conforme a estrutura da sua coleção de usuários
           const userDoc = await getDoc(userDocRef);
           if (userDoc.exists()) {
             interestedNames.push(userDoc.data().name || "Desconhecido");
