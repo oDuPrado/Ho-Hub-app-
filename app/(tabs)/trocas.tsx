@@ -18,6 +18,7 @@ import {
   doc,
   onSnapshot,
   deleteDoc,
+  getDoc,
   updateDoc,
   arrayUnion,
 } from "firebase/firestore";
@@ -103,10 +104,30 @@ export default function UserTradeFeed() {
     });
   }
 
-  function openDetailModal(post: TradePost) {
-    setDetailPost(post);
+  async function openDetailModal(post: TradePost) {
+    const interestedNames: string[] = [];
+  
+    if (post.interested.length > 0) {
+      try {
+        for (const playerId of post.interested) {
+          const userDocRef = doc(db, "users", playerId); // Ajuste conforme a estrutura da sua coleção de usuários
+          const userDoc = await getDoc(userDocRef);
+          if (userDoc.exists()) {
+            interestedNames.push(userDoc.data().name || "Desconhecido");
+          } else {
+            interestedNames.push("Desconhecido");
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao buscar nomes dos interessados:", err);
+      }
+    }
+  
+    // Atualiza o post com os nomes dos interessados
+    setDetailPost({ ...post, interested: interestedNames });
     setDetailModalVisible(true);
   }
+  
   function closeDetailModal() {
     setDetailPost(null);
     setDetailModalVisible(false);
