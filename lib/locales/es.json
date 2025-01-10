@@ -1,0 +1,258 @@
+{
+    "login": {
+        "title_login": "Iniciar Sesión",
+        "title_signup": "Registrarse",
+        "email_label": "Correo Electrónico",
+        "email_placeholder": "tucorreo@ejemplo.com",
+        "password_label": "Contraseña",
+        "password_placeholder": "Introduce tu contraseña",
+        "forgot_password": "¿Olvidaste tu Contraseña?",
+        "password_strength": "Fortaleza de la contraseña: {{strength}}",
+        "player_name_label": "Nombre del Jugador",
+        "player_name_placeholder": "Ej: Ash Ketchum",
+        "player_id_label": "ID del Jugador",
+        "player_id_placeholder": "Ej: 5062577",
+        "pin_label": "PIN",
+        "pin_placeholder": "****",
+        "stay_logged": "Mantenerme Conectado (próximamente)",
+        "signup_button": "Registrarse",
+        "login_button": "Iniciar Sesión",
+        "link_to_login": "¿Ya tienes cuenta? Inicia Sesión Aquí",
+        "link_to_signup": "¿No tienes cuenta? Regístrate",
+        "loading": "Cargando...",
+        "alerts": {
+            "welcome": "Bienvenido",
+            "empty_fields": "Completa todos los campos (Nombre, Correo Electrónico, Contraseña, ID y PIN).",
+            "invalid_email": "Correo Electrónico inválido.",
+            "weak_password": "Tu contraseña debe tener al menos 1 mayúscula, 1 minúscula, 1 número, 1 carácter especial y 8 caracteres.",
+            "signup_success": "Cuenta creada. ID={{playerId}}, PIN={{pin}}",
+            "signup_error": "Error al registrarse. {{error}}",
+            "login_error": "Error al iniciar sesión. {{error}}",
+            "wrong_password": "Contraseña incorrecta. Intenta de nuevo.",
+            "user_not_found": "Usuario no encontrado. Verifica el correo.",
+            "password_reset_sent": "Se ha enviado un enlace para restablecer la contraseña a tu correo.",
+            "password_reset_error": "Error al enviar el restablecimiento de contraseña: {{error}}",
+            "incomplete_account": "Tu inicio de sesión no tiene datos de playerId/PIN. Cuenta incompleta.",
+            "missing_data": "Documento sin playerId/PIN. Contacta al soporte."
+        }
+    },
+    "drawer": {
+        "home": "Inicio",
+        "calendario": "Calendario",
+        "torneio": "Torneo",
+        "noticias": "Noticias",
+        "iapikachu": "PikachuIA",
+        "cartas": "Cartas",
+        "trocas": "Intercambios",
+        "decks": "Mazos",
+        "jogador": "Jugador",
+        "sugestao": "Sugerencia"
+    },
+    "analytics": {
+        "welcome_messages": [
+            "¡Hola, Entrenador! ¿Listo para mejorar tus habilidades?",
+            "¡Bienvenido de nuevo, maestro de batallas!",
+            "¿Qué tal, campeón? ¡Vamos a fortalecer ese mazo aún más!",
+            "¡Saludos, Entrenador! Soy PikachuIA."
+        ],
+        "loading": "Cargando estadísticas...",
+        "error_loading": "Error al cargar las estadísticas.",
+        "generate_tip": "Generar Nuevo Consejo",
+        "ai_card_title": "Consejos de IA",
+        "block_message": "¡Hey, calma! ¡Estás entrenando más que un Machamp en el gimnasio! ¿Qué tal un descanso de 10 minutos?",
+        "ai_name": "PikachuIA",
+        "alerts": {
+            "player_id_error": "No se pudo obtener el ID del Jugador.",
+            "pause_message": "¡Hey, calma! ¿Qué tal un descanso de 10 minutos antes de generar más consejos?",
+            "no_tips_available": "¡Sigue jugando y mejorando tus habilidades!"
+        },
+        "generic_tips": [
+            "Recuerda: cada carta en tu mazo tiene un propósito. ¡Conócelas bien!",
+            "La práctica hace al maestro. ¡Sigue entrenando tus estrategias!",
+            "Estudia el meta actual para adaptar tu mazo a las tendencias.",
+            "La paciencia es una virtud. Espera el momento adecuado para jugar esa carta decisiva.",
+            "Conoce no solo tus cartas, sino también las posibles jugadas de tu oponente.",
+            "Nunca subestimes a un entrenador con un Pikachu en el banco. ¡Pequeños comienzos pueden tener grandes finales eléctricos!",
+            "Las cartas de energía son la base de cualquier mazo. ¡Asegúrate de que el equilibrio sea el correcto!"
+        ],
+        "conditional_tips": {
+            "more_wins": [
+                "¡Tu desempeño es excelente! Considera participar en torneos en línea para poner a prueba tus habilidades.",
+                "Con una alta tasa de victorias, estás en el camino correcto para convertirte en un campeón."
+            ],
+            "more_losses": [
+                "¡No te rindas! Revisa tus estrategias y estudia el meta actual.",
+                "Identifica los tipos de Pokémon que te causan más problemas y ajusta tu mazo para contrarrestarlos."
+            ],
+            "more_draws": [
+                "¿Muchos empates? Podría ser momento de ajustar tu estrategia para lograr victorias más consistentes.",
+                "Considera cartas que brinden un finalizador fuerte para evitar empates frecuentes."
+            ]
+        }
+    },
+    "calendar": {
+        "header": {
+            "prev_month": "<",
+            "next_month": ">",
+            "title": "{{month}} de {{year}}"
+        },
+        "create_tournament": "+ Crear Torneo",
+        "form": {
+            "name_label": "Nombre",
+            "date_label": "Fecha (DD/MM/AAAA)",
+            "time_label": "Hora (HH:mm)",
+            "event_type_label": "Tipo de Evento",
+            "judge_label": "Juez",
+            "head_judge_label": "Juez Principal",
+            "cancel_button": "Cancelar",
+            "save_button": "Guardar"
+        },
+        "event_types": {
+            "cup": "Copa",
+            "challenger": "Desafío",
+            "pre_release": "Pre-lanzamiento",
+            "liguinha": "Liga",
+            "special_event": "Evento Especial"
+        },
+        "alerts": {
+            "name_required": "El nombre del torneo no puede estar vacío.",
+            "invalid_date": "Fecha inválida (usa DD/MM/AAAA).",
+            "save_error": "Error al guardar el torneo.",
+            "delete_confirm": "¿Eliminar el torneo {{name}}?",
+            "delete_error": "Error al eliminar el torneo.",
+            "success_registration": "¡Inscripción realizada con éxito!",
+            "registration_error": "Error al inscribirse."
+        },
+        "details": {
+            "title": "Detalles del Torneo",
+            "name_label": "Nombre",
+            "date_label": "Fecha",
+            "time_label": "Hora",
+            "event_type_label": "Tipo de Evento",
+            "judge_label": "Juez",
+            "head_judge_label": "Juez Principal",
+            "view_inscriptions_button": "Ver Inscripciones/Mazos",
+            "close_button": "Cerrar"
+        },
+        "registration": {
+            "title": "Elige tu Mazo",
+            "no_decks": "(Ningún mazo registrado)",
+            "submit_button": "Enviar"
+        },
+        "card": {
+            "creator_label": "Creador",
+            "judge_label": "Juez",
+            "head_judge_label": "Juez Principal",
+            "details_button": "Ver Detalles",
+            "register_button": "Inscribirse",
+            "already_occurred": "Ya ocurrió"
+        }
+    },
+    "noticias": {
+        "header": "Noticias de Pokémon TCG",
+        "loading": "Cargando noticias...",
+        "error": "No se pudieron cargar las noticias.",
+        "retry": "Intentar de Nuevo",
+        "details": {
+            "source": "Fuente",
+            "date": "Fecha",
+            "description": "Descripción",
+            "link_error": "No se pudo abrir el enlace."
+        }
+    },
+    "sugestao": {
+        "header": "Sugerencias",
+        "labels": {
+            "subject": "Asunto",
+            "message": "Mensaje"
+        },
+        "placeholders": {
+            "subject": "Introduce el asunto",
+            "message": "Introduce tu sugerencia"
+        },
+        "buttons": {
+            "send": "Enviar"
+        },
+        "warnings": {
+            "daily_limit": "Solo puedes enviar una sugerencia por día.",
+            "empty_message": "El mensaje no puede estar vacío."
+        },
+        "success": "¡Sugerencia enviada con éxito!",
+        "error": "No se pudo enviar tu sugerencia."
+    },
+    "trocas": {
+        "header": "Intercambios/Ventas",
+        "filters": {
+            "all": "Todos",
+            "trade": "Intercambio",
+            "sale": "Venta",
+            "want": "Quiero"
+        },
+        "placeholders": {
+            "search": "Buscar carta..."
+        },
+        "messages": {
+            "no_results": "No se encontraron cartas."
+        }
+    },
+    "home": {
+        "welcome": "¡Bienvenido, {{username}}!",
+        "stats": {
+            "wins": "Victorias",
+            "losses": "Derrotas",
+            "draws": "Empates",
+            "total_matches": "Partidas Totales",
+            "rival": "Rival Principal"
+        },
+        "buttons": {
+            "logout": "Cerrar Sesión"
+        },
+        "alerts": {
+            "loading": "Cargando estadísticas..."
+        }
+    },
+    "jogador": {
+        "header": "Perfil del Jugador",
+        "stats": {
+            "wins": "Victorias",
+            "losses": "Derrotas",
+            "draws": "Empates",
+            "unique_opponents": "Oponentes Únicos"
+        },
+        "titles": {
+            "unlocked": "Títulos Desbloqueados"
+        },
+        "buttons": {
+            "view_history": "Ver Historial",
+            "search_player": "Buscar Jugador"
+        }
+    },
+    "decks": {
+        "header": "Gestión de Mazos",
+        "buttons": {
+            "create": "Crear Mazo",
+            "edit": "Editar",
+            "delete": "Eliminar"
+        },
+        "labels": {
+            "name": "Nombre del Mazo"
+        },
+        "alerts": {
+            "delete_confirm": "¿Estás seguro de que quieres eliminar este mazo?",
+            "delete_success": "¡Mazo eliminado con éxito!"
+        }
+    },
+    "cartas": {
+        "header": "Búsqueda de Cartas",
+        "placeholders": {
+            "search": "Busca por nombre o código..."
+        },
+        "buttons": {
+            "have": "Tengo",
+            "want": "Quiero"
+        },
+        "alerts": {
+            "no_results": "No se encontraron resultados."
+        }
+    }
+}
