@@ -19,7 +19,9 @@ import {
 } from "react-native";
 import * as Updates from "expo-updates";
 
-// Prevenção da splash screen
+// ==> Importamos o i18n para que seja inicializado antes de tudo
+import "../i18n";
+
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
@@ -52,7 +54,7 @@ export default function RootLayout() {
       if (update.isAvailable) {
         setUpdateMessage("Atualização disponível!");
         console.log("Atualização disponível. Baixando...");
-        setUpdateAvailable(true); // Indica que há uma atualização disponível
+        setUpdateAvailable(true);
 
         const downloadProgress = Updates.fetchUpdateAsync();
 
@@ -61,12 +63,12 @@ export default function RootLayout() {
 
         downloadProgress.then(() => {
           console.log("Atualização baixada com sucesso!");
-          setUpdateMessage(null); // Esconde a mensagem de progresso
-          setShowModal(true); // Mostra o modal
+          setUpdateMessage(null);
+          setShowModal(true);
         });
       } else {
         console.log("Nenhuma atualização disponível.");
-        setUpdateMessage(null); // Remove mensagem se não há atualização
+        setUpdateMessage(null);
       }
     } catch (error) {
       console.error("Erro ao verificar atualizações: ", error);
@@ -87,7 +89,7 @@ export default function RootLayout() {
   }
 
   const handleApplyUpdate = async () => {
-    setShowModal(false); // Fecha o modal antes de reiniciar
+    setShowModal(false);
     await Updates.reloadAsync();
   };
 
@@ -101,7 +103,6 @@ export default function RootLayout() {
         {updateMessage && (
           <View style={styles.updateContainer}>
             <Text style={styles.updateText}>{updateMessage}</Text>
-
             {updateAvailable && (
               <View style={styles.progressBar}>
                 <View
@@ -144,16 +145,9 @@ export default function RootLayout() {
         </Modal>
 
         <Stack initialRouteName="index">
-          {/* Rota raiz */}
           <Stack.Screen name="index" options={{ headerShown: false }} />
-
-          {/* Tela de login */}
           <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
-
-          {/* Abas */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-
-          {/* Not found */}
           <Stack.Screen name="+not-found" />
         </Stack>
       </View>

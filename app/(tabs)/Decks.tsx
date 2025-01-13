@@ -28,10 +28,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../../lib/firebaseConfig";
 import "react-native-get-random-values";
 import { v4 as uuidv4 } from "uuid";
+import { useTranslation } from "react-i18next"; // <--- i18n
 
-// ------------------------------------------------
-// Tipos
-// ------------------------------------------------
 interface CardLine {
   _tempId: string;
   quantity: number;
@@ -48,8 +46,10 @@ interface DeckData {
   energies: CardLine[];
 }
 
-// ------------------------------------------------
 export default function DecksScreen() {
+  const router = useRouter();
+  const { t } = useTranslation(); // <--- i18n
+
   const [deckName, setDeckName] = useState("");
   const [deckContent, setDeckContent] = useState("");
 
@@ -64,24 +64,21 @@ export default function DecksScreen() {
   const [editPokemons, setEditPokemons] = useState<CardLine[]>([]);
   const [editTrainers, setEditTrainers] = useState<CardLine[]>([]);
   const [editEnergies, setEditEnergies] = useState<CardLine[]>([]);
-  const router = useRouter();
-  const currentDeckName = deckName; // Supondo que o objeto deck contém o nome
 
-  // Função para calcular o total de cartas em um array de CardLine[]
+  // --------------------------------------------
+  // Função para calcular total de cartas em CardLine[]
+  // --------------------------------------------
   const calculateTotalFromCards = (cards: CardLine[]): number => {
     return cards.reduce((sum, card) => sum + card.quantity, 0);
   };
 
-  // ------------------------------------------------
+  // --------------------------------------------
   // Efeito: Pega UID do auth e playerId do AsyncStorage
-  // ------------------------------------------------
+  // --------------------------------------------
   useEffect(() => {
     const user = auth.currentUser;
     if (user?.uid) {
       setAuthUid(user.uid);
-      console.log("authUid detectado:", user.uid);
-    } else {
-      console.log("Nenhum authUid detectado. user:", user);
     }
 
     (async () => {
@@ -89,9 +86,6 @@ export default function DecksScreen() {
         const storedPlayerId = await AsyncStorage.getItem("@userId");
         if (storedPlayerId) {
           setPlayerId(storedPlayerId);
-          console.log("playerId (AsyncStorage) =", storedPlayerId);
-        } else {
-          console.log("Nenhum @userId encontrado no AsyncStorage.");
         }
       } catch (err) {
         console.log("Erro ao obter @userId do AsyncStorage", err);
@@ -99,13 +93,11 @@ export default function DecksScreen() {
     })();
   }, []);
 
-  // ------------------------------------------------
+  // --------------------------------------------
   // Efeito: onSnapshot p/ decks
-  // ------------------------------------------------
+  // --------------------------------------------
   useEffect(() => {
-    if (!playerId) return; // Se o playerId não existir, não faz a busca
-
-    console.log("Iniciando onSnapshot de decks para playerId =", playerId);
+    if (!playerId) return;
 
     const decksRef = collection(db, "decks");
     const q = query(decksRef, where("playerId", "==", playerId));
@@ -125,19 +117,15 @@ export default function DecksScreen() {
           });
         });
         setDecks(newDecks);
-        console.log("Decks atualizados. total =", newDecks.length);
       },
       (error) => {
         console.log("Erro no onSnapshot decks:", error);
       }
     );
 
-    return () => unsubscribe(); // Para de ouvir as mudanças ao desmontar o componente
-  }, [playerId]); // O playerId é o gatilho para essa query
+    return () => unsubscribe();
+  }, [playerId]);
 
-  // ------------------------------------------------
-  // Converte array do Firestore p/ CardLine
-  // ------------------------------------------------
   function convertFirestoreToCardLines(arr?: any[]): CardLine[] {
     if (!arr) return [];
     return arr.map((item) => ({
@@ -149,9 +137,9 @@ export default function DecksScreen() {
     }));
   }
 
-  // ------------------------------------------------
+  // --------------------------------------------
   // parseDeckContent
-  // ------------------------------------------------
+  // --------------------------------------------
   function parseDeckContent(content: string) {
     const lines = content.split("\n").map((l) => l.trim());
     const pokemons: CardLine[] = [];
@@ -179,7 +167,6 @@ export default function DecksScreen() {
       }
 
       if (!currentBlock) {
-        // caso não tenha bloco definido, ignore a linha
         continue;
       }
 
@@ -195,9 +182,6 @@ export default function DecksScreen() {
     return { pokemons, trainers, energies };
   }
 
-  // ------------------------------------------------
-  // parseSingleLine (ex.: "1 Togepi SSP 70")
-  // ------------------------------------------------
   function parseSingleLine(line: string): CardLine {
     const tokens = line.split(" ").filter(Boolean);
     let quantity = 1;
@@ -205,7 +189,6 @@ export default function DecksScreen() {
     let cardNumber: string | null = null;
     let nameParts: string[] = [];
 
-    // Tenta quantity no primeiro token
     const first = tokens[0];
     const qNum = parseInt(first ?? "");
     let startIndex = 0;
@@ -217,10 +200,9 @@ export default function DecksScreen() {
     let i = startIndex;
     while (i < tokens.length) {
       const t = tokens[i];
-      const reg3letters = /^[A-Z]{3}$/; // 3 letras maiúsculas
+      const reg3letters = /^[A-Z]{3}$/;
       if (reg3letters.test(t)) {
         expansion = t;
-        // Verifica se o próximo token é número
         if (i + 1 < tokens.length) {
           const nextTok = tokens[i + 1];
           const nextNum = parseInt(nextTok);
@@ -254,73 +236,54 @@ export default function DecksScreen() {
     };
   }
 
-  // ------------------------------------------------
-  // sanitizeCardLines
-  // ------------------------------------------------
   function sanitizeCardLines(lines: CardLine[]): CardLine[] {
     return lines.map((c) => ({
       ...c,
-      quantity: c.quantity && c.quantity > 0 ? c.quantity : 1,
+      quantity: c.quantity > 0 ? c.quantity : 1,
       name: c.name || "",
     }));
   }
 
-  // ------------------------------------------------
+  // --------------------------------------------
   // handleCreateDeck
-  // ------------------------------------------------
+  // --------------------------------------------
   async function handleCreateDeck() {
-    console.log("handleCreateDeck disparado...");
-    console.log("authUid:", authUid);
-    console.log("deckName:", deckName.trim());
-    console.log("deckContent:", deckContent);
-
     if (!authUid) {
-      Alert.alert("Erro", "authUid ausente ou não logado como anônimo.");
+      Alert.alert(t("common.error"), "authUid ausente ou não logado.");
       return;
     }
     if (!deckName.trim()) {
-      Alert.alert("Erro", "Informe um nome para o deck.");
+      Alert.alert(t("common.error"), t("decks.label_name"));
       return;
     }
 
     const parsed = parseDeckContent(deckContent);
-    console.log("resultado parseDeckContent = ", parsed);
     const { pokemons, trainers, energies } = parsed;
 
     const safePokemons = sanitizeCardLines(pokemons);
     const safeTrainers = sanitizeCardLines(trainers);
     const safeEnergies = sanitizeCardLines(energies);
 
-    // Se TUDO veio vazio, não cria
     if (
       safePokemons.length === 0 &&
       safeTrainers.length === 0 &&
       safeEnergies.length === 0
     ) {
-      Alert.alert(
-        "Erro",
-        "Nenhuma carta detectada. Verifique se há blocos 'Pokémon:', 'Treinador:' ou 'Energia:'"
-      );
+      Alert.alert(t("common.error"), t("decks.no_cards_detected"));
       return;
     }
-
-    // Se tiver quantity < 1
     if (
       [...safePokemons, ...safeTrainers, ...safeEnergies].some(
         (c) => c.quantity < 1
       )
     ) {
-      Alert.alert(
-        "Erro",
-        "Alguma carta está com quantity < 1. Corrija antes de criar."
-      );
+      Alert.alert(t("common.error"), t("decks.invalid_quantity"));
       return;
     }
 
     try {
-      console.log("Tentando addDoc() em /decks ...");
       const decksRef = collection(db, "decks");
-      const docRef = await addDoc(decksRef, {
+      await addDoc(decksRef, {
         authUid,
         playerId: playerId ?? "",
         name: deckName.trim(),
@@ -344,67 +307,47 @@ export default function DecksScreen() {
           cardNumber: c.cardNumber || null,
         })),
       });
-      console.log("Deck criado docId =", docRef.id);
-      Alert.alert("Sucesso", "Deck criado com sucesso!");
+      Alert.alert(t("common.success"), t("decks.create_success"));
       setDeckName("");
       setDeckContent("");
     } catch (err) {
       console.log("Erro ao criar deck:", err);
-      Alert.alert(
-        "Erro",
-        "Falha ao criar deck. Verifique as regras do Firestore e logs."
-      );
+      Alert.alert(t("common.error"), t("decks.create_error"));
     }
   }
-  // ------------------------------------------------
-  // DeleteDeck
-  // ------------------------------------------------
-  async function handleDeleteDeck(deckId: string) {
-    try {
-      console.log("Tentando excluir deck com ID:", deckId);
 
-      // Obter referência ao documento no Firestore
+  // --------------------------------------------
+  // handleDeleteDeck
+  // --------------------------------------------
+  async function handleDeleteDeck(deckId: string, deckNameToShow: string) {
+    try {
       const deckRef = doc(db, "decks", deckId);
       const deckSnap = await getDoc(deckRef);
 
       if (!deckSnap.exists()) {
-        Alert.alert("Erro", "Deck não encontrado.");
-        console.log("Deck não encontrado no Firestore.");
+        Alert.alert(t("common.error"), "Deck não encontrado.");
         return;
       }
 
-      // Obter dados do documento
       const deckData = deckSnap.data();
-      console.log("Dados do deck:", deckData);
-
-      // Verificar se o playerId no documento corresponde ao playerId do frontend
-      console.log("Player ID no documento:", deckData?.playerId);
-      console.log("Player ID no frontend (AsyncStorage):", playerId);
-
       if (deckData.playerId !== playerId) {
-        Alert.alert("Erro", "Você não tem permissão para excluir este deck.");
-        console.log(
-          `Permissão negada: playerId no documento (${deckData.playerId}) não corresponde ao playerId do frontend (${playerId}).`
-        );
+        Alert.alert(t("common.error"), "Você não tem permissão.");
         return;
       }
 
-      // Excluir o deck
       await deleteDoc(deckRef);
-      console.log("Deck excluído com sucesso!");
-      Alert.alert("Sucesso", "Deck excluído com sucesso!");
+      Alert.alert(t("common.success"), t("decks.delete_success"));
 
-      // Atualizar estado local para remover o deck da lista
-      setDecks((prevDecks) => prevDecks.filter((deck) => deck.id !== deckId));
+      setDecks((prevDecks) => prevDecks.filter((d) => d.id !== deckId));
     } catch (err) {
       console.log("Erro ao excluir deck:", err);
-      Alert.alert("Erro", "Falha ao excluir o deck. Tente novamente.");
+      Alert.alert(t("common.error"), t("decks.delete_error"));
     }
   }
 
-  // ------------------------------------------------
+  // --------------------------------------------
   // openEditModal
-  // ------------------------------------------------
+  // --------------------------------------------
   function openEditModal(deck: DeckData) {
     setEditDeckId(deck.id);
     setEditDeckName(deck.name);
@@ -414,9 +357,6 @@ export default function DecksScreen() {
     setModalVisible(true);
   }
 
-  // ------------------------------------------------
-  // addLine
-  // ------------------------------------------------
   function addLine(cat: "POKEMON" | "TRAINER" | "ENERGY") {
     const newCard: CardLine = {
       _tempId: uuidv4(),
@@ -432,9 +372,6 @@ export default function DecksScreen() {
     }
   }
 
-  // ------------------------------------------------
-  // removeLine
-  // ------------------------------------------------
   function removeLine(cat: "POKEMON" | "TRAINER" | "ENERGY", _tempId: string) {
     if (cat === "POKEMON") {
       setEditPokemons((prev) => prev.filter((p) => p._tempId !== _tempId));
@@ -445,18 +382,15 @@ export default function DecksScreen() {
     }
   }
 
-  // ------------------------------------------------
+  // --------------------------------------------
   // handleSaveEdit
-  // ------------------------------------------------
+  // --------------------------------------------
   async function handleSaveEdit() {
     if (!editDeckId) return;
 
     const allCards = [...editPokemons, ...editTrainers, ...editEnergies];
     if (allCards.some((c) => c.quantity < 1)) {
-      Alert.alert(
-        "Erro",
-        "Existe carta com quantity < 1. Ajuste antes de salvar."
-      );
+      Alert.alert(t("common.error"), t("decks.invalid_quantity"));
       return;
     }
 
@@ -487,99 +421,92 @@ export default function DecksScreen() {
           cardNumber: c.cardNumber || null,
         })),
       });
-      Alert.alert("Sucesso", "Deck atualizado!");
+      Alert.alert(t("common.success"), t("decks.update_success"));
       setModalVisible(false);
     } catch (err) {
       console.log("Erro ao atualizar deck:", err);
-      Alert.alert("Erro", "Falha ao atualizar deck.");
+      Alert.alert(t("common.error"), t("decks.update_error"));
     }
   }
 
-  // ------------------------------------------------
+  // --------------------------------------------
   // Render
-  // ------------------------------------------------
+  // --------------------------------------------
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text style={styles.heading}>Meus Decks</Text>
+        <Text style={styles.heading}>{t("decks.heading")}</Text>
 
         <ScrollView style={{ flex: 1 }}>
-          {/* Lista de decks */}
           {decks.map((deck) => (
-            <TouchableOpacity
-              key={`deck-${deck.id}`}
-              style={styles.deckCard}
-              onPress={() => openEditModal(deck)}
-            >
-              <Text style={styles.deckTitle}>{deck.name}</Text>
-              <Text style={styles.deckInfo}>
-                Criado em:{" "}
-                {deck.createdAt
-                  ? new Date(deck.createdAt).toLocaleString()
-                  : "Desconhecido"}
-              </Text>
-              <Text style={styles.deckInfo}>
-                Pokémons: {calculateTotalFromCards(deck.pokemons)} |
-                Treinadores: {calculateTotalFromCards(deck.trainers)} |
-                Energias: {calculateTotalFromCards(deck.energies)} | Total de
-                Cartas:{" "}
-                {calculateTotalFromCards(deck.pokemons) +
-                  calculateTotalFromCards(deck.trainers) +
-                  calculateTotalFromCards(deck.energies)}
-              </Text>
+            <View key={`deck-${deck.id}`} style={styles.deckCard}>
+              <TouchableOpacity onPress={() => openEditModal(deck)}>
+                <Text style={styles.deckTitle}>{deck.name}</Text>
+                <Text style={styles.deckInfo}>
+                  {t("common.close")}:{" "}
+                  {deck.createdAt
+                    ? new Date(deck.createdAt).toLocaleString()
+                    : "Desconhecido"}
+                </Text>
+                <Text style={styles.deckInfo}>
+                  {t("decks.pokemons")}: {calculateTotalFromCards(deck.pokemons)} |{" "}
+                  {t("decks.trainers")}: {calculateTotalFromCards(deck.trainers)} |{" "}
+                  {t("decks.energies")}: {calculateTotalFromCards(deck.energies)} | Total:{" "}
+                  {calculateTotalFromCards(deck.pokemons) +
+                    calculateTotalFromCards(deck.trainers) +
+                    calculateTotalFromCards(deck.energies)}
+                </Text>
+              </TouchableOpacity>
 
-              {/* Botão de exclusão */}
               <TouchableOpacity
                 style={styles.deleteButton}
                 onPress={() =>
                   Alert.alert(
-                    "Confirmação",
-                    `Tem certeza que deseja excluir o deck "${deck.name}"?`,
+                    t("common.confirmation_title"),
+                    t("decks.delete_confirm", { deckName: deck.name }),
                     [
-                      { text: "Cancelar", style: "cancel" },
+                      { text: t("calendar.form.cancel_button"), style: "cancel" },
                       {
-                        text: "Excluir",
+                        text: t("common.delete"),
                         style: "destructive",
-                        onPress: () => handleDeleteDeck(deck.id),
+                        onPress: () => handleDeleteDeck(deck.id, deck.name),
                       },
                     ]
                   )
                 }
               >
-                <Text style={styles.deleteButtonText}>Excluir</Text>
+                <Text style={styles.deleteButtonText}>{t("common.delete")}</Text>
               </TouchableOpacity>
-            </TouchableOpacity>
+            </View>
           ))}
 
           {/* Form p/ criar deck */}
           <View style={styles.form}>
-            <Text style={styles.label}>Nome do Deck</Text>
+            <Text style={styles.label}>{t("decks.label_name")}</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ex: Gholdengo"
+              placeholder={t("decks.placeholder_name") || ""}
               placeholderTextColor="#aaa"
               value={deckName}
               onChangeText={setDeckName}
             />
 
-            <Text style={styles.label}>Lista do Deck (texto)</Text>
-            <Text style={styles.tip}>
-              “Pokémon: X” / “Treinador: Y” / “Energia: Z”...
-            </Text>
+            <Text style={styles.label}>{t("decks.label_deck_list")}</Text>
+            <Text style={styles.tip}>{t("decks.tip_deck_list")}</Text>
             <TextInput
               style={[styles.input, { height: 80 }]}
               multiline
-              placeholder="Pokémon: 10 Togepi... Treinador: 18 Energy Search... Energia: 8 Basic..."
+              placeholder={t("decks.placeholder_deck_list") || ""}
               placeholderTextColor="#aaa"
               value={deckContent}
               onChangeText={setDeckContent}
             />
 
             <TouchableOpacity style={styles.button} onPress={handleCreateDeck}>
-              <Text style={styles.buttonText}>Criar Deck</Text>
+              <Text style={styles.buttonText}>{t("decks.create_button")}</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -593,9 +520,9 @@ export default function DecksScreen() {
       >
         <SafeAreaView style={styles.modalContainer}>
           <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalHeading}>Editar Deck</Text>
+            <Text style={styles.modalHeading}>{t("decks.edit_title")}</Text>
 
-            <Text style={styles.label}>Nome do Deck</Text>
+            <Text style={styles.label}>{t("decks.label_name")}</Text>
             <TextInput
               style={styles.input}
               value={editDeckName}
@@ -603,7 +530,7 @@ export default function DecksScreen() {
             />
 
             {/* Pokémons */}
-            <Text style={styles.sectionTitle}>Pokémons</Text>
+            <Text style={styles.sectionTitle}>{t("decks.pokemons")}</Text>
             {editPokemons.map((card) => (
               <View style={styles.cardLineContainer} key={`pk-${card._tempId}`}>
                 <TextInput
@@ -614,9 +541,7 @@ export default function DecksScreen() {
                     const num = parseInt(val || "") || 0;
                     setEditPokemons((prev) => {
                       const copy = [...prev];
-                      const idx = copy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = copy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         copy[idx].quantity = num;
                       }
@@ -631,9 +556,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditPokemons((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].name = v;
                       }
@@ -648,9 +571,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditPokemons((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].expansion = v === "" ? null : v;
                       }
@@ -665,9 +586,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditPokemons((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].cardNumber = v === "" ? null : v;
                       }
@@ -684,16 +603,15 @@ export default function DecksScreen() {
                 </TouchableOpacity>
               </View>
             ))}
-
             <TouchableOpacity
               style={[styles.buttonSmall, { backgroundColor: "#555" }]}
               onPress={() => addLine("POKEMON")}
             >
-              <Text style={styles.buttonText}>+ Pokémon</Text>
+              <Text style={styles.buttonText}>+ {t("decks.pokemons")}</Text>
             </TouchableOpacity>
 
             {/* Treinadores */}
-            <Text style={styles.sectionTitle}>Treinadores</Text>
+            <Text style={styles.sectionTitle}>{t("decks.trainers")}</Text>
             {editTrainers.map((card) => (
               <View style={styles.cardLineContainer} key={`tr-${card._tempId}`}>
                 <TextInput
@@ -704,9 +622,7 @@ export default function DecksScreen() {
                     const num = parseInt(val || "") || 0;
                     setEditTrainers((prev) => {
                       const copy = [...prev];
-                      const idx = copy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = copy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         copy[idx].quantity = num;
                       }
@@ -721,9 +637,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditTrainers((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].name = v;
                       }
@@ -738,9 +652,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditTrainers((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].expansion = v === "" ? null : v;
                       }
@@ -755,9 +667,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditTrainers((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].cardNumber = v === "" ? null : v;
                       }
@@ -778,11 +688,11 @@ export default function DecksScreen() {
               style={[styles.buttonSmall, { backgroundColor: "#555" }]}
               onPress={() => addLine("TRAINER")}
             >
-              <Text style={styles.buttonText}>+ Treinador</Text>
+              <Text style={styles.buttonText}>+ {t("decks.trainers")}</Text>
             </TouchableOpacity>
 
             {/* Energias */}
-            <Text style={styles.sectionTitle}>Energias</Text>
+            <Text style={styles.sectionTitle}>{t("decks.energies")}</Text>
             {editEnergies.map((card) => (
               <View style={styles.cardLineContainer} key={`en-${card._tempId}`}>
                 <TextInput
@@ -793,9 +703,7 @@ export default function DecksScreen() {
                     const num = parseInt(val || "") || 0;
                     setEditEnergies((prev) => {
                       const copy = [...prev];
-                      const idx = copy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = copy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         copy[idx].quantity = num;
                       }
@@ -810,9 +718,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditEnergies((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].name = v;
                       }
@@ -827,9 +733,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditEnergies((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].expansion = v === "" ? null : v;
                       }
@@ -844,9 +748,7 @@ export default function DecksScreen() {
                   onChangeText={(v) => {
                     setEditEnergies((prev) => {
                       const cpy = [...prev];
-                      const idx = cpy.findIndex(
-                        (x) => x._tempId === card._tempId
-                      );
+                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
                       if (idx >= 0) {
                         cpy[idx].cardNumber = v === "" ? null : v;
                       }
@@ -867,27 +769,7 @@ export default function DecksScreen() {
               style={[styles.buttonSmall, { backgroundColor: "#555" }]}
               onPress={() => addLine("ENERGY")}
             >
-              <Text style={styles.buttonText}>+ Energia</Text>
-            </TouchableOpacity>
-
-            {/* Botão para ver o deck */}
-            <TouchableOpacity
-              style={[
-                styles.buttonSmall,
-                { backgroundColor: "#E3350D", marginTop: 20 },
-              ]}
-              onPress={() => {
-                if (!deckName) {
-                  Alert.alert(
-                    "Erro",
-                    "Por favor, insira ou selecione um deck primeiro."
-                  );
-                  return;
-                }
-                router.push(`/DeckViewer?deck=${deckName}`); // Usa diretamente `deckName`
-              }}
-            >
-              <Text style={styles.buttonText}>Em breve</Text>
+              <Text style={styles.buttonText}>+ {t("decks.energies")}</Text>
             </TouchableOpacity>
 
             <View style={styles.modalButtons}>
@@ -895,11 +777,11 @@ export default function DecksScreen() {
                 style={[styles.button, { backgroundColor: "#999" }]}
                 onPress={() => setModalVisible(false)}
               >
-                <Text style={styles.buttonText}>Cancelar</Text>
+                <Text style={styles.buttonText}>{t("calendar.form.cancel_button")}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.button} onPress={handleSaveEdit}>
-                <Text style={styles.buttonText}>Salvar</Text>
+                <Text style={styles.buttonText}>{t("calendar.form.save_button")}</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -909,9 +791,7 @@ export default function DecksScreen() {
   );
 }
 
-// ---------------------------------------------------
-// Styles
-// ---------------------------------------------------
+// ------------- ESTILOS -------------
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const WHITE = "#FFFFFF";
@@ -1019,7 +899,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   deleteButton: {
-    backgroundColor: "#FF3B30", // Vermelho
+    backgroundColor: "#FF3B30",
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 6,

@@ -16,10 +16,10 @@ import {
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { signOut } from "firebase/auth";
-
 import { auth, db } from "../../lib/firebaseConfig";
 import { collectionGroup, getDocs, doc, getDoc } from "firebase/firestore";
 import { useFocusEffect } from "@react-navigation/native";
+import { useTranslation } from "react-i18next"; // <--- i18n
 
 interface MatchData {
   player1_id: string;
@@ -27,7 +27,6 @@ interface MatchData {
   outcomeNumber: number;
   outcome: string;
 }
-
 interface CollectionData {
   id: string;
   name: string;
@@ -43,11 +42,12 @@ interface CollectionData {
     symbol: string;
     logo: string;
   };
-  rotationDate?: string; // Adicionando a propriedade opcional
+  rotationDate?: string;
 }
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { t } = useTranslation(); // <--- i18n
 
   const [userName, setUserName] = useState("...");
   const [userId, setUserId] = useState("");
@@ -63,9 +63,7 @@ export default function HomeScreen() {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
-  const [validCollections, setValidCollections] = useState<CollectionData[]>(
-    []
-  );
+  const [validCollections, setValidCollections] = useState<CollectionData[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
 
   useEffect(() => {
@@ -112,7 +110,7 @@ export default function HomeScreen() {
         setLoading(false);
       }
     })();
-  }, [fadeAnim, scaleAnim]);
+  }, [fadeAnim, scaleAnim, router]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -124,9 +122,7 @@ export default function HomeScreen() {
           setLoading(false);
         }
       };
-
       fetchData();
-
       return () => {};
     }, [router])
   );
@@ -152,10 +148,10 @@ export default function HomeScreen() {
 
     userMatches.forEach((match) => {
       const { player1_id, player2_id, outcomeNumber } = match;
-
       const isP1 = player1_id === uId;
       const isP2 = player2_id === uId;
       const rivalId = isP1 ? player2_id : player1_id;
+
       if (rivalId && rivalId !== "N/A") {
         rivalCount[rivalId] = (rivalCount[rivalId] || 0) + 1;
       }
@@ -187,15 +183,15 @@ export default function HomeScreen() {
       }
     }
     if (!rivalMax) {
-      setBiggestRival("Nenhum rival encontrado");
+      setBiggestRival(t("home.stats.none_rival"));
     } else {
       const docSnap = await getDoc(doc(db, "players", rivalMax));
       if (!docSnap.exists()) {
-        setBiggestRival(`Jogador ${rivalMax} (${max} partidas)`);
+        setBiggestRival(`${t("home.stats.rival")}: ${rivalMax} (${max}x)`);
       } else {
         const data = docSnap.data();
         const rName = data.fullname || `Jogador ${rivalMax}`;
-        setBiggestRival(`${rName} (${max} partidas)`);
+        setBiggestRival(`${rName} (${max}x)`);
       }
     }
   }
@@ -207,7 +203,7 @@ export default function HomeScreen() {
       await AsyncStorage.removeItem("@userName");
       router.replace("/(auth)/login");
     } catch (err) {
-      Alert.alert("Erro", "Não foi possível sair.");
+      Alert.alert(t("common.error"), t("home.alerts.no_logout"));
       console.log(err);
     }
   }
@@ -226,21 +222,16 @@ export default function HomeScreen() {
         const setsWithRotation = validSets.map((set: CollectionData) => {
           try {
             if (!set.releaseDate) {
-              console.warn(`releaseDate ausente para o set: ${set.name}`);
-              return { ...set, rotationDate: "Indefinida" };
+              return { ...set, rotationDate: t("home.collections_modal.error_loading") };
             }
-
             const [year, month, day] = set.releaseDate.split("/").map(Number);
             if (!year || !month || !day) {
-              console.warn(`Data inválida para o set: ${set.name}`);
               return { ...set, rotationDate: "Indefinida" };
             }
-
             const releaseDateFormatted = `${day
               .toString()
               .padStart(2, "0")}/${month.toString().padStart(2, "0")}/${year}`;
 
-            // Calcula o ano da rotação: 2 anos para janeiro, 3 anos para os demais
             const rotationYear = month === 1 ? year + 2 : year + 3;
 
             return {
@@ -249,10 +240,7 @@ export default function HomeScreen() {
               rotationDate: `${rotationYear}`,
             };
           } catch (error) {
-            console.error(
-              `Erro ao calcular rotação para o set: ${set.name}`,
-              error
-            );
+            console.error(`Erro ao calcular rotação:`, error);
             return { ...set, rotationDate: "Erro" };
           }
         });
@@ -270,7 +258,6 @@ export default function HomeScreen() {
     setCollectionsModalVisible(true);
     loadValidCollections();
   }
-
   function closeCollectionModal() {
     setCollectionsModalVisible(false);
   }
@@ -301,50 +288,49 @@ export default function HomeScreen() {
       />
 
       <Animated.Text style={[styles.title, { opacity: fadeAnim }]}>
-        Bem-vindo, {userName}!
+        {t("home.welcome", { username: userName })}
       </Animated.Text>
 
       <View style={styles.statsSection}>
-        <Text style={styles.sectionTitle}>Suas Estatísticas</Text>
+        <Text style={styles.sectionTitle}>{t("home.stats.total_matches")}</Text>
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{winsCount}</Text>
-            <Text style={styles.statLabel}>Vitórias</Text>
+            <Text style={styles.statLabel}>{t("home.stats.wins")}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{lossesCount}</Text>
-            <Text style={styles.statLabel}>Derrotas</Text>
+            <Text style={styles.statLabel}>{t("home.stats.losses")}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{drawCount}</Text>
-            <Text style={styles.statLabel}>Empates</Text>
+            <Text style={styles.statLabel}>{t("home.stats.draws")}</Text>
           </View>
         </View>
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{total}</Text>
-            <Text style={styles.statLabel}>Partidas</Text>
+            <Text style={styles.statLabel}>{t("home.stats.total_matches")}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>{wr}%</Text>
-            <Text style={styles.statLabel}>Winrate</Text>
+            <Text style={styles.statLabel}>{t("home.stats.winrate")}</Text>
           </View>
         </View>
 
         <View style={styles.rivalContainer}>
-          <Text style={styles.rivalLabel}>Maior Rival:</Text>
+          <Text style={styles.rivalLabel}>{t("home.stats.rival")}:</Text>
           <Text style={styles.rivalValue}>{biggestRival}</Text>
         </View>
       </View>
 
       <View style={styles.buttonsContainer}>
-        <TouchableOpacity
-          style={styles.collectionsButton}
-          onPress={openCollectionModal}
-        >
-          <Text style={styles.collectionsButtonText}>Coleções Válidas</Text>
+        <TouchableOpacity style={styles.collectionsButton} onPress={openCollectionModal}>
+          <Text style={styles.collectionsButtonText}>
+            {t("home.buttons.collections", "Coleções Validas")}
+          </Text>
         </TouchableOpacity>
 
         <View style={styles.bottomButtonsRow}>
@@ -354,11 +340,11 @@ export default function HomeScreen() {
               Linking.openURL("https://picpay.me/marco.macedo10/0.5")
             }
           >
-            <Text style={styles.donateText}>Doar</Text>
+            <Text style={styles.donateText}>{t("home.buttons.donate", "Doar")}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutText}>Sair</Text>
+            <Text style={styles.logoutText}>{t("home.buttons.logout")}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -366,7 +352,7 @@ export default function HomeScreen() {
       {/* Modal de Coleções */}
       <Modal visible={collectionsModalVisible} animationType="slide">
         <ScrollView contentContainerStyle={styles.modalContainer}>
-          <Text style={styles.modalTitle}>Coleções Válidas</Text>
+          <Text style={styles.modalTitle}>{t("home.collections_modal.title")}</Text>
           {loadingCollections ? (
             <ActivityIndicator size="large" color="#E3350D" />
           ) : (
@@ -383,15 +369,17 @@ export default function HomeScreen() {
                   />
                   <Text style={styles.collectionName}>{set.name}</Text>
                 </View>
-                <Text style={styles.collectionSeries}>Série: {set.series}</Text>
+                <Text style={styles.collectionSeries}>
+                  {t("home.collections_modal.serie")}: {set.series}
+                </Text>
                 <Text style={styles.collectionTotal}>
-                  Total de Cartas: {set.total}
+                  {t("home.collections_modal.total_cards")}: {set.total}
                 </Text>
                 <Text style={styles.collectionReleaseDate}>
-                  Lançamento: {set.releaseDate}
+                  {t("home.collections_modal.released")}: {set.releaseDate}
                 </Text>
                 <Text style={styles.collectionRotationDate}>
-                  Rotação: {set.rotationDate}
+                  {t("home.collections_modal.rotation")}: {set.rotationDate}
                 </Text>
               </TouchableOpacity>
             ))
@@ -400,7 +388,7 @@ export default function HomeScreen() {
             style={styles.modalCloseButton}
             onPress={closeCollectionModal}
           >
-            <Text style={styles.modalCloseButtonText}>Fechar</Text>
+            <Text style={styles.modalCloseButtonText}>{t("common.close")}</Text>
           </TouchableOpacity>
         </ScrollView>
       </Modal>
@@ -505,7 +493,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1.5,
     borderColor: "#FFF",
-    marginBottom: 10, // Espaçamento entre Coleções e os outros botões
+    marginBottom: 10,
   },
   collectionsButtonText: {
     color: "#FFF",
@@ -516,7 +504,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     width: "100%",
-    paddingHorizontal: 20, // Espaçamento nas laterais
+    paddingHorizontal: 20,
   },
   donateButton: {
     flex: 1,
@@ -563,7 +551,7 @@ const styles = StyleSheet.create({
   },
   collectionCard: {
     backgroundColor: "#333",
-    width: "100%", // Garantir que os cards fiquem com o mesmo tamanho
+    width: "100%",
     padding: 20,
     borderRadius: 8,
     shadowColor: "#000",
@@ -588,11 +576,8 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: "#FFF",
     fontWeight: "bold",
-    flex: 1, // Ajusta para ocupar o espaço restante
+    flex: 1,
     textAlign: "left",
-  },
-  collectionDetails: {
-    marginTop: 10,
   },
   collectionSeries: {
     color: "#CCC",

@@ -25,6 +25,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import moment from "moment";
 import { db } from "../../lib/firebaseConfig";
+import { useTranslation } from "react-i18next"; // <--- i18n
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
@@ -43,21 +44,20 @@ interface TradePost {
 }
 
 export default function UserTradeFeed() {
+  const { t } = useTranslation(); // <--- i18n
+
   const [playerId, setPlayerId] = useState("");
   const [posts, setPosts] = useState<TradePost[]>([]);
   const [searchText, setSearchText] = useState("");
-  const [filterType, setFilterType] = useState<
-    "all" | "sale" | "trade" | "want"
-  >("all");
+  const [filterType, setFilterType] = useState<"all" | "sale" | "trade" | "want">("all");
   const [onlyMine, setOnlyMine] = useState(false);
 
-  // Modal de detalhes
+  // Modal
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailPost, setDetailPost] = useState<TradePost | null>(null);
 
   useEffect(() => {
     moment.locale("pt-br");
-
     (async () => {
       const pid = await AsyncStorage.getItem("@userId");
       if (pid) setPlayerId(pid);
@@ -69,7 +69,7 @@ export default function UserTradeFeed() {
       const now = Date.now();
       snap.forEach((ds) => {
         const data = ds.data();
-        // remove velhos (+3 dias)
+        // remove posts com +3 dias
         if (data.createdAt && now - data.createdAt > 3 * 86400000) {
           return;
         }
@@ -106,11 +106,11 @@ export default function UserTradeFeed() {
 
   async function openDetailModal(post: TradePost) {
     const interestedNames: string[] = [];
-  
+
     if (post.interested.length > 0) {
       try {
-        for (const playerId of post.interested) {
-          const userDocRef = doc(db, "players", playerId); // Ajuste conforme a estrutura da sua coleção de usuários
+        for (const pId of post.interested) {
+          const userDocRef = doc(db, "players", pId);
           const userDoc = await getDoc(userDocRef);
           if (userDoc.exists()) {
             interestedNames.push(userDoc.data().name || "Desconhecido");
@@ -122,12 +122,11 @@ export default function UserTradeFeed() {
         console.error("Erro ao buscar nomes dos interessados:", err);
       }
     }
-  
-    // Atualiza o post com os nomes dos interessados
+
     setDetailPost({ ...post, interested: interestedNames });
     setDetailModalVisible(true);
   }
-  
+
   function closeDetailModal() {
     setDetailPost(null);
     setDetailModalVisible(false);
@@ -135,11 +134,11 @@ export default function UserTradeFeed() {
 
   async function handleInterest(post: TradePost) {
     if (!playerId) {
-      Alert.alert("Erro", "Você não está logado");
+      Alert.alert(t("common.error"), t("trocas.alerts.not_logged_in"));
       return;
     }
     if (post.ownerId === playerId) {
-      Alert.alert("Aviso", "Você é dono deste card.");
+      Alert.alert(t("common.error"), t("trocas.alerts.owner"));
       return;
     }
     const collRef = collection(db, "trade");
@@ -147,27 +146,34 @@ export default function UserTradeFeed() {
     await updateDoc(docRef, {
       interested: arrayUnion(playerId),
     });
-    Alert.alert("Interesse registrado", "O dono recebeu a notificação.");
+    Alert.alert(
+      t("common.success"),
+      t("trocas.alerts.interest_registered")
+    );
   }
 
   async function handleDeletePost(post: TradePost) {
-    Alert.alert("Confirmar", `Excluir "${post.cardName}"?`, [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Excluir",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const collRef = collection(db, "trade");
-            await deleteDoc(doc(collRef, post.id));
-            Alert.alert("Excluído", "Card removido do feed.");
-          } catch (err) {
-            console.log("Erro ao excluir card:", err);
-            Alert.alert("Erro", "Falha ao excluir.");
-          }
+    Alert.alert(
+      t("common.confirmation_title"),
+      t("trocas.alerts.delete_confirm", { cardName: post.cardName }),
+      [
+        { text: t("calendar.form.cancel_button"), style: "cancel" },
+        {
+          text: t("common.delete"),
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const collRef = collection(db, "trade");
+              await deleteDoc(doc(collRef, post.id));
+              Alert.alert(t("common.success"), t("trocas.alerts.deleted"));
+            } catch (err) {
+              console.log("Erro ao excluir card:", err);
+              Alert.alert(t("common.error"), t("trocas.alerts.delete_failed"));
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   }
 
   function renderItem({ item }: { item: TradePost }) {
@@ -188,15 +194,13 @@ export default function UserTradeFeed() {
           {item.ownerName}
         </Text>
         {item.type === "want" ? (
-          <Text style={[styles.postCardPrice, { color: "#FDC30B" }]}>
-            Deseja
-          </Text>
+          <Text style={[styles.postCardPrice, { color: "#FDC30B" }]}>{t("trocas.filters.want")}</Text>
         ) : item.type === "sale" ? (
           <Text style={styles.postCardPrice} numberOfLines={1}>
             {item.price}
           </Text>
         ) : (
-          <Text style={styles.postCardPrice}>Troca</Text>
+          <Text style={styles.postCardPrice}>{t("trocas.filters.trade")}</Text>
         )}
       </TouchableOpacity>
     );
@@ -207,62 +211,52 @@ export default function UserTradeFeed() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Área de Trocas/Vendas</Text>
+        <Text style={styles.headerTitle}>{t("trocas.header")}</Text>
         <TouchableOpacity
-          style={[styles.switchMyCards, onlyMine && styles.switchMyCardsActive]}
+          style={[
+            styles.switchMyCards,
+            onlyMine && styles.switchMyCardsActive,
+          ]}
           onPress={() => setOnlyMine((prev) => !prev)}
         >
           <Text style={styles.switchMyCardsText}>
-            {onlyMine ? "Meus" : "Todos"}
+            {onlyMine ? t("trocas.buttons.my_cards") : t("trocas.buttons.all_cards")}
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Filtros */}
       <View style={styles.filterContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar carta..."
+          placeholder={t("trocas.placeholders.search") || ""}
           placeholderTextColor="#888"
           value={searchText}
           onChangeText={setSearchText}
         />
         <View style={styles.filterRow}>
           <TouchableOpacity
-            style={[
-              styles.filterButton,
-              filterType === "all" && styles.filterButtonActive,
-            ]}
+            style={[styles.filterButton, filterType === "all" && styles.filterButtonActive]}
             onPress={() => setFilterType("all")}
           >
-            <Text style={styles.filterButtonText}>Todos</Text>
+            <Text style={styles.filterButtonText}>{t("trocas.filters.all")}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.filterButton,
-              filterType === "trade" && styles.filterButtonActive,
-            ]}
+            style={[styles.filterButton, filterType === "trade" && styles.filterButtonActive]}
             onPress={() => setFilterType("trade")}
           >
-            <Text style={styles.filterButtonText}>Troca</Text>
+            <Text style={styles.filterButtonText}>{t("trocas.filters.trade")}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.filterButton,
-              filterType === "sale" && styles.filterButtonActive,
-            ]}
+            style={[styles.filterButton, filterType === "sale" && styles.filterButtonActive]}
             onPress={() => setFilterType("sale")}
           >
-            <Text style={styles.filterButtonText}>Venda</Text>
+            <Text style={styles.filterButtonText}>{t("trocas.filters.sale")}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.filterButton,
-              filterType === "want" && styles.filterButtonActive,
-            ]}
+            style={[styles.filterButton, filterType === "want" && styles.filterButtonActive]}
             onPress={() => setFilterType("want")}
           >
-            <Text style={styles.filterButtonText}>Quero</Text>
+            <Text style={styles.filterButtonText}>{t("trocas.filters.want")}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -276,7 +270,6 @@ export default function UserTradeFeed() {
         contentContainerStyle={{ paddingBottom: 60 }}
       />
 
-      {/* Modal Detalhes */}
       <Modal
         visible={detailModalVisible}
         animationType="slide"
@@ -295,12 +288,16 @@ export default function UserTradeFeed() {
               </View>
               {detailPost.type === "want" ? (
                 <Text style={[styles.modalLabel, { color: "#FDC30B" }]}>
-                  O jogador deseja esta carta
+                  {t("trocas.filters.want")}
                 </Text>
               ) : detailPost.type === "sale" ? (
-                <Text style={styles.modalLabel}>Venda: {detailPost.price}</Text>
+                <Text style={styles.modalLabel}>
+                  {t("trocas.filters.sale")}: {detailPost.price}
+                </Text>
               ) : (
-                <Text style={styles.modalLabel}>Disponível para troca</Text>
+                <Text style={styles.modalLabel}>
+                  {t("trocas.filters.trade")}
+                </Text>
               )}
               <Text style={styles.modalLabel}>
                 Dono: {detailPost.ownerName}
@@ -326,18 +323,14 @@ export default function UserTradeFeed() {
                     ))
                   )}
 
-                  {/* Dono pode excluir (ou editar) */}
                   <TouchableOpacity
-                    style={[
-                      styles.button,
-                      { backgroundColor: "#FF5555", marginTop: 20 },
-                    ]}
+                    style={[styles.button, { backgroundColor: "#FF5555", marginTop: 20 }]}
                     onPress={() => {
                       closeDetailModal();
                       handleDeletePost(detailPost);
                     }}
                   >
-                    <Text style={styles.buttonText}>Excluir Card</Text>
+                    <Text style={styles.buttonText}>{t("trocas.buttons.delete")}</Text>
                   </TouchableOpacity>
                 </>
               ) : (
@@ -348,18 +341,15 @@ export default function UserTradeFeed() {
                     closeDetailModal();
                   }}
                 >
-                  <Text style={styles.buttonText}>Tenho Interesse</Text>
+                  <Text style={styles.buttonText}>{t("trocas.buttons.interest")}</Text>
                 </TouchableOpacity>
               )}
 
               <TouchableOpacity
-                style={[
-                  styles.button,
-                  { backgroundColor: "#999", marginTop: 16 },
-                ]}
+                style={[styles.button, { backgroundColor: "#999", marginTop: 16 }]}
                 onPress={closeDetailModal}
               >
-                <Text style={styles.buttonText}>Fechar</Text>
+                <Text style={styles.buttonText}>{t("trocas.buttons.close")}</Text>
               </TouchableOpacity>
             </ScrollView>
           )}

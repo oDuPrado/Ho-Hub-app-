@@ -32,6 +32,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { auth, db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next"; // <--- Import do i18n
+import LSselector from "../../LSselector"; 
 
 // --------------- Funções Auxiliares (validação) ---------------
 function checkPasswordStrength(password: string) {
@@ -273,6 +274,10 @@ export default function LoginScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
+
+          {/* Seletor de idioma */}
+          <LSselector />
+          
           {/* Logo animada */}
           <Animated.Image
             source={require("../../assets/images/pokemon_ms_logo.jpg")}

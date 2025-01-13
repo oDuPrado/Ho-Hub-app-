@@ -9,9 +9,13 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const SENDGRID_API_KEY = "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";
+import { useTranslation } from "react-i18next"; // <--- i18n
+
+const SENDGRID_API_KEY = "SUA_API_KEY_AQUI"; // lembre de ocultar
 
 export default function SuggestionScreen() {
+  const { t } = useTranslation(); // <--- i18n
+
   const [userName, setUserName] = useState("");
   const [userId, setUserId] = useState("");
   const [message, setMessage] = useState("");
@@ -19,7 +23,6 @@ export default function SuggestionScreen() {
   const [lastSent, setLastSent] = useState<number | null>(null);
 
   useEffect(() => {
-    // Carrega informações do usuário e última data de envio
     (async () => {
       const storedName = await AsyncStorage.getItem("@userName");
       const storedId = await AsyncStorage.getItem("@userId");
@@ -34,21 +37,18 @@ export default function SuggestionScreen() {
   const canSendEmail = (): boolean => {
     if (!lastSent) return true;
     const now = Date.now();
-    const oneDayInMs = 24 * 60 * 60 * 1000; // 1 dia
-    return now - lastSent > oneDayInMs; // Verifica se passou 1 dia
+    const oneDayInMs = 24 * 60 * 60 * 1000;
+    return now - lastSent > oneDayInMs;
   };
 
   const handleSendEmail = async () => {
     if (!message.trim()) {
-      Alert.alert("Erro", "A mensagem não pode estar vazias.");
+      Alert.alert(t("common.error"), t("sugestao.warnings.empty_message"));
       return;
     }
 
     if (!canSendEmail()) {
-      Alert.alert(
-        "Limite Atingido",
-        "Você só pode enviar uma sugestão por dia."
-      );
+      Alert.alert(t("common.error"), t("sugestao.warnings.daily_limit"));
       return;
     }
 
@@ -56,12 +56,12 @@ export default function SuggestionScreen() {
       const emailBody = {
         personalizations: [
           {
-            to: [{ email: "ma.macedo11@hotmail.com" }], // Seu e-mail de destino
+            to: [{ email: "seu-email@exemplo.com" }],
             subject: subject,
           },
         ],
         from: {
-          email: "ma.macedo11@hotmail.com", // Use um e-mail válido
+          email: "sender@exemplo.com",
           name: userName,
         },
         content: [
@@ -91,62 +91,63 @@ Mensagem: ${message}`,
         throw new Error(`Falha ao enviar e-mail: ${response.statusText}`);
       }
 
-      Alert.alert("Sucesso", "Sugestão enviada com sucesso!");
+      Alert.alert(t("common.success"), t("sugestao.success"));
 
-      // Atualiza a data do último envio
       const now = Date.now();
       setLastSent(now);
       await AsyncStorage.setItem("@lastSentEmail", now.toString());
 
-      // Limpa o campo de mensagem
       setMessage("");
     } catch (error) {
       console.error("Erro ao enviar e-mail:", error);
-      Alert.alert("Erro", "Não foi possível enviar sua sugestão.");
+      Alert.alert(t("common.error"), t("sugestao.error"));
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Sugestões</Text>
+      <Text style={styles.header}>{t("sugestao.header")}</Text>
 
-      <Text style={styles.label}>Assunto</Text>
+      <Text style={styles.label}>{t("sugestao.labels.subject")}</Text>
       <TextInput
         style={styles.input}
         value={subject}
         onChangeText={setSubject}
-        placeholder="Digite o assunto"
+        placeholder={t("sugestao.placeholders.subject") || ""}
         placeholderTextColor="#999"
       />
 
-      <Text style={styles.label}>Mensagem</Text>
+      <Text style={styles.label}>{t("sugestao.labels.message")}</Text>
       <TextInput
         style={[styles.input, styles.textArea]}
         value={message}
         onChangeText={setMessage}
-        placeholder="Digite sua sugestão"
+        placeholder={t("sugestao.placeholders.message") || ""}
         placeholderTextColor="#999"
         multiline
         numberOfLines={6}
       />
 
       <TouchableOpacity style={styles.button} onPress={handleSendEmail}>
-        <Text style={styles.buttonText}>Enviar</Text>
+        <Text style={styles.buttonText}>{t("sugestao.buttons.send")}</Text>
       </TouchableOpacity>
 
       {!canSendEmail() && (
-        <Text style={styles.warning}>
-          Você já enviou uma sugestão hoje. Tente novamente amanhã.
-        </Text>
+        <Text style={styles.warning}>{t("sugestao.warnings.daily_limit")}</Text>
       )}
     </View>
   );
 }
 
+const DARK = "#1E1E1E";
+const PRIMARY = "#E3350D";
+const WHITE = "#FFFFFF";
+const BORDER = "#4D4D4D";
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1E1E1E",
+    backgroundColor: DARK,
     padding: 20,
   },
   header: {
@@ -157,7 +158,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   label: {
-    color: "#FFF",
+    color: WHITE,
     fontSize: 16,
     marginBottom: 8,
   },
@@ -165,25 +166,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#292929",
     borderRadius: 8,
     padding: 12,
-    color: "#FFF",
+    color: WHITE,
     marginBottom: 16,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: "#4D4D4D",
+    borderColor: BORDER,
   },
   textArea: {
     height: 100,
     textAlignVertical: "top",
   },
   button: {
-    backgroundColor: "#E3350D",
+    backgroundColor: PRIMARY,
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
     marginTop: 10,
   },
   buttonText: {
-    color: "#FFF",
+    color: WHITE,
     fontSize: 16,
     fontWeight: "bold",
   },

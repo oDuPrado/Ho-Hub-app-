@@ -40,6 +40,8 @@ import {
   fetchHostsInfo,
 } from "../hosts";
 
+import { useTranslation } from "react-i18next"; // <--- i18n
+
 /** Estrutura do Torneio */
 interface Torneio {
   id: string;
@@ -49,8 +51,8 @@ interface Torneio {
   createdBy: string;
   judge: string;
   headJudge: string;
-  eventType: string; // Cup, Challenger, Pre-release, Liguinha, Evento Especial
-  judgeAccepted?: boolean; // se o juiz confirmou a função
+  eventType: string;
+  judgeAccepted?: boolean;
 }
 
 /** Estrutura de Inscrição */
@@ -68,6 +70,8 @@ interface DeckData {
 }
 
 export default function CalendarScreen() {
+  const { t } = useTranslation(); // <--- i18n Hook
+
   const [playerId, setPlayerId] = useState("");
   const [isHost, setIsHost] = useState(false);
 
@@ -92,7 +96,7 @@ export default function CalendarScreen() {
   const [detalhesModalVisible, setDetalhesModalVisible] = useState(false);
   const [detalhesTorneio, setDetalhesTorneio] = useState<Torneio | null>(null);
 
-  // Sub-modal INSCRIÇÕES (para exibir lista de inscrições e decks) - **Novo** approach
+  // Sub-modal INSCRIÇÕES
   const [inscricoesModalVisible, setInscricoesModalVisible] = useState(false);
   const [inscricoes, setInscricoes] = useState<Inscricao[]>([]);
   const [deckNameMap, setDeckNameMap] = useState<Record<string, string>>({});
@@ -124,9 +128,14 @@ export default function CalendarScreen() {
   const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState<boolean>(false);
 
-  // ------------------------------------------------------------------
-  // Efeito Inicial: Carrega playerId, roles, e SetIdMap
-  // ------------------------------------------------------------------
+  // Select de Juiz
+  const [judgeOptions, setJudgeOptions] = useState<
+    { userId: string; fullname: string }[]
+  >([]);
+  const [headJudgeOptions, setHeadJudgeOptions] = useState<
+    { userId: string; fullname: string }[]
+  >([]);
+
   useEffect(() => {
     moment.locale("pt-br");
 
@@ -141,7 +150,7 @@ export default function CalendarScreen() {
         console.log("Erro ao obter playerId:", error);
       }
 
-      // Carrega Juiz
+      // Carrega Judge
       const jArray = await fetchHostsInfo(JUDGE_PLAYER_IDS);
       const jMapObj: Record<string, string> = {};
       jArray.forEach((j) => {
@@ -159,14 +168,12 @@ export default function CalendarScreen() {
       setHeadJudgeOptions(hjArray);
       setHeadJudgeMap(hjMapObj);
 
-      // Carrega mapping de ptcgoCode => set.id
+      // Carrega mapping p/ imagens
       loadSetIdMap();
     })();
   }, []);
 
-  // ------------------------------------------------------------------
-  // Efeito: Carregar torneios do Firestore p/ mês atual
-  // ------------------------------------------------------------------
+  // Carrega torneios do Firestore p/ mês atual
   useEffect(() => {
     const colRef = collection(db, "calendar", "torneios", "list");
     const unsub = onSnapshot(colRef, (snap) => {
@@ -197,16 +204,12 @@ export default function CalendarScreen() {
     return () => unsub();
   }, [currentMonth]);
 
-  // ------------------------------------------------------------------
-  // Função: loadSetIdMap() - carrega sets p/ fetch de imagens
-  // ------------------------------------------------------------------
   async function loadSetIdMap() {
     try {
       const response = await fetch("https://api.pokemontcg.io/v2/sets");
       const data = await response.json();
       if (data && data.data) {
         const map: Record<string, string> = {};
-        // Agrupa sets
         const groupedSets: Record<string, any[]> = {};
         data.data.forEach((s: any) => {
           const code = s.ptcgoCode?.toUpperCase();
@@ -214,7 +217,6 @@ export default function CalendarScreen() {
           if (!groupedSets[code]) groupedSets[code] = [];
           groupedSets[code].push(s);
         });
-        // Seleciona best set
         Object.keys(groupedSets).forEach((code) => {
           const sets = groupedSets[code];
           const bestSet = sets.reduce((prev, curr) =>
@@ -229,14 +231,7 @@ export default function CalendarScreen() {
     }
   }
 
-  // ====================== CREATE / EDIT TOURNAMENT ===========================
-  const [judgeOptions, setJudgeOptions] = useState<
-    { userId: string; fullname: string }[]
-  >([]);
-  const [headJudgeOptions, setHeadJudgeOptions] = useState<
-    { userId: string; fullname: string }[]
-  >([]);
-
+  // --------------- Navegação de mês ---------------
   function handlePrevMonth() {
     setCurrentMonth((prev) => prev.clone().subtract(1, "month"));
   }
@@ -244,6 +239,7 @@ export default function CalendarScreen() {
     setCurrentMonth((prev) => prev.clone().add(1, "month"));
   }
 
+  // --------------- Criar/Editar Torneio ---------------
   function openCreateModal() {
     setEditId(null);
     setEditName("");
@@ -254,7 +250,6 @@ export default function CalendarScreen() {
     setEditEventType("Cup");
     setModalVisible(true);
   }
-
   function openEditModal(t: Torneio) {
     setEditId(t.id);
     setEditName(t.name);
@@ -268,11 +263,11 @@ export default function CalendarScreen() {
 
   async function handleSaveTorneio() {
     if (!editName.trim()) {
-      Alert.alert("Erro", "Nome do torneio não pode estar vazio.");
+      Alert.alert(t("common.error"), t("calendar.alerts.name_required"));
       return;
     }
     if (!moment(editDate, "DD/MM/YYYY", true).isValid()) {
-      Alert.alert("Erro", "Data inválida (use DD/MM/AAAA).");
+      Alert.alert(t("common.error"), t("calendar.alerts.invalid_date"));
       return;
     }
     try {
@@ -285,7 +280,7 @@ export default function CalendarScreen() {
           date: editDate,
           time: editTime,
           judge: editJudge,
-          judgeAccepted: false, // zera caso troque de juiz
+          judgeAccepted: false,
           headJudge: editHeadJudge,
           eventType: editEventType,
         });
@@ -309,7 +304,7 @@ export default function CalendarScreen() {
       setModalVisible(false);
     } catch (err) {
       console.log("Erro handleSaveTorneio:", err);
-      Alert.alert("Erro", "Falha ao salvar torneio.");
+      Alert.alert(t("common.error"), t("calendar.alerts.save_error"));
     }
   }
 
@@ -324,42 +319,47 @@ export default function CalendarScreen() {
         type: "judge_invite",
         torneioId,
         torneioName,
-        message: `Você foi escolhido como juiz do torneio "${torneioName}"`,
+        message: t("calendar.alerts.judge_invite_message", {
+          torneioName: torneioName,
+        }) /* <--- Falta criar se quiser */,
         timestamp: serverTimestamp(),
       });
-      console.log("Notificação enviada ao juiz:", judgeId);
     } catch (err) {
       console.log("Erro ao notificar juiz:", err);
     }
   }
 
-  // ==================== DELETE TORN. ====================
-  async function handleDeleteTorneio(t: Torneio) {
-    Alert.alert("Confirmar", `Excluir torneio ${t.name}?`, [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Excluir",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const colRef = collection(db, "calendar", "torneios", "list");
-            const docRef = doc(colRef, t.id);
-            await deleteDoc(docRef);
-          } catch (err) {
-            console.log("Erro handleDeleteTorneio:", err);
-            Alert.alert("Erro", "Falha ao excluir torneio.");
-          }
+  // --------------- Excluir Torneio ---------------
+  async function handleDeleteTorneio(torneio: Torneio) {
+    Alert.alert(
+      t("common.confirm"),
+      t("calendar.alerts.delete_confirm", { name: torneio.name }), // Use o nome corretamente
+      [
+        { text: t("calendar.form.cancel_button"), style: "cancel" },
+        {
+          text: t("common.delete"),
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const colRef = collection(db, "calendar", "torneios", "list");
+              const docRef = doc(colRef, torneio.id); // Use torneio.id aqui
+              await deleteDoc(docRef);
+            } catch (err) {
+              console.log("Erro handleDeleteTorneio:", err);
+              Alert.alert(t("common.error"), t("calendar.alerts.delete_error"));
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   }
+  
 
-  // ==================== INSCRIÇÃO ====================
+  // --------------- Inscrever ---------------
   async function handleInscrever(t: Torneio) {
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
 
-    // Carrega decks do user
     const decksRef = collection(db, "decks");
     onSnapshot(query(decksRef, where("playerId", "==", playerId)), (snap) => {
       const arr: DeckData[] = [];
@@ -378,7 +378,7 @@ export default function CalendarScreen() {
   async function handleSalvarInscricao() {
     if (!inscricaoTorneioId) return;
     if (!selectedDeckId) {
-      Alert.alert("Erro", "Selecione um deck antes de enviar.");
+      Alert.alert(t("common.error"), t("calendar.alerts.registration_error"));
       return;
     }
     try {
@@ -396,15 +396,15 @@ export default function CalendarScreen() {
         deckId: selectedDeckId,
         createdAt: new Date().toISOString(),
       });
-      Alert.alert("Sucesso", "Inscrição realizada!");
+      Alert.alert(t("common.success"), t("calendar.alerts.success_registration"));
       setInscricaoModalVisible(false);
     } catch (err) {
       console.log("Erro handleSalvarInscricao:", err);
-      Alert.alert("Erro", "Falha ao se inscrever.");
+      Alert.alert(t("common.error"), t("calendar.alerts.registration_error"));
     }
   }
 
-  // ==================== DETALHES (HOST/JUIZ) ====================
+  // --------------- Detalhes do Torneio ---------------
   async function handleOpenDetalhes(t: Torneio) {
     setDetalhesTorneio(t);
     setDetalhesModalVisible(true);
@@ -414,9 +414,8 @@ export default function CalendarScreen() {
     setDetalhesTorneio(null);
   }
 
-  // ============ Sub-Modal: Inscrições + Decks (mais responsivo) ============
+  // --------------- Ver Inscrições ---------------
   async function openInscricoesModal(t: Torneio) {
-    // Carrega a subcoleção “inscricoes”
     const colRef = collection(db, "calendar", "torneios", "list", t.id, "inscricoes");
     onSnapshot(colRef, (snap) => {
       const arr: Inscricao[] = [];
@@ -427,11 +426,9 @@ export default function CalendarScreen() {
           createdAt: ds.data().createdAt || "",
         });
       });
-      // Ordena
       arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
       setInscricoes(arr);
 
-      // Montar userIDs e deckIDs
       const deckIdsSet = new Set<string>();
       const userIdsSet = new Set<string>();
       arr.forEach((i) => {
@@ -464,33 +461,62 @@ export default function CalendarScreen() {
     setInscricoes([]);
   }
 
-  // ==================== Juiz Pendente: confirm / recusar ====================
-  async function confirmJudge(t: Torneio) {
-    try {
-      const colRef = collection(db, "calendar", "torneios", "list");
-      const docRef = doc(colRef, t.id);
-      await updateDoc(docRef, { judgeAccepted: true });
-      Alert.alert("Sucesso", `Você confirmou como Juiz de ${t.name}.`);
-      sendNotifToHost(t.createdBy, t.id, t.name, "O Juiz confirmou a função!");
-    } catch (err) {
-      console.log("Erro confirmJudge:", err);
-      Alert.alert("Erro", "Não foi possível confirmar.");
-    }
-  }
-  async function declineJudge(t: Torneio) {
-    try {
-      const colRef = collection(db, "calendar", "torneios", "list");
-      const docRef = doc(colRef, t.id);
-      await updateDoc(docRef, { judge: "", judgeAccepted: false });
-      Alert.alert("Aviso", `Você recusou ser Juiz de ${t.name}.`);
-      sendNotifToHost(t.createdBy, t.id, t.name, "O Juiz recusou a função.");
-    } catch (err) {
-      console.log("Erro declineJudge:", err);
-      Alert.alert("Erro", "Não foi possível recusar.");
-    }
-  }
+  // --------------- Juiz: Confirmar ou Recusar ---------------
+  async function confirmJudge(tournament: Torneio) {
 
-  /** Notifica o host */
+  try {
+    const colRef = collection(db, "calendar", "torneios", "list");
+    const docRef = doc(colRef, tournament.id);
+    await updateDoc(docRef, { judgeAccepted: true });
+
+    // Exibe alerta de sucesso
+    Alert.alert(
+      t("common.success"),
+      t("calendar.alerts.judge_confirmed", { tournamentName: tournament.name })
+    );
+
+    // Envia notificação para o criador do torneio
+    sendNotifToHost(
+      tournament.createdBy,
+      tournament.id,
+      tournament.name,
+      t("calendar.alerts.judge_notif_host_confirmed")
+    );
+  } catch (err) {
+    console.log("Erro confirmJudge:", err);
+
+    // Exibe alerta de erro
+    Alert.alert(t("common.error"), t("calendar.alerts.judge_notif_host_confirmed"));
+  }
+}
+
+async function declineJudge(tournament: Torneio) {
+
+  try {
+    const colRef = collection(db, "calendar", "torneios", "list");
+    const docRef = doc(colRef, tournament.id);
+    await updateDoc(docRef, { judge: "", judgeAccepted: false });
+
+    // Exibe alerta de sucesso
+    Alert.alert(
+      t("common.success"),
+      t("calendar.alerts.judge_declined", { tournamentName: tournament.name })
+    );
+
+    // Envia notificação para o criador do torneio
+    sendNotifToHost(
+      tournament.createdBy,
+      tournament.id,
+      tournament.name,
+      t("calendar.alerts.judge_notif_host_declined")
+    );
+  } catch (err) {
+    console.log("Erro declineJudge:", err);
+
+    // Exibe alerta de erro
+    Alert.alert(t("common.error"), t("calendar.alerts.judge_decline_error"));
+  }
+}
   async function sendNotifToHost(
     hostId: string,
     torneioId: string,
@@ -507,13 +533,12 @@ export default function CalendarScreen() {
         message,
         timestamp: serverTimestamp(),
       });
-      console.log("Notificou host:", hostId);
     } catch (err) {
       console.log("Erro ao notificar host:", err);
     }
   }
 
-  // ============ Carregar Deck p/ sub-modal PDF ============
+  // --------------- Carregar Deck p/ sub-modal PDF ---------------
   async function loadDeckCards(deckId: string) {
     try {
       const deckRef = doc(db, "decks", deckId);
@@ -545,7 +570,6 @@ export default function CalendarScreen() {
       setDeckCards(cards);
       setLoadingImages(true);
 
-      // Exemplo fetch de imagens:
       const imagePromises = cards.map(async (card) => {
         const imageUrl = await fetchCardImage(
           card.name,
@@ -585,7 +609,6 @@ export default function CalendarScreen() {
       if (cardNumber) queryParts.push(`number:"${cardNumber}"`);
       const query = queryParts.join("%20");
       const url = `https://api.pokemontcg.io/v2/cards?q=${query}`;
-      console.log("Consultando:", url);
       const resp = await fetch(url, {
         headers: {
           "X-Api-Key": "8d293a2a-4949-4d04-a06c-c20672a7a12c",
@@ -602,7 +625,6 @@ export default function CalendarScreen() {
     }
   }
 
-  // Sub-modal PDF do deck
   function renderDeckPdfModal() {
     return (
       <Modal
@@ -611,9 +633,10 @@ export default function CalendarScreen() {
         onRequestClose={() => setDeckPdfModalVisible(false)}
       >
         <SafeAreaView style={styles.modalContainer}>
-          <Text style={styles.modalTitle}>Detalhes do Deck</Text>
+          <Text style={styles.modalTitle}>{/* Falta i18n? */}Detalhes do Deck</Text>
           <Text style={{ color: "#ccc", textAlign: "center", marginBottom: 20 }}>
-            Deck: {deckNameMap[selectedDeckIdForPdf] || `ID ${selectedDeckIdForPdf}`}
+            {t("calendar.registration.title")}:
+            {deckNameMap[selectedDeckIdForPdf] || `ID ${selectedDeckIdForPdf}`}
           </Text>
 
           <ScrollView style={{ marginHorizontal: 16 }}>
@@ -628,7 +651,9 @@ export default function CalendarScreen() {
                         <Text style={styles.cardTitle}>
                           {card.category}: {card.name}
                         </Text>
-                        <Text style={styles.cardSub}>Qtd: {card.quantity}</Text>
+                        <Text style={styles.cardSub}>
+                          Qtd: {card.quantity}
+                        </Text>
                         {card.expansion && (
                           <Text style={styles.cardSub}>
                             Expansão: {card.expansion}
@@ -659,7 +684,7 @@ export default function CalendarScreen() {
               })
             ) : (
               <Text style={{ color: "#fff", marginBottom: 20 }}>
-                Nenhuma carta encontrada neste deck.
+                {t("calendar.registration.no_decks")}
               </Text>
             )}
           </ScrollView>
@@ -668,54 +693,54 @@ export default function CalendarScreen() {
             style={[styles.button, { margin: 16 }]}
             onPress={() => setDeckPdfModalVisible(false)}
           >
-            <Text style={styles.buttonText}>Fechar</Text>
+            <Text style={styles.buttonText}>
+              {t("calendar.details.close_button")}
+            </Text>
           </TouchableOpacity>
         </SafeAreaView>
       </Modal>
     );
   }
 
-  // -------------- Render do card principal --------------
-  function renderCard(t: Torneio) {
-    const dt = moment(t.date, "DD/MM/YYYY");
+  // -------------- Render card --------------
+  function renderCard(tor: Torneio) {
+    const dt = moment(tor.date, "DD/MM/YYYY");
     const isFuture = dt.isSameOrAfter(moment(), "day");
-    const eventLabel = t.eventType || "Cup";
+    const eventLabel = tor.eventType || "Cup";
 
-    const judgeName = judgeMap[t.judge] || "(Sem juiz)";
-    const headJudgeName = headJudgeMap[t.headJudge] || "(Sem head judge)";
-
-    const isThisJudgePending = t.judge === playerId && t.judgeAccepted === false;
-    const canAccessDetails =
-      isHost || (t.judge === playerId && t.judgeAccepted === true);
+    const judgeName = judgeMap[tor.judge] || t("calendar.card.judge_label");
+    const headJudgeName = headJudgeMap[tor.headJudge] || t("calendar.card.head_judge_label");
+    const isThisJudgePending = tor.judge === playerId && tor.judgeAccepted === false;
+    const canAccessDetails = isHost || (tor.judge === playerId && tor.judgeAccepted);
 
     return (
-      <View style={styles.card} key={`t-${t.id}`}>
-        <Text style={styles.cardTitle}>{t.name}</Text>
+      <View style={styles.card} key={`t-${tor.id}`}>
+        <Text style={styles.cardTitle}>{tor.name}</Text>
         <Text style={styles.cardSub}>
-          {t.date} às {t.time} | [{eventLabel}]
+          {tor.date} {t("calendar.form.time_label")?.split(" ")[0] || "às"} {tor.time} | [{eventLabel}]
         </Text>
         <Text style={styles.cardSub}>
-          Criador: {t.createdBy}
+          {t("calendar.card.creator_label")}: {tor.createdBy}
           {"\n"}
-          Juiz: {judgeName}
-          {t.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
+          {t("calendar.card.judge_label")}: {judgeName}
+          {tor.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
           {"\n"}
-          Head Judge: {headJudgeName}
+          {t("calendar.card.head_judge_label")}: {headJudgeName}
         </Text>
 
         {isThisJudgePending && (
           <View style={{ flexDirection: "row", marginTop: 8 }}>
             <TouchableOpacity
               style={[styles.buttonSmall, { marginRight: 8 }]}
-              onPress={() => confirmJudge(t)}
+              onPress={() => confirmJudge(tor)}
             >
-              <Text style={styles.buttonSmallText}>Confirmar Juiz</Text>
+              <Text style={styles.buttonSmallText}>{t("common.confirm")}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
-              onPress={() => declineJudge(t)}
+              onPress={() => declineJudge(tor)}
             >
-              <Text style={styles.buttonSmallText}>Recusar</Text>
+              <Text style={styles.buttonSmallText}>{t("common.decline")}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -724,15 +749,15 @@ export default function CalendarScreen() {
           <View style={{ flexDirection: "row", marginTop: 6 }}>
             <TouchableOpacity
               style={[styles.buttonSmall, { marginRight: 8 }]}
-              onPress={() => openEditModal(t)}
+              onPress={() => openEditModal(tor)}
             >
-              <Text style={styles.buttonSmallText}>Editar</Text>
+              <Text style={styles.buttonSmallText}>{t("common.edit")}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
-              onPress={() => handleDeleteTorneio(t)}
+              onPress={() => handleDeleteTorneio(tor)}
             >
-              <Text style={styles.buttonSmallText}>Excluir</Text>
+              <Text style={styles.buttonSmallText}>{t("common.delete")}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -742,25 +767,31 @@ export default function CalendarScreen() {
             {canAccessDetails && (
               <TouchableOpacity
                 style={[styles.inscreverButton, { marginRight: 8 }]}
-                onPress={() => handleOpenDetalhes(t)}
+                onPress={() => handleOpenDetalhes(tor)}
               >
-                <Text style={styles.inscreverButtonText}>Ver Detalhes</Text>
+                <Text style={styles.inscreverButtonText}>
+                  {t("calendar.card.details_button")}
+                </Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
               style={styles.inscreverButton}
-              onPress={() => handleInscrever(t)}
+              onPress={() => handleInscrever(tor)}
             >
-              <Text style={styles.inscreverButtonText}>Inscrever-se</Text>
+              <Text style={styles.inscreverButtonText}>
+                {t("calendar.card.register_button")}
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
           <TouchableOpacity
             style={[styles.inscreverButton, { backgroundColor: "#777", marginTop: 8 }]}
-            onPress={() => (canAccessDetails ? handleOpenDetalhes(t) : null)}
+            onPress={() => (canAccessDetails ? handleOpenDetalhes(tor) : null)}
           >
             <Text style={styles.inscreverButtonText}>
-              {canAccessDetails ? "Ver Detalhes" : "Já ocorreu"}
+              {canAccessDetails
+                ? t("calendar.card.details_button")
+                : t("calendar.card.already_occurred")}
             </Text>
           </TouchableOpacity>
         )}
@@ -768,7 +799,7 @@ export default function CalendarScreen() {
     );
   }
 
-  // -------------- Render da Tela de Detalhes --------------
+  // -------------- Modal de Detalhes --------------
   function renderDetalhesModal() {
     if (!detalhesTorneio) return null;
 
@@ -780,44 +811,47 @@ export default function CalendarScreen() {
       >
         <SafeAreaView style={styles.modalContainer}>
           <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>Detalhes do Torneio</Text>
+            <Text style={styles.modalTitle}>{t("calendar.details.title")}</Text>
 
-            <Text style={styles.modalLabel}>Nome</Text>
+            <Text style={styles.modalLabel}>{t("calendar.details.name_label")}</Text>
             <Text style={styles.modalInput}>{detalhesTorneio.name}</Text>
 
-            <Text style={styles.modalLabel}>Data</Text>
+            <Text style={styles.modalLabel}>{t("calendar.details.date_label")}</Text>
             <Text style={styles.modalInput}>{detalhesTorneio.date}</Text>
 
-            <Text style={styles.modalLabel}>Hora</Text>
+            <Text style={styles.modalLabel}>{t("calendar.details.time_label")}</Text>
             <Text style={styles.modalInput}>{detalhesTorneio.time}</Text>
 
-            <Text style={styles.modalLabel}>Tipo de Evento</Text>
+            <Text style={styles.modalLabel}>{t("calendar.details.event_type_label")}</Text>
             <Text style={styles.modalInput}>{detalhesTorneio.eventType}</Text>
 
-            <Text style={styles.modalLabel}>Juiz</Text>
+            <Text style={styles.modalLabel}>{t("calendar.details.judge_label")}</Text>
             <Text style={styles.modalInput}>
               {judgeMap[detalhesTorneio.judge] || "Sem juiz"}
               {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
             </Text>
 
-            <Text style={styles.modalLabel}>Head Judge</Text>
+            <Text style={styles.modalLabel}>{t("calendar.details.head_judge_label")}</Text>
             <Text style={styles.modalInput}>
               {headJudgeMap[detalhesTorneio.headJudge] || "Sem head judge"}
             </Text>
 
-            {/* Botão para abrir outro modal com Inscrições e Decks */}
             <TouchableOpacity
               style={[styles.button, { marginTop: 20 }]}
               onPress={() => openInscricoesModal(detalhesTorneio)}
             >
-              <Text style={styles.buttonText}>Ver Inscrições/Decks</Text>
+              <Text style={styles.buttonText}>
+                {t("calendar.details.view_inscriptions_button")}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
               onPress={closeDetalhes}
             >
-              <Text style={styles.buttonText}>Fechar</Text>
+              <Text style={styles.buttonText}>
+                {t("calendar.details.close_button")}
+              </Text>
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
@@ -825,7 +859,7 @@ export default function CalendarScreen() {
     );
   }
 
-  // -------------- Sub-modal para mostrar INSCRIÇÕES E DECKS --------------
+  // -------------- Sub-modal Inscrições --------------
   function renderInscricoesModal() {
     return (
       <Modal
@@ -835,11 +869,14 @@ export default function CalendarScreen() {
       >
         <SafeAreaView style={styles.modalContainer}>
           <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>Inscrições / Decks</Text>
+            <Text style={styles.modalTitle}>
+              {/* Falta no JSON: "calendar.inscriptions.title" */}
+              {t("calendar.inscriptions.title", "Inscrições / Decks")}
+            </Text>
 
             {inscricoes.length === 0 ? (
               <Text style={{ color: "#ccc", marginVertical: 10 }}>
-                Nenhuma inscrição encontrada.
+                {t("calendar.inscriptions.none", "Nenhuma inscrição encontrada.")}
               </Text>
             ) : (
               inscricoes.map((ins, idx) => (
@@ -855,7 +892,8 @@ export default function CalendarScreen() {
                   }
                 >
                   <Text style={styles.inscricaoItemText}>
-                    Jogador: {playerNameMap[ins.userId] || ins.userId}
+                    {t("jogador.header", "Jogador")}:{" "}
+                    {playerNameMap[ins.userId] || ins.userId}
                   </Text>
                   <Text style={styles.inscricaoItemText}>
                     Deck:{" "}
@@ -874,7 +912,9 @@ export default function CalendarScreen() {
               style={[styles.button, { marginTop: 20 }]}
               onPress={closeInscricoesModal}
             >
-              <Text style={styles.buttonText}>Fechar</Text>
+              <Text style={styles.buttonText}>
+                {t("calendar.details.close_button")}
+              </Text>
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
@@ -882,35 +922,35 @@ export default function CalendarScreen() {
     );
   }
 
-  // --------------------------------- RENDER FINAL ---------------------------------
+  // -------------------------------- RENDER PRINCIPAL --------------------------------
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Cabeçalho: Troca de mês */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handlePrevMonth}>
-          <Text style={styles.headerButton}>{"<"}</Text>
+          {/* t("calendar.header.prev_month") => "<" */}
+          <Text style={styles.headerButton}>{t("calendar.header.prev_month")}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
           {currentMonth.format("MMMM [de] YYYY")}
         </Text>
         <TouchableOpacity onPress={handleNextMonth}>
-          <Text style={styles.headerButton}>{">"}</Text>
+          {/* t("calendar.header.next_month") => ">" */}
+          <Text style={styles.headerButton}>{t("calendar.header.next_month")}</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Se for Host, exibe botão de Criar Torneio */}
       {isHost && (
         <TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
-          <Text style={styles.createButtonText}>+ Criar Torneio</Text>
+          <Text style={styles.createButtonText}>
+            {t("calendar.create_tournament")}
+          </Text>
         </TouchableOpacity>
       )}
 
-      {/* Lista de torneios */}
       <ScrollView style={{ flex: 1, marginTop: 10 }}>
         {torneios.map((t) => renderCard(t))}
       </ScrollView>
 
-      {/* Modal: CRIAR/EDITAR TORNEIO */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -919,44 +959,69 @@ export default function CalendarScreen() {
         <SafeAreaView style={styles.modalContainer}>
           <ScrollView style={{ padding: 16 }}>
             <Text style={styles.modalTitle}>
-              {editId ? "Editar Torneio" : "Criar Torneio"}
+              {editId
+                ? /* Falta i18n: "Editar Torneio" */
+                  t("calendar.edit_tournament", "Editar Torneio")
+                : t("calendar.create_tournament")}
             </Text>
 
-            <Text style={styles.modalLabel}>Nome</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.form.name_label")}
+            </Text>
             <TextInput
               style={styles.modalInput}
               value={editName}
               onChangeText={setEditName}
             />
 
-            <Text style={styles.modalLabel}>Data (DD/MM/AAAA)</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.form.date_label")}
+            </Text>
             <TextInput
               style={styles.modalInput}
               value={editDate}
               onChangeText={setEditDate}
             />
 
-            <Text style={styles.modalLabel}>Hora (HH:mm)</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.form.time_label")}
+            </Text>
             <TextInput
               style={styles.modalInput}
               value={editTime}
               onChangeText={setEditTime}
             />
 
-            <Text style={styles.modalLabel}>Tipo de Evento</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.form.event_type_label")}
+            </Text>
             <Picker
               selectedValue={editEventType}
               onValueChange={(v) => setEditEventType(v)}
               style={[styles.modalInput, { color: "#fff" }]}
             >
-              <Picker.Item label="Cup" value="Cup" />
-              <Picker.Item label="Challenger" value="Challenger" />
-              <Picker.Item label="Pre-release" value="Pre-release" />
-              <Picker.Item label="Liguinha" value="Liguinha" />
-              <Picker.Item label="Evento Especial" value="Evento Especial" />
+              <Picker.Item label={t("calendar.event_types.cup")} value="Cup" />
+              <Picker.Item
+                label={t("calendar.event_types.challenger")}
+                value="Challenger"
+              />
+              <Picker.Item
+                label={t("calendar.event_types.pre_release")}
+                value="Pre-release"
+              />
+              <Picker.Item
+                label={t("calendar.event_types.liguinha")}
+                value="Liguinha"
+              />
+              <Picker.Item
+                label={t("calendar.event_types.special_event")}
+                value="Evento Especial"
+              />
             </Picker>
 
-            <Text style={styles.modalLabel}>Juiz</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.form.judge_label")}
+            </Text>
             <Picker
               selectedValue={editJudge}
               onValueChange={(v) => setEditJudge(v)}
@@ -972,7 +1037,9 @@ export default function CalendarScreen() {
               ))}
             </Picker>
 
-            <Text style={styles.modalLabel}>Head Judge</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.form.head_judge_label")}
+            </Text>
             <Picker
               selectedValue={editHeadJudge}
               onValueChange={(v) => setEditHeadJudge(v)}
@@ -993,23 +1060,27 @@ export default function CalendarScreen() {
                 style={[styles.button, { backgroundColor: "#999" }]}
                 onPress={() => setModalVisible(false)}
               >
-                <Text style={styles.buttonText}>Cancelar</Text>
+                <Text style={styles.buttonText}>
+                  {t("calendar.form.cancel_button")}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.button} onPress={handleSaveTorneio}>
-                <Text style={styles.buttonText}>Salvar</Text>
+                <Text style={styles.buttonText}>
+                  {t("calendar.form.save_button")}
+                </Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
         </SafeAreaView>
       </Modal>
 
-      {/* Modal DETALHES (host/juiz) */}
+      {/* Modal DETALHES */}
       {detalhesModalVisible && renderDetalhesModal()}
 
-      {/* Sub-modal INSCRIÇÕES / DECKS (mais otimizado) */}
+      {/* Sub-modal INSCRIÇÕES */}
       {renderInscricoesModal()}
 
-      {/* Sub-modal do PDF do deck */}
+      {/* Sub-modal PDF do Deck */}
       {renderDeckPdfModal()}
 
       {/* Modal INSCRIÇÃO (Deck) */}
@@ -1020,10 +1091,12 @@ export default function CalendarScreen() {
       >
         <SafeAreaView style={styles.modalContainer}>
           <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>Escolha seu Deck</Text>
+            <Text style={styles.modalTitle}>
+              {t("calendar.registration.title")}
+            </Text>
             {userDecks.length === 0 && (
               <Text style={{ color: "#fff", marginBottom: 10 }}>
-                (Nenhum deck cadastrado)
+                {t("calendar.registration.no_decks")}
               </Text>
             )}
             {userDecks.map((dk) => (
@@ -1046,10 +1119,14 @@ export default function CalendarScreen() {
                 style={[styles.button, { backgroundColor: "#999" }]}
                 onPress={() => setInscricaoModalVisible(false)}
               >
-                <Text style={styles.buttonText}>Cancelar</Text>
+                <Text style={styles.buttonText}>
+                  {t("calendar.form.cancel_button")}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
-                <Text style={styles.buttonText}>Enviar</Text>
+                <Text style={styles.buttonText}>
+                  {t("calendar.registration.submit_button")}
+                </Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -1059,7 +1136,6 @@ export default function CalendarScreen() {
   );
 }
 
-// ----------- Funções auxiliares -----------
 function formatIsoDate(isoStr: string) {
   if (!isoStr) return "";
   const m = moment(isoStr);

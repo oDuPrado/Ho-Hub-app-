@@ -1,258 +1,389 @@
 {
     "login": {
-        "title_login": "Login",
-        "title_signup": "Sign Up",
-        "email_label": "Email",
-        "email_placeholder": "youremail@example.com",
-        "password_label": "Password",
-        "password_placeholder": "Enter your password",
-        "forgot_password": "Forgot Password?",
-        "password_strength": "Password strength: {{strength}}",
-        "player_name_label": "Player Name",
-        "player_name_placeholder": "Ex: Ash Ketchum",
-        "player_id_label": "Player ID",
-        "player_id_placeholder": "Ex: 5062577",
-        "pin_label": "PIN",
-        "pin_placeholder": "****",
-        "stay_logged": "Stay Logged In (coming soon)",
-        "signup_button": "Sign Up",
-        "login_button": "Login",
-        "link_to_login": "Already have an account? Login Here",
-        "link_to_signup": "Don't have an account? Sign Up",
-        "loading": "Loading...",
-        "alerts": {
-            "welcome": "Welcome",
-            "empty_fields": "Fill in all fields (Name, Email, Password, ID, and PIN).",
-            "invalid_email": "Invalid email.",
-            "weak_password": "Your password must have at least 1 uppercase, 1 lowercase, 1 number, 1 special character, and 8 characters.",
-            "signup_success": "Account created. ID={{playerId}}, PIN={{pin}}",
-            "signup_error": "Sign-up error. {{error}}",
-            "login_error": "Login error. {{error}}",
-            "wrong_password": "Incorrect password. Try again.",
-            "user_not_found": "User not found. Check the email.",
-            "password_reset_sent": "A password reset link has been sent to your email.",
-            "password_reset_error": "Error sending password reset: {{error}}",
-            "incomplete_account": "Your login does not have playerId/pin data. Incomplete account.",
-            "missing_data": "Document missing playerId/pin. Contact support."
-        }
+      "title_login": "Sign In",
+      "title_signup": "Create Account",
+      "email_label": "Email",
+      "email_placeholder": "youremail@example.com",
+      "password_label": "Password",
+      "password_placeholder": "Enter your password",
+      "forgot_password": "Forgot Password?",
+      "password_strength": "Password strength: {{strength}}",
+      "player_name_label": "Player Name",
+      "player_name_placeholder": "Ex: Ash Ketchum",
+      "player_id_label": "Player ID",
+      "player_id_placeholder": "Ex: 5062577",
+      "pin_label": "PIN",
+      "pin_placeholder": "****",
+      "stay_logged": "Stay Logged (soon)",
+      "signup_button": "Sign Up",
+      "login_button": "Sign In",
+      "link_to_login": "Already have an account? Sign In",
+      "link_to_signup": "Don't have an account? Create One",
+      "loading": "Loading...",
+      "alerts": {
+        "welcome": "Welcome",
+        "empty_fields": "Fill all fields (Name, Email, Password, ID, and PIN).",
+        "invalid_email": "Invalid email.",
+        "weak_password": "Your password must have at least 1 uppercase, 1 lowercase, 1 number, 1 special character, and 8 characters total.",
+        "signup_success": "Account created. ID={{playerId}}, PIN={{pin}}",
+        "signup_error": "Sign-up error. {{error}}",
+        "login_error": "Sign-in error. {{error}}",
+        "wrong_password": "Wrong password. Try again.",
+        "user_not_found": "User not found. Check the email.",
+        "password_reset_sent": "A reset link has been sent to your email.",
+        "password_reset_error": "Error sending reset link: {{error}}",
+        "incomplete_account": "Your login does not have playerId/pin. Incomplete account.",
+        "missing_data": "Document has no playerId/pin. Contact support."
+      }
     },
+  
     "drawer": {
-        "home": "Home",
-        "calendario": "Calendar",
-        "torneio": "Tournament",
-        "noticias": "News",
-        "iapikachu": "PikachuAI",
-        "cartas": "Cards",
-        "trocas": "Trades",
-        "decks": "Decks",
-        "jogador": "Player",
-        "sugestao": "Suggestion"
+      "home": "Home",
+      "calendario": "Calendar",
+      "torneio": "Tournament",
+      "noticias": "News",
+      "iapikachu": "IApikachu",
+      "cartas": "Cards",
+      "trocas": "Trades",
+      "decks": "Decks",
+      "jogador": "Player",
+      "sugestao": "Suggestion"
     },
+  
     "analytics": {
-        "welcome_messages": [
-            "Hello, Trainer! Ready to evolve your skills?",
-            "Welcome back, battle master!",
-            "Hey, champ! Let's strengthen that deck even more!",
-            "Greetings, Trainer! This is PikachuAI!"
+      "welcome_messages": [
+        "Hello, Trainer! Ready to improve your skills?",
+        "Welcome back, battle master!",
+        "Hey, champion! Let’s strengthen this deck even more?",
+        "Greetings, Trainer! This is PikachuAI!"
+      ],
+      "loading": "Loading stats...",
+      "error_loading": "Failed to load stats.",
+      "generate_tip": "Generate New Tip",
+      "ai_card_title": "AI Tips",
+      "block_message": "Hey, hold on! You're training more than a Machamp at the gym! How about a 10-minute break?",
+      "ai_name": "PikachuAI",
+      "alerts": {
+        "player_id_error": "Could not get the player ID.",
+        "pause_message": "Hey, hold on! How about a 10-minute break before generating more tips?",
+        "no_tips_available": "Keep playing and honing your skills!"
+      },
+      "generic_tips": [
+        "Remember: each card in your deck has a purpose. Get to know them well!",
+        "Practice makes perfect. Keep training your strategies!",
+        "Study the current meta to adapt your deck to the trends.",
+        "Patience is a virtue. Wait for the right moment to play that decisive card.",
+        "Know not only your cards but also the possible moves of your opponent.",
+        "Never underestimate a trainer with a Pikachu on the bench. Small beginnings can have electric endings!",
+        "Energy cards are the foundation of any deck. Make sure the balance is correct!"
+      ],
+      "conditional_tips": {
+        "more_wins": [
+          "You're doing great! Consider joining online tournaments to test your skills.",
+          "With a high win rate, you're on the right path to becoming a champion."
         ],
-        "loading": "Loading statistics...",
-        "error_loading": "Failed to load statistics.",
-        "generate_tip": "Generate New Tip",
-        "ai_card_title": "AI Tips",
-        "block_message": "Hey, slow down! You're training more than a Machamp at the gym! How about a 10-minute break?",
-        "ai_name": "PikachuAI",
-        "alerts": {
-            "player_id_error": "Unable to get Player ID.",
-            "pause_message": "Hey, slow down! How about a 10-minute break before generating more tips?",
-            "no_tips_available": "Keep playing and improving your skills!"
-        },
-        "generic_tips": [
-            "Remember: each card in your deck has a purpose. Know them well!",
-            "Practice makes perfect. Keep training your strategies!",
-            "Study the current meta to adapt your deck to trends.",
-            "Patience is a virtue. Wait for the right moment to play that decisive card.",
-            "Know not only your cards but also your opponent's possible plays.",
-            "Never underestimate a trainer with a Pikachu on the bench. Small beginnings can have electric endings!",
-            "Energy cards are the foundation of any deck. Ensure the balance is right!"
+        "more_losses": [
+          "Don't be discouraged! Review your strategies and study the current meta.",
+          "Identify the Pokémon types that cause you the most trouble and adjust your deck to face them."
         ],
-        "conditional_tips": {
-            "more_wins": [
-                "Your performance is great! Consider participating in online tournaments to test your skills.",
-                "With a high win rate, you're on the right path to becoming a champion."
-            ],
-            "more_losses": [
-                "Don't give up! Review your strategies and study the current meta.",
-                "Identify the types of Pokémon that cause the most problems and adjust your deck to counter them."
-            ],
-            "more_draws": [
-                "Many ties? It might be time to adjust your strategy to focus on consistent wins.",
-                "Consider cards that provide a strong finisher to avoid frequent ties."
-            ]
-        }
+        "more_draws": [
+          "Too many draws? Maybe it's time to adjust your strategy to aim for a more consistent win.",
+          "Consider cards that offer a strong finisher to avoid frequent draws."
+        ]
+      }
     },
+  
     "calendar": {
-        "header": {
-            "prev_month": "<",
-            "next_month": ">",
-            "title": "{{month}} of {{year}}"
-        },
-        "create_tournament": "+ Create Tournament",
-        "form": {
-            "name_label": "Name",
-            "date_label": "Date (DD/MM/YYYY)",
-            "time_label": "Time (HH:mm)",
-            "event_type_label": "Event Type",
-            "judge_label": "Judge",
-            "head_judge_label": "Head Judge",
-            "cancel_button": "Cancel",
-            "save_button": "Save"
-        },
-        "event_types": {
-            "cup": "Cup",
-            "challenger": "Challenger",
-            "pre_release": "Pre-release",
-            "liguinha": "League",
-            "special_event": "Special Event"
-        },
-        "alerts": {
-            "name_required": "Tournament name cannot be empty.",
-            "invalid_date": "Invalid date (use DD/MM/YYYY).",
-            "save_error": "Failed to save tournament.",
-            "delete_confirm": "Delete tournament {{name}}?",
-            "delete_error": "Failed to delete tournament.",
-            "success_registration": "Registration successful!",
-            "registration_error": "Failed to register."
-        },
-        "details": {
-            "title": "Tournament Details",
-            "name_label": "Name",
-            "date_label": "Date",
-            "time_label": "Time",
-            "event_type_label": "Event Type",
-            "judge_label": "Judge",
-            "head_judge_label": "Head Judge",
-            "view_inscriptions_button": "View Registrations/Decks",
-            "close_button": "Close"
-        },
-        "registration": {
-            "title": "Choose Your Deck",
-            "no_decks": "(No decks registered)",
-            "submit_button": "Submit"
-        },
-        "card": {
-            "creator_label": "Creator",
-            "judge_label": "Judge",
-            "head_judge_label": "Head Judge",
-            "details_button": "View Details",
-            "register_button": "Register",
-            "already_occurred": "Already occurred"
-        }
+      "header": {
+        "prev_month": "<",
+        "next_month": ">",
+        "title": "{{month}} of {{year}}"
+      },
+      "create_tournament": "+ Create Tournament",
+      "form": {
+        "name_label": "Name",
+        "date_label": "Date (MM/DD/YYYY)",
+        "time_label": "Time (HH:mm)",
+        "event_type_label": "Event Type",
+        "judge_label": "Judge",
+        "head_judge_label": "Head Judge",
+        "cancel_button": "Cancel",
+        "save_button": "Save"
+      },
+      "event_types": {
+        "cup": "Cup",
+        "challenger": "Challenger",
+        "pre_release": "Pre-release",
+        "liguinha": "Little League",
+        "special_event": "Special Event"
+      },
+      "alerts": {
+        "name_required": "Tournament name cannot be empty.",
+        "invalid_date": "Invalid date (use MM/DD/YYYY).",
+        "save_error": "Failed to save tournament.",
+        "delete_confirm": "Delete tournament {{name}}?",
+        "delete_error": "Failed to delete tournament.",
+        "success_registration": "Registration successful!",
+        "registration_error": "Failed to register.",
+  
+        "judge_confirmed": "You have confirmed as Judge for {{tournamentName}}.",
+        "judge_declined": "You have declined to be Judge for {{tournamentName}}.",
+        "judge_notif_host_confirmed": "The Judge has confirmed the role!",
+        "judge_notif_host_declined": "The Judge has declined the role."
+      },
+      "details": {
+        "title": "Tournament Details",
+        "name_label": "Name",
+        "date_label": "Date",
+        "time_label": "Time",
+        "event_type_label": "Event Type",
+        "judge_label": "Judge",
+        "head_judge_label": "Head Judge",
+        "view_inscriptions_button": "View Registrations/Decks",
+        "close_button": "Close"
+      },
+      "registration": {
+        "title": "Choose Your Deck",
+        "no_decks": "(No decks registered)",
+        "submit_button": "Send"
+      },
+      "card": {
+        "creator_label": "Creator",
+        "judge_label": "Judge",
+        "head_judge_label": "Head Judge",
+        "details_button": "View Details",
+        "register_button": "Register",
+        "already_occurred": "Already occurred"
+      }
     },
+  
     "noticias": {
-        "header": "Pokémon TCG News",
-        "loading": "Loading news...",
-        "error": "Unable to load news.",
-        "retry": "Try Again",
-        "details": {
-            "source": "Source",
-            "date": "Date",
-            "description": "Description",
-            "link_error": "Unable to open the link."
-        }
+      "header": "Pokémon TCG News",
+      "loading": "Loading news...",
+      "error": "Could not load the news.",
+      "no_news": "No news found about Pokémon TCG.",
+      "retry": "Try Again",
+      "details": {
+        "source": "Source",
+        "date": "Date",
+        "description": "Description",
+        "no_title": "No title",
+        "no_description": "No description available",
+        "link_error": "Could not open the link."
+      }
     },
+  
     "sugestao": {
-        "header": "Suggestions",
-        "labels": {
-            "subject": "Subject",
-            "message": "Message"
-        },
-        "placeholders": {
-            "subject": "Enter the subject",
-            "message": "Enter your suggestion"
-        },
-        "buttons": {
-            "send": "Send"
-        },
-        "warnings": {
-            "daily_limit": "You can only send one suggestion per day.",
-            "empty_message": "Message cannot be empty."
-        },
-        "success": "Suggestion sent successfully!",
-        "error": "Unable to send your suggestion."
+      "header": "Suggestions",
+      "labels": {
+        "subject": "Subject",
+        "message": "Message"
+      },
+      "placeholders": {
+        "subject": "Enter the subject",
+        "message": "Enter your suggestion"
+      },
+      "buttons": {
+        "send": "Send"
+      },
+      "warnings": {
+        "daily_limit": "You can only send one suggestion per day.",
+        "empty_message": "The message cannot be empty."
+      },
+      "success": "Suggestion sent successfully!",
+      "error": "Could not send your suggestion."
     },
+  
+    "torneio": {
+      "header": "Tournament",
+      "loading": "Loading tournament data...",
+      "error": "Error loading tournament data.",
+      "round": "Round",
+      "table": "Table",
+      "opponent": "Opponent",
+      "buttons": {
+        "refresh": "Refresh",
+        "report_result": "Report Result"
+      },
+      "alerts": {
+        "new_round": "New round available!",
+        "attention": "Attention",
+        "not_logged_in": "You are not logged in.",
+        "no_table": "No table was found for you.",
+        "no_opponent": "None",
+        "no_round": "None"
+      },
+      "info": {
+        "ongoing_title": "Ongoing Tournament",
+        "player_label": "Player",
+        "opponent_label": "Opponent",
+        "current_round": "Current Round",
+        "your_table": "Your Table",
+        "none": "None",
+        "not_found": "Not Found"
+      }
+    },
+  
     "trocas": {
-        "header": "Trades/Sales",
-        "filters": {
-            "all": "All",
-            "trade": "Trade",
-            "sale": "Sale",
-            "want": "Want"
-        },
-        "placeholders": {
-            "search": "Search card..."
-        },
-        "messages": {
-            "no_results": "No cards found."
-        }
+      "header": "Trades/Sales",
+      "filters": {
+        "all": "All",
+        "trade": "Trade",
+        "sale": "Sale",
+        "want": "Want"
+      },
+      "placeholders": {
+        "search": "Search card..."
+      },
+      "messages": {
+        "no_results": "No card found."
+      },
+      "alerts": {
+        "not_logged_in": "You are not logged in.",
+        "owner": "You own this card.",
+        "interest_registered": "Interest registered. The owner has been notified.",
+        "deleted": "Card removed from feed.",
+        "delete_confirm": "Delete \"{{cardName}}\"?",
+        "delete_failed": "Failed to delete."
+      },
+      "buttons": {
+        "my_cards": "Mine",
+        "all_cards": "All",
+        "interest": "I'm Interested",
+        "delete": "Delete Card",
+        "close": "Close"
+      }
     },
+  
     "home": {
-        "welcome": "Welcome, {{username}}!",
-        "stats": {
-            "wins": "Wins",
-            "losses": "Losses",
-            "draws": "Draws",
-            "total_matches": "Total Matches",
-            "rival": "Biggest Rival"
-        },
-        "buttons": {
-            "logout": "Logout"
-        },
-        "alerts": {
-            "loading": "Loading statistics..."
-        }
+      "welcome": "Welcome, {{username}}!",
+      "stats": {
+        "wins": "Wins",
+        "losses": "Losses",
+        "draws": "Draws",
+        "total_matches": "Total Matches",
+        "winrate": "WinRate",
+        "rival": "Biggest Rival",
+        "none_rival": "No rival found"
+      },
+      "buttons": {
+        "logout": "Sign Out",
+        "donate": "Donate",
+        "collections": "Valid Collections"
+      },
+      "alerts": {
+        "loading": "Loading stats...",
+        "no_logout": "Could not sign out."
+      },
+      "collections_modal": {
+        "title": "Valid Collections",
+        "serie": "Series",
+        "total_cards": "Total Cards",
+        "released": "Release Date",
+        "rotation": "Rotation",
+        "error_loading": "Failed to load valid collections."
+      }
     },
+  
     "jogador": {
-        "header": "Player Profile",
-        "stats": {
-            "wins": "Wins",
-            "losses": "Losses",
-            "draws": "Draws",
-            "unique_opponents": "Unique Opponents"
-        },
-        "titles": {
-            "unlocked": "Unlocked Titles"
-        },
-        "buttons": {
-            "view_history": "View History",
-            "search_player": "Search Player"
-        }
+      "header": "Player Profile",
+      "stats": {
+        "wins": "Wins (Matches)",
+        "losses": "Losses (Matches)",
+        "draws": "Draws (Matches)",
+        "total_matches": "Total Matches",
+        "win_rate": "WinRate",
+        "win_streak": "Win Streak (Matches)",
+        "loss_streak": "Loss Streak (Matches)"
+      },
+      "buttons": {
+        "view_history": "View Tournament History",
+        "close": "Close"
+      },
+      "titles": {
+        "unlocked": "Unlocked Titles",
+        "none": "No titles yet."
+      },
+      "history": {
+        "modal_title": "Tournament History",
+        "position": "Position",
+        "rounds": "Rounds",
+        "none": "No tournaments found for you.",
+        "error_loading": "Failed to load history."
+      },
+      "rival": {
+        "title": "Rivalry",
+        "factor": "Rivalry Factor",
+        "matches": "Matches",
+        "wins": "Wins",
+        "losses": "Losses",
+        "draws": "Draws",
+        "error_loading": "Failed to calculate rivalry."
+      },
+      "search": {
+        "header": "Search Player for Rivalry",
+        "placeholder": "Enter part of the name...",
+        "button": "Search",
+        "no_results": "No player found.",
+        "error": "Failed to search players."
+      }
     },
+  
     "decks": {
-        "header": "Deck Management",
-        "buttons": {
-            "create": "Create Deck",
-            "edit": "Edit",
-            "delete": "Delete"
-        },
-        "labels": {
-            "name": "Deck Name"
-        },
-        "alerts": {
-            "delete_confirm": "Are you sure you want to delete this deck?",
-            "delete_success": "Deck successfully deleted!"
-        }
+      "header": "Deck Management",
+      "heading": "My Decks",
+      "label_name": "Deck Name",
+      "label_deck_list": "Deck List (text)",
+      "tip_deck_list": "Ex.: 'Pokémon: ... Trainer: ... Energy: ...'",
+      "create_button": "Create Deck",
+      "create_success": "Deck created successfully!",
+      "create_error": "Failed to create deck. Check Firestore rules and logs.",
+      "no_cards_detected": "No card detected. Check if there are 'Pokémon:', 'Trainer:' or 'Energy:' blocks.",
+      "invalid_quantity": "Some card has quantity < 1. Fix it before creating.",
+      "delete_confirm": "Are you sure you want to delete deck \"{{deckName}}\"?",
+      "delete_success": "Deck deleted successfully!",
+      "delete_error": "Failed to delete deck. Please try again.",
+      "edit_title": "Edit Deck",
+      "update_success": "Deck updated!",
+      "update_error": "Failed to update deck.",
+      "pokemons": "Pokémon",
+      "trainers": "Trainer",
+      "energies": "Energies",
+      "placeholder_name": "Ex: Gholdengo",
+      "placeholder_deck_list": "Pokémon: 10 Togepi... Trainer: 18 Energy Search... Energy: 8 Basic..."
     },
+  
     "cartas": {
-        "header": "Card Search",
-        "placeholders": {
-            "search": "Search by name or code..."
-        },
-        "buttons": {
-            "have": "Have",
-            "want": "Want"
-        },
-        "alerts": {
-            "no_results": "No results found."
-        }
+      "header": "Card Lookup",
+      "placeholders": {
+        "search": "Search by name or code..."
+      },
+      "buttons": {
+        "have": "I Have",
+        "want": "I Want"
+      },
+      "alerts": {
+        "no_results": "No results found.",
+        "post_created": "Post created!",
+        "post_failed": "Failed to create post.",
+        "not_logged_in": "You are not logged in.",
+        "limit_reached": "You already have 5 cards published simultaneously.",
+        "no_card_selected": "No card selected.",
+        "no_price": "Enter a value or e.g. 'R$ 10,00'."
+      }
+    },
+  
+    "common": {
+      "error": "Error",
+      "success": "Success",
+      "edit": "Edit",
+      "confirm": "Confirm",
+      "decline": "Decline",
+      "delete": "Delete",
+      "close": "Close",
+      "confirmation_title": "Confirmation",
+      "coming_soon": "Coming soon",
+      "attention": "Attention"
     }
-}
+  }
+  

@@ -12,9 +12,8 @@ import {
 import axios from "axios";
 import * as WebBrowser from "expo-web-browser";
 
-// ----------------------
-// 1. Tipo da nossa Notícia
-// ----------------------
+import { useTranslation } from "react-i18next"; // <--- i18n
+
 interface NewsItem {
   title: string;
   link: string;
@@ -24,66 +23,54 @@ interface NewsItem {
   description: string;
 }
 
-// ----------------------
-// 2. Componente Principal
-// ----------------------
 export default function NoticiasScreen() {
+  const { t } = useTranslation(); // <--- i18n
   const [loading, setLoading] = useState<boolean>(true);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [errorLog, setErrorLog] = useState<string>("");
 
-  // Ao montar, faz a busca
   useEffect(() => {
     fetchNews();
   }, []);
 
-  // Função principal de busca
   const fetchNews = async () => {
     setLoading(true);
     setErrorLog("");
     try {
-      // Buscar apenas NewsAPI
       const fetchedNews = await fetchNewsAPINews();
       if (fetchedNews.length === 0) {
-        setErrorLog("Nenhuma notícia encontrada sobre Pokémon TCG.");
+        setErrorLog(t("noticias.no_news"));
       }
       setNews(fetchedNews);
     } catch (error) {
       console.log("Erro ao buscar notícias:", error);
-      setErrorLog(
-        "Não foi possível carregar as notícias. Verifique a rede ou sua API Key."
-      );
+      setErrorLog(t("noticias.error"));
       setNews([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Abre link no navegador (WebBrowser)
   const handleOpenLink = async (url: string) => {
     try {
       await WebBrowser.openBrowserAsync(url);
     } catch (error) {
-      Alert.alert("Erro", "Não foi possível abrir o link.");
+      Alert.alert(t("common.error"), t("noticias.details.link_error"));
       console.error("Erro ao abrir link:", error);
     }
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Notícias Pokémon TCG</Text>
+      <Text style={styles.header}>{t("noticias.header")}</Text>
 
       {loading ? (
-        <ActivityIndicator
-          size="large"
-          color={PRIMARY}
-          style={{ marginTop: 20 }}
-        />
+        <ActivityIndicator size="large" color={PRIMARY} style={{ marginTop: 20 }} />
       ) : errorLog ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorMessage}>{errorLog}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={fetchNews}>
-            <Text style={styles.retryButtonText}>Tentar Novamente</Text>
+            <Text style={styles.retryButtonText}>{t("noticias.retry")}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -97,12 +84,20 @@ export default function NoticiasScreen() {
               {item.image && (
                 <Image source={{ uri: item.image }} style={styles.cardImage} />
               )}
-              <Text style={styles.title}>{item.title}</Text>
+              <Text style={styles.title}>
+                {item.title || t("noticias.details.no_title")}
+              </Text>
               {item.description && (
-                <Text style={styles.description}>{item.description}</Text>
+                <Text style={styles.description}>
+                  {item.description || t("noticias.details.no_description")}
+                </Text>
               )}
-              <Text style={styles.date}>{item.date}</Text>
-              <Text style={styles.source}>Fonte: {item.source}</Text>
+              <Text style={styles.date}>
+                {t("noticias.details.date")}: {item.date}
+              </Text>
+              <Text style={styles.source}>
+                {t("noticias.details.source")}: {item.source}
+              </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -111,9 +106,6 @@ export default function NoticiasScreen() {
   );
 }
 
-// ----------------------
-// 3. Busca via NewsAPI
-// ----------------------
 async function fetchNewsAPINews(): Promise<NewsItem[]> {
   const apiKey = "847216195ee642f684ee6f39c627a58d";
   const today = new Date();
@@ -127,7 +119,6 @@ async function fetchNewsAPINews(): Promise<NewsItem[]> {
 
   try {
     const response = await axios.get(url);
-
     if (response.status !== 200) {
       throw new Error(`Status de Erro: ${response.status}`);
     }
@@ -135,12 +126,12 @@ async function fetchNewsAPINews(): Promise<NewsItem[]> {
     const articles = response.data.articles || [];
     const mapped = articles.map((article: any) => {
       return {
-        title: article.title || "Sem título",
+        title: article.title || "",
         link: article.url || "#",
         date: new Date(article.publishedAt || "").toLocaleDateString(),
         source: article.source?.name || "NewsAPI",
         image: article.urlToImage || null,
-        description: article.description || "Descrição não disponível",
+        description: article.description || "",
       } as NewsItem;
     });
     return mapped;
@@ -150,9 +141,6 @@ async function fetchNewsAPINews(): Promise<NewsItem[]> {
   }
 }
 
-// ----------------------
-// 4. Estilos
-// ----------------------
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const CARD_BG = "#292929";

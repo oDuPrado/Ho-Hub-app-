@@ -19,9 +19,10 @@ import {
   doc,
   getDocs,
   setDoc,
-  updateDoc,
-} from "firebase/firestore";
+} from "firebase/firestore"; // (você usa updateDoc também, mas não vi neste code)
 import { db } from "../../lib/firebaseConfig";
+
+import { useTranslation } from "react-i18next"; // <--- i18n
 
 interface CardData {
   id: string;
@@ -51,22 +52,22 @@ interface CollectionData {
   ptcgoCode?: string;
 }
 
-/** Para criar um post no Firestore, podemos ter esses tipos */
 type TradeType = "sale" | "trade" | "want";
 
-/** Estrutura do modal de criação (edição) */
 interface CreatingState {
   visible: boolean;
   card: CardData | null;
-  action: "have" | "want"; // Se clicou em "Tenho" ou "Quero"
-  type: TradeType; // sale, trade ou want
+  action: "have" | "want";
+  type: TradeType;
   priceMode: "manual" | "liga";
-  priceValue: string; // ex. "R$ 10,00"
-  ligaPercent: string; // ex. "5%"
+  priceValue: string;
+  ligaPercent: string;
   obs: string;
 }
 
 export default function CardsSearchScreen() {
+  const { t } = useTranslation(); // <--- i18n Hook
+
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredCards, setFilteredCards] = useState<CardData[]>([]);
   const [collections, setCollections] = useState<CollectionData[]>([]);
@@ -99,6 +100,7 @@ export default function CardsSearchScreen() {
       if (uid) setPlayerId(uid);
       if (uname) setPlayerName(uname);
     })();
+
     async function fetchCollections() {
       try {
         const resp = await fetch("https://api.pokemontcg.io/v2/sets");
@@ -123,6 +125,7 @@ export default function CardsSearchScreen() {
         return;
       }
 
+      // Tenta separação setCode + cardNumber
       const parts = text.split(/\s+/);
       if (parts.length === 2) {
         const setCode = parts[0].toUpperCase();
@@ -132,7 +135,6 @@ export default function CardsSearchScreen() {
         );
         if (matchedSet) {
           const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${matchedSet.id}" number:"${cardNumber}"`;
-          console.log("Consulta (set+num):", url);
           const response = await fetch(url);
           const data = await response.json();
           if (data && data.data) setFilteredCards(data.data);
@@ -142,13 +144,13 @@ export default function CardsSearchScreen() {
         }
       }
 
+      // Tenta achar setCode sozinho
       const up = text.toUpperCase();
       const matchedSet2 = collections.find(
         (c) => (c.ptcgoCode || "").toUpperCase() === up
       );
       if (matchedSet2) {
         const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${matchedSet2.id}"`;
-        console.log("Consulta (apenas set):", url);
         const resp = await fetch(url);
         const data = await resp.json();
         if (data && data.data) setFilteredCards(data.data);
@@ -157,11 +159,10 @@ export default function CardsSearchScreen() {
         return;
       }
 
-      // assume nome da carta
+      // Assume nome
       const nameUrl = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(
         text
       )}"`;
-      console.log("Consulta (nome):", nameUrl);
       const resp2 = await fetch(nameUrl);
       const data2 = await resp2.json();
       if (data2 && data2.data) setFilteredCards(data2.data);
@@ -173,6 +174,7 @@ export default function CardsSearchScreen() {
       setLoading(false);
     }
   }
+
   function handleSearchChange(txt: string) {
     setSearchQuery(txt);
     searchCard(txt);
@@ -190,12 +192,10 @@ export default function CardsSearchScreen() {
 
   // --------------- CRIAR (Tenho/Quero) ---------------
   function handleHaveOrWant(card: CardData, action: "have" | "want") {
-    // Abre modal de criação com defaults
     setCreateState({
       visible: true,
       card,
       action,
-      // se é "have", default type= "trade" ou "sale"?
       type: action === "have" ? "sale" : "want",
       priceMode: "manual",
       priceValue: "",
@@ -211,24 +211,21 @@ export default function CardsSearchScreen() {
   // --------------- Salvar post --------------
   async function handleSavePost() {
     if (!playerId) {
-      Alert.alert("Erro", "Você não está logado");
+      Alert.alert(t("common.error"), t("cartas.alerts.not_logged_in"));
       return;
     }
     if (!createState.card) {
-      Alert.alert("Erro", "Nenhuma carta selecionada");
+      Alert.alert(t("common.error"), t("cartas.alerts.no_card_selected"));
       return;
     }
-    // Pega contagem do user
+    // Verifica limite
     const collRef = collection(db, "trade");
     const snapshot = await getDocs(collRef);
     const userPosts = snapshot.docs.filter(
       (d) => d.data().ownerId === playerId
     );
     if (userPosts.length >= 5) {
-      Alert.alert(
-        "Limite Atingido",
-        "Você já tem 5 cartas publicadas simultaneamente."
-      );
+      Alert.alert(t("common.error"), t("cartas.alerts.limit_reached"));
       closeCreateModal();
       return;
     }
@@ -238,7 +235,7 @@ export default function CardsSearchScreen() {
       // Se for venda, pega price
       if (createState.priceMode === "manual") {
         if (!createState.priceValue.trim()) {
-          Alert.alert("Erro", "Informe um valor ou ex: 'R$ 10,00'");
+          Alert.alert(t("common.error"), t("cartas.alerts.no_price"));
           return;
         }
         finalPrice = createState.priceValue.trim();
@@ -254,7 +251,7 @@ export default function CardsSearchScreen() {
     }
 
     try {
-      const docRef = doc(collRef); // gera um novo ID
+      const docRef = doc(collRef);
       await setDoc(docRef, {
         cardName: createState.card.name,
         cardImage: createState.card.images.small,
@@ -266,20 +263,20 @@ export default function CardsSearchScreen() {
         interested: [],
         createdAt: Date.now(),
       });
-      Alert.alert("Sucesso", "Publicação criada!");
+      Alert.alert(t("common.success"), t("cartas.alerts.post_created"));
       closeCreateModal();
     } catch (err) {
       console.log("Erro ao criar post:", err);
-      Alert.alert("Erro", "Falha ao criar post.");
+      Alert.alert(t("common.error"), t("cartas.alerts.post_failed"));
     }
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Consulta de Cartas (Pokémon TCG)</Text>
+      <Text style={styles.title}>{t("cartas.header")} (Pokémon TCG)</Text>
       <TextInput
         style={styles.searchInput}
-        placeholder='Busque: "PGO 68", "PGO" ou "Pikachu"'
+        placeholder={`${t("cartas.placeholders.search")} (Ex: "PGO 68")`}
         placeholderTextColor="#999"
         value={searchQuery}
         onChangeText={handleSearchChange}
@@ -288,7 +285,9 @@ export default function CardsSearchScreen() {
 
       <ScrollView contentContainerStyle={styles.cardList}>
         {!loading && filteredCards.length === 0 && searchQuery.length > 0 && (
-          <Text style={styles.noResultsText}>Nenhum resultado encontrado.</Text>
+          <Text style={styles.noResultsText}>
+            {t("cartas.alerts.no_results")}
+          </Text>
         )}
 
         {filteredCards.map((card) => (
@@ -329,7 +328,8 @@ export default function CardsSearchScreen() {
                 {selectedCard.tcgplayer ? (
                   <>
                     <Text style={styles.modalText}>
-                      Preço atualizado em: {selectedCard.tcgplayer.updatedAt}
+                      {t("cartas.details.updated_at", "Preço atualizado em")}:{" "}
+                      {selectedCard.tcgplayer.updatedAt}
                     </Text>
                     <View style={styles.rarityRow}>
                       {Object.keys(selectedCard.tcgplayer.prices).map(
@@ -365,26 +365,25 @@ export default function CardsSearchScreen() {
                         Linking.openURL(selectedCard.tcgplayer.url)
                       }
                     >
-                      <Text style={styles.linkButtonText}>Abrir TCGPlayer</Text>
+                      <Text style={styles.linkButtonText}>
+                        {t("cartas.details.open_tcgplayer", "Abrir TCGPlayer")}
+                      </Text>
                     </TouchableOpacity>
                   </>
                 ) : (
                   <Text style={styles.modalText}>
-                    (Sem info de preço no TCGPlayer)
+                    {t("cartas.details.no_price", "(Sem info de preço)")}
                   </Text>
                 )}
 
-                {/* Botões para "Tenho esta carta" ou "Quero esta carta" */}
                 <View style={styles.actionButtonsContainer}>
                   <TouchableOpacity
                     style={styles.actionButton}
-                    onPress={() =>
-                      // Abre modal de criação
-                      handleHaveOrWant(selectedCard, "have")
-                    }
+                    onPress={() => handleHaveOrWant(selectedCard, "have")}
                   >
                     <Text style={styles.actionButtonText}>
-                      Tenho esta carta
+                      {t("cartas.buttons.have")} {t("cartas.header")} 
+                      {/* Ex.: "Tenho Cartas" ou só "Tenho" */}
                     </Text>
                   </TouchableOpacity>
 
@@ -393,7 +392,7 @@ export default function CardsSearchScreen() {
                     onPress={() => handleHaveOrWant(selectedCard, "want")}
                   >
                     <Text style={styles.actionButtonText}>
-                      Quero esta carta
+                      {t("cartas.buttons.want")} {t("cartas.header")}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -402,7 +401,9 @@ export default function CardsSearchScreen() {
                   style={styles.closeButton}
                   onPress={closeCardModal}
                 >
-                  <Text style={styles.closeButtonText}>Fechar</Text>
+                  <Text style={styles.closeButtonText}>
+                    {t("common.close", "Fechar")}
+                  </Text>
                 </TouchableOpacity>
               </>
             )}
@@ -422,8 +423,8 @@ export default function CardsSearchScreen() {
               <>
                 <Text style={styles.modalTitle}>
                   {createState.action === "have"
-                    ? "Tenho esta carta"
-                    : "Quero esta carta"}
+                    ? `${t("cartas.buttons.have")} ${t("cartas.header")}`
+                    : `${t("cartas.buttons.want")} ${t("cartas.header")}`}
                 </Text>
 
                 <Image
@@ -433,8 +434,7 @@ export default function CardsSearchScreen() {
                 />
                 <Text style={styles.modalText}>{createState.card.name}</Text>
 
-                {/* Se action="have", escolhe sale ou trade */}
-                {createState.action === "have" ? (
+                {createState.action === "have" && (
                   <>
                     <Text style={styles.modalLabel}>Tipo</Text>
                     <View style={{ flexDirection: "row", marginBottom: 10 }}>
@@ -464,7 +464,6 @@ export default function CardsSearchScreen() {
                       </TouchableOpacity>
                     </View>
 
-                    {/* Se type=sale, define price */}
                     {createState.type === "sale" && (
                       <>
                         <Text style={styles.modalLabel}>Preço</Text>
@@ -541,10 +540,14 @@ export default function CardsSearchScreen() {
                       </>
                     )}
                   </>
-                ) : (
-                  // se action= "want", definimos type="want" fixo
+                )}
+
+                {createState.action === "want" && (
                   <Text style={[styles.modalLabel, { marginBottom: 6 }]}>
-                    Você deseja obter esta carta (tipo: "want").
+                    {t(
+                      "cartas.want_text",
+                      'Você deseja obter esta carta (tipo: "want").'
+                    )}
                   </Text>
                 )}
 
@@ -565,13 +568,14 @@ export default function CardsSearchScreen() {
                     style={[styles.button, { backgroundColor: "#999" }]}
                     onPress={closeCreateModal}
                   >
-                    <Text style={styles.buttonText}>Cancelar</Text>
+                    <Text style={styles.buttonText}>
+                      {t("calendar.form.cancel_button", "Cancelar")}
+                    </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.button}
-                    onPress={handleSavePost}
-                  >
-                    <Text style={styles.buttonText}>Salvar</Text>
+                  <TouchableOpacity style={styles.button} onPress={handleSavePost}>
+                    <Text style={styles.buttonText}>
+                      {t("calendar.registration.submit_button", "Enviar")}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </>
