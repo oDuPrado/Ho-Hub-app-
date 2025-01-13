@@ -31,9 +31,9 @@ import { doc, setDoc, getDoc } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 
 import { auth, db } from "../../lib/firebaseConfig";
+import { useTranslation } from "react-i18next"; // <--- Import do i18n
 
 // --------------- Funções Auxiliares (validação) ---------------
-
 function checkPasswordStrength(password: string) {
   let score = 0;
   if (/[A-Z]/.test(password)) score++;
@@ -73,6 +73,7 @@ function validatePassword(pw: string): boolean {
 // --------------- Componente Principal ---------------
 export default function LoginScreen() {
   const router = useRouter();
+  const { t } = useTranslation(); // <--- Hook do i18n
 
   const [mode, setMode] = useState<"login" | "signup">("login");
 
@@ -81,7 +82,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [playerId, setPlayerId] = useState(""); // só no signup
   const [pin, setPin] = useState(""); // só no signup
-  const [playerName, setPlayerName] = useState(""); // NOVO: nome do jogador
+  const [playerName, setPlayerName] = useState(""); // nome do jogador (signup)
 
   const [stayLogged, setStayLogged] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -124,8 +125,8 @@ export default function LoginScreen() {
         const snap = await getDoc(docRef);
         if (!snap.exists()) {
           Alert.alert(
-            "Aviso",
-            "Seu login não possui dados de playerId/pin. Conta incompleta."
+            t("login.alerts.incomplete_account"),
+            t("login.alerts.incomplete_account")
           );
           await signOut(auth);
           setLoading(false);
@@ -134,24 +135,22 @@ export default function LoginScreen() {
         const data = snap.data();
         if (!data.playerId || !data.pin) {
           Alert.alert(
-            "Aviso",
-            "Documento sem playerId/pin. Contate o suporte."
+            t("login.alerts.missing_data"),
+            t("login.alerts.missing_data")
           );
           await signOut(auth);
           setLoading(false);
           return;
         }
 
-        // Se tiver "name", ótimo. Senão, fallback.
         const docName = data.name || "Jogador";
 
-        // Salva no AsyncStorage para que as outras telas funcionem igual antes
+        // Salva no AsyncStorage para que as outras telas funcionem
         await AsyncStorage.setItem("@userId", data.playerId);
         await AsyncStorage.setItem("@userPin", data.pin);
         await AsyncStorage.setItem("@userName", docName);
 
-        // Exemplo de feedback
-        Alert.alert("Bem-vindo", `Olá, ${docName}!`);
+        Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
 
         // Ir para a Home (tabs)
         router.push("/(tabs)/home");
@@ -161,7 +160,7 @@ export default function LoginScreen() {
       }
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [router, t]);
 
   // --------------- Observa password p/ medir força (em signup) ---------------
   useEffect(() => {
@@ -174,21 +173,15 @@ export default function LoginScreen() {
   // --------------- Ações ---------------
   async function handleSignUp() {
     if (!email || !password || !playerId || !pin || !playerName) {
-      Alert.alert(
-        "Erro",
-        "Preencha todos os campos (Nome, E-mail, Senha, ID e PIN)."
-      );
+      Alert.alert(t("login.alerts.empty_fields"));
       return;
     }
     if (!validateEmail(email)) {
-      Alert.alert("Erro", "E-mail inválido.");
+      Alert.alert(t("login.alerts.invalid_email"));
       return;
     }
     if (!validatePassword(password)) {
-      Alert.alert(
-        "Senha Fraca",
-        "Sua senha deve ter ao menos 1 maiúscula, 1 minúscula, 1 número, 1 especial e 8 caracteres."
-      );
+      Alert.alert(t("login.alerts.weak_password"));
       return;
     }
     try {
@@ -202,15 +195,21 @@ export default function LoginScreen() {
         email,
         playerId,
         pin,
-        name: playerName, // Fundamental para as outras telas
+        name: playerName,
         createdAt: new Date().toISOString(),
       });
 
-      Alert.alert("Sucesso", `Conta criada. ID=${playerId}, PIN=${pin}`);
+      // Mensagem de sucesso (com interpolação)
+      Alert.alert(
+        t("login.alerts.signup_success", {
+          playerId: playerId,
+          pin: pin,
+        })
+      );
       // onAuthStateChanged redireciona
     } catch (err: any) {
       console.log("Erro no SignUp:", err);
-      Alert.alert("Erro", err.message || "Não foi possível criar conta.");
+      Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
     } finally {
       setLoading(false);
     }
@@ -218,7 +217,7 @@ export default function LoginScreen() {
 
   async function handleSignIn() {
     if (!email || !password) {
-      Alert.alert("Erro", "Informe e-mail e senha.");
+      Alert.alert(t("login.alerts.empty_fields")); // aproveitando a mesma key
       return;
     }
     setLoading(true);
@@ -227,13 +226,13 @@ export default function LoginScreen() {
       // A onAuthStateChanged fará o resto
     } catch (err: any) {
       console.log("Erro no SignIn:", err);
-      let msg = "Não foi possível entrar.";
+      let msg = t("login.alerts.login_error", { error: "" });
       if (err.code === "auth/wrong-password") {
-        msg = "Senha incorreta. Tente novamente.";
+        msg = t("login.alerts.wrong_password");
       } else if (err.code === "auth/user-not-found") {
-        msg = "Usuário não encontrado. Verifique o e-mail.";
+        msg = t("login.alerts.user_not_found");
       }
-      Alert.alert("Erro", msg);
+      Alert.alert(t("login.alerts.login_error", { error: "" }), msg);
     } finally {
       setLoading(false);
     }
@@ -241,18 +240,17 @@ export default function LoginScreen() {
 
   async function handleResetPassword() {
     if (!email) {
-      Alert.alert("Atenção", "Informe seu e-mail para redefinir a senha.");
+      Alert.alert(t("login.alerts.password_reset_error", { error: "" }), t("login.alerts.invalid_email"));
       return;
     }
     try {
       await sendPasswordResetEmail(auth, email);
-      Alert.alert(
-        "Verifique seu e-mail",
-        "Um link de redefinição foi enviado para seu e-mail."
-      );
+      Alert.alert(t("login.alerts.password_reset_sent"));
     } catch (err: any) {
       console.log("Erro ao resetar senha:", err);
-      Alert.alert("Erro", err.message || "Não foi possível enviar e-mail.");
+      Alert.alert(
+        t("login.alerts.password_reset_error", { error: err.message || "" })
+      );
     }
   }
 
@@ -261,7 +259,9 @@ export default function LoginScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={PRIMARY} />
-        <Text style={{ color: SECONDARY, marginTop: 8 }}>Carregando...</Text>
+        <Text style={{ color: SECONDARY, marginTop: 8 }}>
+          {t("login.loading")}
+        </Text>
       </View>
     );
   }
@@ -281,14 +281,16 @@ export default function LoginScreen() {
           />
 
           <Text style={styles.title}>
-            {mode === "signup" ? "Criar Conta" : "Entrar"}
+            {mode === "signup"
+              ? t("login.title_signup")
+              : t("login.title_login")}
           </Text>
 
           {/* E-mail */}
-          <Text style={styles.label}>E-mail</Text>
+          <Text style={styles.label}>{t("login.email_label")}</Text>
           <TextInput
             style={styles.input}
-            placeholder="seuemail@exemplo.com"
+            placeholder={t("login.email_placeholder") || ""}
             placeholderTextColor={INPUT_BORDER}
             value={email}
             onChangeText={setEmail}
@@ -297,11 +299,11 @@ export default function LoginScreen() {
           />
 
           {/* Senha */}
-          <Text style={styles.label}>Senha</Text>
+          <Text style={styles.label}>{t("login.password_label")}</Text>
           <View style={styles.inputWithIcon}>
             <TextInput
               style={[styles.input, { flex: 1, marginRight: 8 }]}
-              placeholder="Digite sua senha"
+              placeholder={t("login.password_placeholder") || ""}
               placeholderTextColor={INPUT_BORDER}
               secureTextEntry={!showPassword}
               value={password}
@@ -326,7 +328,7 @@ export default function LoginScreen() {
               style={{ marginTop: 10, alignSelf: "flex-end" }}
               onPress={handleResetPassword}
             >
-              <Text style={styles.forgotText}>Esqueceu a Senha?</Text>
+              <Text style={styles.forgotText}>{t("login.forgot_password")}</Text>
             </TouchableOpacity>
           )}
 
@@ -338,37 +340,37 @@ export default function LoginScreen() {
                 { color: getPasswordStrengthColor(passwordStrength) },
               ]}
             >
-              Força da senha: {passwordStrength}
+              {t("login.password_strength", { strength: passwordStrength })}
             </Text>
           )}
 
-          {/* ID e PIN, e NOME caso signup */}
+          {/* ID, PIN e Nome caso signup */}
           {mode === "signup" && (
             <>
-              <Text style={styles.label}>Nome do Jogador</Text>
+              <Text style={styles.label}>{t("login.player_name_label")}</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Ex: Ash Ketchum"
+                placeholder={t("login.player_name_placeholder") || ""}
                 placeholderTextColor={INPUT_BORDER}
                 value={playerName}
                 onChangeText={setPlayerName}
               />
 
-              <Text style={styles.label}>ID do Jogador</Text>
+              <Text style={styles.label}>{t("login.player_id_label")}</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Ex: 5062577"
+                placeholder={t("login.player_id_placeholder") || ""}
                 placeholderTextColor={INPUT_BORDER}
                 value={playerId}
                 onChangeText={setPlayerId}
                 keyboardType="numeric"
               />
 
-              <Text style={styles.label}>PIN</Text>
+              <Text style={styles.label}>{t("login.pin_label")}</Text>
               <View style={styles.inputWithIcon}>
                 <TextInput
                   style={[styles.input, { flex: 1, marginRight: 8 }]}
-                  placeholder="****"
+                  placeholder={t("login.pin_placeholder") || ""}
                   placeholderTextColor={INPUT_BORDER}
                   secureTextEntry={!showPin}
                   value={pin}
@@ -390,31 +392,24 @@ export default function LoginScreen() {
           )}
 
           {/* Switch: Continuar Conectado */}
-          {
-            <View style={styles.switchRow}>
-              <Text style={styles.switchText}>
-                Continuar Conectado (em breve){" "}
-              </Text>
-              <Switch
-                value={stayLogged}
-                onValueChange={setStayLogged}
-                trackColor={{ false: SWITCH_TRACK, true: PRIMARY }}
-                thumbColor={stayLogged ? SWITCH_THUMB : "#ccc"}
-              />
-            </View>
-          }
+          <View style={styles.switchRow}>
+            <Text style={styles.switchText}>{t("login.stay_logged")} </Text>
+            <Switch
+              value={stayLogged}
+              onValueChange={setStayLogged}
+              trackColor={{ false: SWITCH_TRACK, true: PRIMARY }}
+              thumbColor={stayLogged ? SWITCH_THUMB : "#ccc"}
+            />
+          </View>
 
           {/* Botão principal */}
           {mode === "signup" ? (
-            <TouchableOpacity
-              style={styles.signupButton}
-              onPress={handleSignUp}
-            >
-              <Text style={styles.buttonText}>Cadastrar</Text>
+            <TouchableOpacity style={styles.signupButton} onPress={handleSignUp}>
+              <Text style={styles.buttonText}>{t("login.signup_button")}</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.button} onPress={handleSignIn}>
-              <Text style={styles.buttonText}>Entrar</Text>
+              <Text style={styles.buttonText}>{t("login.login_button")}</Text>
             </TouchableOpacity>
           )}
 
@@ -425,7 +420,7 @@ export default function LoginScreen() {
               onPress={() => setMode("login")}
             >
               <Text style={{ color: SECONDARY }}>
-                Já tem conta? <Text style={styles.underline}>Entre Aqui</Text>
+                {t("login.link_to_login")}
               </Text>
             </TouchableOpacity>
           ) : (
@@ -434,7 +429,7 @@ export default function LoginScreen() {
               onPress={() => setMode("signup")}
             >
               <Text style={{ color: SECONDARY }}>
-                Não tem conta? <Text style={styles.underline}>Criar Conta</Text>
+                {t("login.link_to_signup")}
               </Text>
             </TouchableOpacity>
           )}

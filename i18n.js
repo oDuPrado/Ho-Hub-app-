@@ -17,7 +17,7 @@ const languageDetector = {
   type: 'languageDetector',
   async: true,
   detect: (callback) => {
-    const supportedLanguages = ['en', 'pt', 'es'];
+    const supportedLanguages = ['en','es'];
     const bestLanguage = Localization.getLocales()[0]?.languageCode;
     if (supportedLanguages.includes(bestLanguage)) {
       callback(bestLanguage);

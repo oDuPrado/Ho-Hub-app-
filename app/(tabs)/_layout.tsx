@@ -1,7 +1,8 @@
 import React from "react";
 import { createDrawerNavigator } from "@react-navigation/drawer";
 import { withLayoutContext } from "expo-router";
-import { Ionicons } from "@expo/vector-icons"; // Biblioteca de ícones
+import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next"; // <--- Import do i18n
 
 // Importar telas
 import HomeScreen from "./home";
@@ -18,6 +19,8 @@ import SugestaoScreen from "./Sugestao";
 const Drawer = createDrawerNavigator();
 
 function DrawerLayout() {
+  const { t } = useTranslation(); // <--- Hook do i18n para pegar traduções do "drawer"
+
   return (
     <Drawer.Navigator
       screenOptions={{
@@ -39,7 +42,7 @@ function DrawerLayout() {
         name="home"
         component={HomeScreen}
         options={{
-          title: "Home",
+          title: t("drawer.home"),
           drawerIcon: ({ color }) => (
             <Ionicons name="home-outline" size={20} color={color} />
           ),
@@ -49,7 +52,7 @@ function DrawerLayout() {
         name="calendario"
         component={CalendarioScreen}
         options={{
-          title: "Calendário",
+          title: t("drawer.calendario"),
           drawerIcon: ({ color }) => (
             <Ionicons name="calendar-outline" size={20} color={color} />
           ),
@@ -59,7 +62,7 @@ function DrawerLayout() {
         name="torneio"
         component={TorneioScreen}
         options={{
-          title: "Torneio",
+          title: t("drawer.torneio"),
           drawerIcon: ({ color }) => (
             <Ionicons name="trophy-outline" size={20} color={color} />
           ),
@@ -70,7 +73,7 @@ function DrawerLayout() {
         name="Noticias"
         component={NoticiasScreen}
         options={{
-          title: "Noticias",
+          title: t("drawer.noticias"),
           drawerIcon: ({ color }) => (
             <Ionicons name="newspaper-outline" size={20} color={color} />
           ),
@@ -81,7 +84,7 @@ function DrawerLayout() {
         name="IApikachu"
         component={AnalyticsScreen}
         options={{
-          title: "IApikachu",
+          title: t("drawer.iapikachu"),
           drawerIcon: ({ color }) => (
             <Ionicons name="bulb-outline" size={20} color={color} />
           ),
@@ -92,7 +95,7 @@ function DrawerLayout() {
         name="Cartas"
         component={CartasScreen}
         options={{
-          title: "Cartas",
+          title: t("drawer.cartas"),
           drawerIcon: ({ color }) => (
             <Ionicons name="pricetag-outline" size={20} color={color} />
           ),
@@ -103,7 +106,7 @@ function DrawerLayout() {
         name="trocas"
         component={TrocasScreen}
         options={{
-          title: "Trocas",
+          title: t("drawer.trocas"),
           drawerIcon: ({ color }) => (
             <Ionicons name="swap-horizontal-outline" size={20} color={color} />
           ),
@@ -113,7 +116,7 @@ function DrawerLayout() {
         name="Decks"
         component={EstatisticasScreen}
         options={{
-          title: "Decks",
+          title: t("drawer.decks"),
           drawerIcon: ({ color }) => (
             <Ionicons name="layers-outline" size={20} color={color} />
           ),
@@ -123,7 +126,7 @@ function DrawerLayout() {
         name="jogador"
         component={JogadorScreen}
         options={{
-          title: "Jogador",
+          title: t("drawer.jogador"),
           drawerIcon: ({ color }) => (
             <Ionicons name="person-outline" size={20} color={color} />
           ),
@@ -131,15 +134,15 @@ function DrawerLayout() {
       />
 
       <Drawer.Screen
-              name="Sugestão"
-              component={SugestaoScreen}
-              options={{
-                title: "Sugestão",
-                drawerIcon: ({ color }) => (
-                  <Ionicons name="bulb-outline" size={20} color={color} />
-                ),
-              }}
-            />
+        name="Sugestão"
+        component={SugestaoScreen}
+        options={{
+          title: t("drawer.sugestao"),
+          drawerIcon: ({ color }) => (
+            <Ionicons name="bulb-outline" size={20} color={color} />
+          ),
+        }}
+      />
     </Drawer.Navigator>
   );
 }
