@@ -319,9 +319,9 @@ export default function UserTradeFeed() {
                       Ninguém se interessou ainda
                     </Text>
                   ) : (
-                    detailPost.interested.map((iid) => (
-                      <Text key={iid} style={{ color: "#fff" }}>
-                        PlayerId: {iid}
+                    detailPost.interested.map((name) => (
+                      <Text key={name} style={{ color: "#fff" }}>
+                        {name}
                       </Text>
                     ))
                   )}
