@@ -1,3 +1,4 @@
+// (auth)/login.tsx
 import React, { useEffect, useRef, useState } from "react";
 import {
   View,
@@ -20,8 +21,6 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-// Firebase
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -31,21 +30,14 @@ import {
   User,
 } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
-import { auth, db } from "../../lib/firebaseConfig";
-
-// i18n
-import { useTranslation } from "react-i18next";
-import LSselector from "../../LSselector";
-
-// Ban List
-import { BAN_PLAYER_IDS } from "../hosts";
-
-// Biometria e SecureStore
-import * as LocalAuthentication from "expo-local-authentication";
-import * as SecureStore from "expo-secure-store";
-
-// Ícones
 import { Ionicons } from "@expo/vector-icons";
+
+import { auth, db } from "../../lib/firebaseConfig";
+import { useTranslation } from "react-i18next"; // i18n
+import LSselector from "../../LSselector"; 
+
+// Importamos a lista de banimento
+import { BAN_PLAYER_IDS } from "../hosts";
 
 // --------------- Funções Auxiliares ---------------
 function checkPasswordStrength(password: string) {
@@ -75,7 +67,6 @@ function validateEmail(mail: string): boolean {
   const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return regex.test(mail);
 }
-
 function validatePassword(pw: string): boolean {
   // Ao menos 1 maiúscula, 1 minúscula, 1 dígito, 1 especial, >=8 chars
   const upper = /[A-Z]/.test(pw);
@@ -83,17 +74,6 @@ function validatePassword(pw: string): boolean {
   const digit = /\d/.test(pw);
   const special = /[^A-Za-z0-9]/.test(pw);
   return upper && lower && digit && special && pw.length >= 8;
-}
-
-// Funções de SecureStore
-async function saveBiometricToken() {
-  await SecureStore.setItemAsync("userBiometricToken", "enabled");
-}
-async function deleteBiometricToken() {
-  await SecureStore.deleteItemAsync("userBiometricToken");
-}
-async function getBiometricToken() {
-  return SecureStore.getItemAsync("userBiometricToken");
 }
 
 // --------------- Componente Principal ---------------
@@ -144,40 +124,17 @@ export default function LoginScreen() {
     ).start();
   }, [logoScale]);
 
-  // --------------- Tenta login com biometria se usuário já tiver optado ---------------
+  // --------------- Checa AsyncStorage p/ ver se user quer permanecer logado ---------------
   useEffect(() => {
     (async () => {
-      const stored = await getBiometricToken(); // "enabled" ou null
-      if (stored === "enabled") {
-        const canAuth = await LocalAuthentication.hasHardwareAsync();
-        if (!canAuth) return;
-        const enrolled = await LocalAuthentication.isEnrolledAsync();
-        if (!enrolled) return;
-
-        const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: "Autenticar com biometria",
-          fallbackLabel: "Usar senha",
-          cancelLabel: "Cancelar",
-        });
-
-        if (result.success) {
-          // Se biometria for ok, pula login e vai home
-          console.log("Biometria ok!");
-          router.push("/(tabs)/home");
-        }
+      const stay = await AsyncStorage.getItem("@stayLogged");
+      if (stay === "true") {
+        setStayLogged(true);
       }
     })();
-  }, [router]);
+  }, []);
 
-  // --------------- Observa password p/ medir força (em signup) ---------------
-  useEffect(() => {
-    if (mode === "signup") {
-      const s = checkPasswordStrength(password);
-      setPasswordStrength(s);
-    }
-  }, [mode, password]);
-
-  // --------------- Observa estado do Auth (FireAuth) ---------------
+  // --------------- Observa estado do Auth ---------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
@@ -187,7 +144,10 @@ export default function LoginScreen() {
         const docRef = doc(db, "login", user.uid);
         const snap = await getDoc(docRef);
         if (!snap.exists()) {
-          Alert.alert("Erro", "Conta incompleta no Firestore.");
+          Alert.alert(
+            t("login.alerts.incomplete_account"),
+            t("login.alerts.incomplete_account")
+          );
           await signOut(auth);
           setLoading(false);
           return;
@@ -195,23 +155,28 @@ export default function LoginScreen() {
 
         const data = snap.data();
         if (!data.playerId || !data.pin) {
-          Alert.alert("Erro", "Conta sem playerId/pin.");
+          Alert.alert(
+            t("login.alerts.missing_data"),
+            t("login.alerts.missing_data")
+          );
           await signOut(auth);
           setLoading(false);
           return;
         }
 
-        // Verifica ban
+        // === Verifica banimento ===
+        // Se o playerId estiver em BAN_PLAYER_IDS => ban
         if (BAN_PLAYER_IDS.includes(data.playerId)) {
           // Exibe modal de ban
           setBanModalVisible(true);
-          // Força signOut
+
+          // Força signOut pra não entrar no app
           await signOut(auth);
           setLoading(false);
           return;
         }
 
-        // Se não banido
+        // Se não banido, prossegue
         const docName = data.name || "Jogador";
 
         // Salva no AsyncStorage
@@ -219,12 +184,17 @@ export default function LoginScreen() {
         await AsyncStorage.setItem("@userPin", data.pin);
         await AsyncStorage.setItem("@userName", docName);
 
-        // Se "stayLogged" = true, pergunta se quer habilitar biometria
+        // Se o user não quer ficar logado, faz signOut ao fechar app
+        // => definimos ou não a persistência do login aqui
         if (stayLogged) {
-          askEnableBiometry();
+          // Armazena preferencia
+          await AsyncStorage.setItem("@stayLogged", "true");
+        } else {
+          // Apaga preferencia
+          await AsyncStorage.removeItem("@stayLogged");
         }
 
-        Alert.alert("Bem-vindo", `Olá, ${docName}!`);
+        Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
         router.push("/(tabs)/home");
         setLoading(false);
       } else {
@@ -232,43 +202,28 @@ export default function LoginScreen() {
       }
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [router, t, stayLogged]);
 
-  // --------------- Pergunta se usuário quer habilitar biometria ---------------
-  async function askEnableBiometry() {
-    const canAuth = await LocalAuthentication.hasHardwareAsync();
-    if (!canAuth) return; // se não suportar, não faz nada
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!enrolled) return; // se não tiver biometria cadastrada, não faz nada
+  // --------------- Observa password p/ medir força (em signup) ---------------
+  useEffect(() => {
+    if (mode === "signup") {
+      const s = checkPasswordStrength(password);
+      setPasswordStrength(s);
+    }
+  }, [mode, password]);
 
-    Alert.alert(
-      "Login por Biometria",
-      "Deseja habilitar login por biometria para entrar sem digitar senha?",
-      [
-        { text: "Não", style: "cancel" },
-        {
-          text: "Sim",
-          onPress: async () => {
-            await saveBiometricToken(); // "enabled"
-            Alert.alert("Sucesso", "Login biométrico habilitado!");
-          },
-        },
-      ]
-    );
-  }
-
-  // --------------- Ações de Signup/Login ---------------
+  // --------------- Ações ---------------
   async function handleSignUp() {
     if (!email || !password || !playerId || !pin || !playerName) {
-      Alert.alert("Erro", "Preencha todos os campos!");
+      Alert.alert(t("login.alerts.empty_fields"));
       return;
     }
     if (!validateEmail(email)) {
-      Alert.alert("Erro", "Email inválido.");
+      Alert.alert(t("login.alerts.invalid_email"));
       return;
     }
     if (!validatePassword(password)) {
-      Alert.alert("Erro", "Senha fraca! Use 8+ chars c/ maiúscula, minúscula, dígito, especial.");
+      Alert.alert(t("login.alerts.weak_password"));
       return;
     }
     try {
@@ -276,7 +231,7 @@ export default function LoginScreen() {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       console.log("Conta criada, UID=", cred.user.uid);
 
-      // Salva doc "login/{uid}" no Firestore
+      // Salva doc "login/{uid}"
       const docRef = doc(db, "login", cred.user.uid);
       await setDoc(docRef, {
         email,
@@ -286,11 +241,16 @@ export default function LoginScreen() {
         createdAt: new Date().toISOString(),
       });
 
-      Alert.alert("Sucesso", `Conta criada. ID=${playerId}, PIN=${pin}.`);
-      // onAuthStateChanged redireciona
+      Alert.alert(
+        t("login.alerts.signup_success", {
+          playerId: playerId,
+          pin: pin,
+        })
+      );
+      // onAuthStateChanged redireciona...
     } catch (err: any) {
       console.log("Erro no SignUp:", err);
-      Alert.alert("Erro no signup", err.message || "");
+      Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
     } finally {
       setLoading(false);
     }
@@ -298,7 +258,7 @@ export default function LoginScreen() {
 
   async function handleSignIn() {
     if (!email || !password) {
-      Alert.alert("Erro", "Digite email e senha");
+      Alert.alert(t("login.alerts.empty_fields"));
       return;
     }
     setLoading(true);
@@ -307,13 +267,13 @@ export default function LoginScreen() {
       // onAuthStateChanged fará o resto
     } catch (err: any) {
       console.log("Erro no SignIn:", err);
-      let msg = "Falha ao logar.";
+      let msg = t("login.alerts.login_error", { error: "" });
       if (err.code === "auth/wrong-password") {
-        msg = "Senha incorreta.";
+        msg = t("login.alerts.wrong_password");
       } else if (err.code === "auth/user-not-found") {
-        msg = "Usuário não encontrado.";
+        msg = t("login.alerts.user_not_found");
       }
-      Alert.alert("Erro de Login", msg);
+      Alert.alert(t("login.alerts.login_error", { error: "" }), msg);
     } finally {
       setLoading(false);
     }
@@ -321,15 +281,20 @@ export default function LoginScreen() {
 
   async function handleResetPassword() {
     if (!email) {
-      Alert.alert("Erro", "Digite um email");
+      Alert.alert(
+        t("login.alerts.password_reset_error", { error: "" }),
+        t("login.alerts.invalid_email")
+      );
       return;
     }
     try {
       await sendPasswordResetEmail(auth, email);
-      Alert.alert("Verifique seu email", "Link de redefinição enviado.");
+      Alert.alert(t("login.alerts.password_reset_sent"));
     } catch (err: any) {
       console.log("Erro ao resetar senha:", err);
-      Alert.alert("Erro ao resetar", err.message || "");
+      Alert.alert(
+        t("login.alerts.password_reset_error", { error: err.message || "" })
+      );
     }
   }
 
@@ -338,7 +303,9 @@ export default function LoginScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={PRIMARY} />
-        <Text style={{ color: SECONDARY, marginTop: 8 }}>Carregando...</Text>
+        <Text style={{ color: SECONDARY, marginTop: 8 }}>
+          {t("login.loading")}
+        </Text>
       </View>
     );
   }
@@ -351,7 +318,7 @@ export default function LoginScreen() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
 
-          {/* Ban Modal */}
+          {/* Modal de Ban (caso banModalVisible = true) */}
           <Modal
             animationType="fade"
             transparent={true}
@@ -389,14 +356,16 @@ export default function LoginScreen() {
           />
 
           <Text style={styles.title}>
-            {mode === "signup" ? "Criar Conta" : "Fazer Login"}
+            {mode === "signup"
+              ? t("login.title_signup")
+              : t("login.title_login")}
           </Text>
 
-          {/* Email */}
-          <Text style={styles.label}>Email</Text>
+          {/* E-mail */}
+          <Text style={styles.label}>{t("login.email_label")}</Text>
           <TextInput
             style={styles.input}
-            placeholder="Digite seu email..."
+            placeholder={t("login.email_placeholder") || ""}
             placeholderTextColor={INPUT_BORDER}
             value={email}
             onChangeText={setEmail}
@@ -405,11 +374,11 @@ export default function LoginScreen() {
           />
 
           {/* Senha */}
-          <Text style={styles.label}>Senha</Text>
+          <Text style={styles.label}>{t("login.password_label")}</Text>
           <View style={styles.inputWithIcon}>
             <TextInput
               style={[styles.input, { flex: 1, marginRight: 8 }]}
-              placeholder="********"
+              placeholder={t("login.password_placeholder") || ""}
               placeholderTextColor={INPUT_BORDER}
               secureTextEntry={!showPassword}
               value={password}
@@ -428,17 +397,17 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Esqueci a senha (somente no login) */}
+          {/* Esqueci Senha (apenas login) */}
           {mode === "login" && (
             <TouchableOpacity
               style={{ marginTop: 10, alignSelf: "flex-end" }}
               onPress={handleResetPassword}
             >
-              <Text style={styles.forgotText}>Esqueci a senha</Text>
+              <Text style={styles.forgotText}>{t("login.forgot_password")}</Text>
             </TouchableOpacity>
           )}
 
-          {/* Força da senha (somente signup) */}
+          {/* Se for signup, mostra força da senha */}
           {mode === "signup" && (
             <Text
               style={[
@@ -446,37 +415,37 @@ export default function LoginScreen() {
                 { color: getPasswordStrengthColor(passwordStrength) },
               ]}
             >
-              Força da senha: {passwordStrength}
+              {t("login.password_strength", { strength: passwordStrength })}
             </Text>
           )}
 
           {/* ID, PIN e Nome caso signup */}
           {mode === "signup" && (
             <>
-              <Text style={styles.label}>Nome</Text>
+              <Text style={styles.label}>{t("login.player_name_label")}</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Seu nome..."
+                placeholder={t("login.player_name_placeholder") || ""}
                 placeholderTextColor={INPUT_BORDER}
                 value={playerName}
                 onChangeText={setPlayerName}
               />
 
-              <Text style={styles.label}>Player ID</Text>
+              <Text style={styles.label}>{t("login.player_id_label")}</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Ex: 123456"
+                placeholder={t("login.player_id_placeholder") || ""}
                 placeholderTextColor={INPUT_BORDER}
                 value={playerId}
                 onChangeText={setPlayerId}
                 keyboardType="numeric"
               />
 
-              <Text style={styles.label}>PIN</Text>
+              <Text style={styles.label}>{t("login.pin_label")}</Text>
               <View style={styles.inputWithIcon}>
                 <TextInput
                   style={[styles.input, { flex: 1, marginRight: 8 }]}
-                  placeholder="Ex: 9999"
+                  placeholder={t("login.pin_placeholder") || ""}
                   placeholderTextColor={INPUT_BORDER}
                   secureTextEntry={!showPin}
                   value={pin}
@@ -497,9 +466,9 @@ export default function LoginScreen() {
             </>
           )}
 
-          {/* Switch: Continuar conectado */}
+          {/* Switch: Continuar Conectado */}
           <View style={styles.switchRow}>
-            <Text style={styles.switchText}>Manter Conectado</Text>
+            <Text style={styles.switchText}>{t("login.stay_logged")} </Text>
             <Switch
               value={stayLogged}
               onValueChange={setStayLogged}
@@ -511,11 +480,11 @@ export default function LoginScreen() {
           {/* Botão principal */}
           {mode === "signup" ? (
             <TouchableOpacity style={styles.signupButton} onPress={handleSignUp}>
-              <Text style={styles.buttonText}>Criar Conta</Text>
+              <Text style={styles.buttonText}>{t("login.signup_button")}</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.button} onPress={handleSignIn}>
-              <Text style={styles.buttonText}>Login</Text>
+              <Text style={styles.buttonText}>{t("login.login_button")}</Text>
             </TouchableOpacity>
           )}
 
@@ -526,7 +495,7 @@ export default function LoginScreen() {
               onPress={() => setMode("login")}
             >
               <Text style={{ color: SECONDARY }}>
-                Já tem conta? Fazer Login
+                {t("login.link_to_login")}
               </Text>
             </TouchableOpacity>
           ) : (
@@ -535,7 +504,7 @@ export default function LoginScreen() {
               onPress={() => setMode("signup")}
             >
               <Text style={{ color: SECONDARY }}>
-                Não tem conta? Criar Conta
+                {t("login.link_to_signup")}
               </Text>
             </TouchableOpacity>
           )}
@@ -651,6 +620,10 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     fontSize: 16,
     fontWeight: "bold",
+  },
+  underline: {
+    color: ACCENT,
+    textDecorationLine: "underline",
   },
   forgotText: {
     color: ACCENT,
