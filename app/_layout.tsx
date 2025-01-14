@@ -1,3 +1,4 @@
+// RootLayout.tsx
 import { useEffect, useState } from "react";
 import { Stack } from "expo-router";
 import {
@@ -21,6 +22,9 @@ import * as Updates from "expo-updates";
 
 // ==> Importamos o i18n para que seja inicializado antes de tudo
 import "../i18n";
+
+// (Opcional) Se quiser usar BAN_PLAYER_IDS em outro lugar do layout
+import { BAN_PLAYER_IDS } from "./hosts";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -58,7 +62,7 @@ export default function RootLayout() {
 
         const downloadProgress = Updates.fetchUpdateAsync();
 
-        // Simula progresso
+        // Simular barra de progresso
         simulateProgress();
 
         downloadProgress.then(() => {

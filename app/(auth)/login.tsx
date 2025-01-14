@@ -1,3 +1,4 @@
+// (auth)/login.tsx
 import React, { useEffect, useRef, useState } from "react";
 import {
   View,
@@ -15,10 +16,11 @@ import {
   Dimensions,
   ActivityIndicator,
   ScrollView,
+  Modal,
+  Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -31,10 +33,13 @@ import { doc, setDoc, getDoc } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 
 import { auth, db } from "../../lib/firebaseConfig";
-import { useTranslation } from "react-i18next"; // <--- Import do i18n
+import { useTranslation } from "react-i18next"; // i18n
 import LSselector from "../../LSselector"; 
 
-// --------------- Funções Auxiliares (validação) ---------------
+// Importamos a lista de banimento
+import { BAN_PLAYER_IDS } from "../hosts";
+
+// --------------- Funções Auxiliares ---------------
 function checkPasswordStrength(password: string) {
   let score = 0;
   if (/[A-Z]/.test(password)) score++;
@@ -74,16 +79,16 @@ function validatePassword(pw: string): boolean {
 // --------------- Componente Principal ---------------
 export default function LoginScreen() {
   const router = useRouter();
-  const { t } = useTranslation(); // <--- Hook do i18n
+  const { t } = useTranslation();
 
   const [mode, setMode] = useState<"login" | "signup">("login");
 
   // Campos do formulário
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [playerId, setPlayerId] = useState(""); // só no signup
-  const [pin, setPin] = useState(""); // só no signup
-  const [playerName, setPlayerName] = useState(""); // nome do jogador (signup)
+  const [playerId, setPlayerId] = useState("");
+  const [pin, setPin] = useState("");
+  const [playerName, setPlayerName] = useState("");
 
   const [stayLogged, setStayLogged] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -92,6 +97,9 @@ export default function LoginScreen() {
   // Auxiliares
   const [passwordStrength, setPasswordStrength] = useState("Fraca");
   const [loading, setLoading] = useState(false);
+
+  // Ban
+  const [banModalVisible, setBanModalVisible] = useState(false);
 
   // Animação de logotipo
   const logoScale = useRef(new Animated.Value(1)).current;
@@ -116,12 +124,23 @@ export default function LoginScreen() {
     ).start();
   }, [logoScale]);
 
+  // --------------- Checa AsyncStorage p/ ver se user quer permanecer logado ---------------
+  useEffect(() => {
+    (async () => {
+      const stay = await AsyncStorage.getItem("@stayLogged");
+      if (stay === "true") {
+        setStayLogged(true);
+      }
+    })();
+  }, []);
+
   // --------------- Observa estado do Auth ---------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
-        // Está logado => buscar doc "login/{uid}"
         setLoading(true);
+
+        // Buscar doc "login/{uid}"
         const docRef = doc(db, "login", user.uid);
         const snap = await getDoc(docRef);
         if (!snap.exists()) {
@@ -133,6 +152,7 @@ export default function LoginScreen() {
           setLoading(false);
           return;
         }
+
         const data = snap.data();
         if (!data.playerId || !data.pin) {
           Alert.alert(
@@ -144,16 +164,37 @@ export default function LoginScreen() {
           return;
         }
 
+        // === Verifica banimento ===
+        // Se o playerId estiver em BAN_PLAYER_IDS => ban
+        if (BAN_PLAYER_IDS.includes(data.playerId)) {
+          // Exibe modal de ban
+          setBanModalVisible(true);
+
+          // Força signOut pra não entrar no app
+          await signOut(auth);
+          setLoading(false);
+          return;
+        }
+
+        // Se não banido, prossegue
         const docName = data.name || "Jogador";
 
-        // Salva no AsyncStorage para que as outras telas funcionem
+        // Salva no AsyncStorage
         await AsyncStorage.setItem("@userId", data.playerId);
         await AsyncStorage.setItem("@userPin", data.pin);
         await AsyncStorage.setItem("@userName", docName);
 
-        Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
+        // Se o user não quer ficar logado, faz signOut ao fechar app
+        // => definimos ou não a persistência do login aqui
+        if (stayLogged) {
+          // Armazena preferencia
+          await AsyncStorage.setItem("@stayLogged", "true");
+        } else {
+          // Apaga preferencia
+          await AsyncStorage.removeItem("@stayLogged");
+        }
 
-        // Ir para a Home (tabs)
+        Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
         router.push("/(tabs)/home");
         setLoading(false);
       } else {
@@ -161,7 +202,7 @@ export default function LoginScreen() {
       }
     });
     return () => unsubscribe();
-  }, [router, t]);
+  }, [router, t, stayLogged]);
 
   // --------------- Observa password p/ medir força (em signup) ---------------
   useEffect(() => {
@@ -200,14 +241,13 @@ export default function LoginScreen() {
         createdAt: new Date().toISOString(),
       });
 
-      // Mensagem de sucesso (com interpolação)
       Alert.alert(
         t("login.alerts.signup_success", {
           playerId: playerId,
           pin: pin,
         })
       );
-      // onAuthStateChanged redireciona
+      // onAuthStateChanged redireciona...
     } catch (err: any) {
       console.log("Erro no SignUp:", err);
       Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
@@ -218,13 +258,13 @@ export default function LoginScreen() {
 
   async function handleSignIn() {
     if (!email || !password) {
-      Alert.alert(t("login.alerts.empty_fields")); // aproveitando a mesma key
+      Alert.alert(t("login.alerts.empty_fields"));
       return;
     }
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // A onAuthStateChanged fará o resto
+      // onAuthStateChanged fará o resto
     } catch (err: any) {
       console.log("Erro no SignIn:", err);
       let msg = t("login.alerts.login_error", { error: "" });
@@ -241,7 +281,10 @@ export default function LoginScreen() {
 
   async function handleResetPassword() {
     if (!email) {
-      Alert.alert(t("login.alerts.password_reset_error", { error: "" }), t("login.alerts.invalid_email"));
+      Alert.alert(
+        t("login.alerts.password_reset_error", { error: "" }),
+        t("login.alerts.invalid_email")
+      );
       return;
     }
     try {
@@ -275,9 +318,36 @@ export default function LoginScreen() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
 
+          {/* Modal de Ban (caso banModalVisible = true) */}
+          <Modal
+            animationType="fade"
+            transparent={true}
+            visible={banModalVisible}
+            onRequestClose={() => setBanModalVisible(false)}
+          >
+            <View style={styles.banOverlay}>
+              <View style={styles.banContainer}>
+                <Image
+                  source={require("../../assets/images/pikachu_happy.png")}
+                  style={styles.banImage}
+                />
+                <Text style={styles.banTitle}>Banido!</Text>
+                <Text style={styles.banText}>
+                  Infelizmente você foi banido por violar nossos Termos de Uso.
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setBanModalVisible(false)}
+                  style={styles.banButton}
+                >
+                  <Text style={styles.banButtonText}>Ok</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
           {/* Seletor de idioma */}
           <LSselector />
-          
+
           {/* Logo animada */}
           <Animated.Image
             source={require("../../assets/images/pokemon_ms_logo.jpg")}
@@ -566,5 +636,48 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     alignSelf: "center",
+  },
+
+  // Ban Modal
+  banOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  banContainer: {
+    width: "80%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 15,
+    alignItems: "center",
+    padding: 20,
+  },
+  banImage: {
+    width: 80,
+    height: 80,
+    marginBottom: 15,
+  },
+  banTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333333",
+    marginBottom: 10,
+  },
+  banText: {
+    fontSize: 14,
+    color: "#666666",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  banButton: {
+    backgroundColor: "#E3350D",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  banButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "bold",
   },
 });

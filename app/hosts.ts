@@ -6,7 +6,7 @@ import { db } from "../lib/firebaseConfig";
 export const HOST_PLAYER_IDS = ["4893989", "2289116"];
 export const JUDGE_PLAYER_IDS = ["4893989", "2289116"];
 export const HEAD_JUDGE_PLAYER_IDS = ["3456789", "4567890"];
-export const BAN_PLAYER_IDS = ["4893989", "4567890"];
+export const BAN_PLAYER_IDS = ["5011891", "4567890"];
 
 /**
  * Busca infos de uma lista de playerIds no Firestore (coleção "players/{uid}")

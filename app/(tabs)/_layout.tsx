@@ -15,6 +15,7 @@ import CartasScreen from "./Cartas";
 import AnalyticsScreen from "./Analise";
 import NoticiasScreen from "./Noticias";
 import SugestaoScreen from "./Sugestao";
+import ChatsListScreen from "./chats";
 
 const Drawer = createDrawerNavigator();
 
@@ -74,6 +75,17 @@ function DrawerLayout() {
         component={NoticiasScreen}
         options={{
           title: t("drawer.noticias"),
+          drawerIcon: ({ color }) => (
+            <Ionicons name="newspaper-outline" size={20} color={color} />
+          ),
+        }}
+        />
+
+      <Drawer.Screen
+        name="chats"
+        component={ChatsListScreen}
+        options={{
+          title: t("drawer.chats"),
           drawerIcon: ({ color }) => (
             <Ionicons name="newspaper-outline" size={20} color={color} />
           ),

@@ -40,6 +40,7 @@
     "drawer": {
       "home": "Inicio",
       "calendario": "Calendario",
+      "chats": "Chats",
       "torneio": "Torneo",
       "noticias": "Noticias",
       "iapikachu": "IApikachu",
@@ -371,6 +372,22 @@
         "no_price": "Indica un valor o ej: 'R$ 10,00'."
       }
     },
+
+    "chat": {
+  "header": "Chats",
+  "no_chats": "Ningún chat todavía",
+  "list_title": "Lista de Conversaciones",
+  "last_message": "Último mensaje",
+  "start_chat": "Iniciar Chat",
+  "window_title": "Conversación",
+  "input_placeholder": "Escribe tu mensaje...",
+  "send_button": "Enviar",
+  "empty_chat": "Ningún mensaje por aquí.",
+  "owner_label": "Tú",
+  "time_format": "HH:mm",
+  "close":"Fiechar"
+},
+
   
     "common": {
       "error": "Error",

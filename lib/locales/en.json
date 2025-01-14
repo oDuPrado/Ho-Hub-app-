@@ -39,6 +39,7 @@
   
     "drawer": {
       "home": "Home",
+      "chats": "Chats",
       "calendario": "Calendar",
       "torneio": "Tournament",
       "noticias": "News",
@@ -372,7 +373,21 @@
         "no_price": "Enter a value or e.g. 'R$ 10,00'."
       }
     },
-  
+    "chat": {
+    "header": "Chats",
+    "no_chats": "No chat yet",
+    "list_title": "Conversation List",
+    "last_message": "Last message",
+    "start_chat": "Start Chat",
+    "window_title": "Conversation",
+    "input_placeholder": "Type your message...",
+    "send_button": "Send",
+    "empty_chat": "No message around here.",
+    "owner_label": "You",
+    "time_format": "HH:mm",
+    "close":"Close"
+  },
+    
     "common": {
       "error": "Error",
       "success": "Success",

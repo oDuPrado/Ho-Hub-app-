@@ -26,6 +26,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import moment from "moment";
 import { db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next"; // <--- i18n
+import { useRouter } from "expo-router";
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
@@ -51,6 +52,8 @@ export default function UserTradeFeed() {
   const [searchText, setSearchText] = useState("");
   const [filterType, setFilterType] = useState<"all" | "sale" | "trade" | "want">("all");
   const [onlyMine, setOnlyMine] = useState(false);
+  const router = useRouter();
+
 
   // Modal
   const [detailModalVisible, setDetailModalVisible] = useState(false);
@@ -152,6 +155,13 @@ export default function UserTradeFeed() {
     );
   }
 
+  function handleOpenChat(targetId: string) {
+    router.push({
+      pathname: "/(tabs)/chats",
+      params: { userId: targetId },
+    });
+  }
+  
   async function handleDeletePost(post: TradePost) {
     Alert.alert(
       t("common.confirmation_title"),
@@ -316,13 +326,19 @@ export default function UserTradeFeed() {
                       Ninguém se interessou ainda
                     </Text>
                   ) : (
-                    detailPost.interested.map((name) => (
-                      <Text key={name} style={{ color: "#fff" }}>
-                        {name}
-                      </Text>
+                    detailPost.interested.map((name, idx) => (
+                      <TouchableOpacity
+                        key={`intr-${idx}`}
+                        style={styles.interestedItem}
+                        onPress={() => handleOpenChat(name)}
+                      >
+                        <Text style={{ color: "#fff", textDecorationLine: "underline" }}>
+                          {name}
+                        </Text>
+                      </TouchableOpacity>
                     ))
                   )}
-
+                  {/* Botão de Excluir */}
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: "#FF5555", marginTop: 20 }]}
                     onPress={() => {
@@ -477,6 +493,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignSelf: "center",
   },
+
+  interestedItem: {
+    marginVertical: 4,
+  },
+
   buttonText: {
     color: SECONDARY,
     fontWeight: "bold",
