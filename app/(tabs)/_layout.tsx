@@ -80,18 +80,7 @@ function DrawerLayout() {
           ),
         }}
         />
-
-      <Drawer.Screen
-        name="chats"
-        component={ChatsListScreen}
-        options={{
-          title: t("drawer.chats"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="newspaper-outline" size={20} color={color} />
-          ),
-        }}
-      />
-
+        
       <Drawer.Screen
         name="IApikachu"
         component={AnalyticsScreen}
