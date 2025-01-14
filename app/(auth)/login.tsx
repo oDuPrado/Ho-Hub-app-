@@ -1,4 +1,3 @@
-// (auth)/login.tsx
 import React, { useEffect, useRef, useState } from "react";
 import {
   View,
@@ -21,6 +20,8 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// Firebase
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -30,14 +31,21 @@ import {
   User,
 } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
-import { Ionicons } from "@expo/vector-icons";
-
 import { auth, db } from "../../lib/firebaseConfig";
-import { useTranslation } from "react-i18next"; // i18n
-import LSselector from "../../LSselector"; 
 
-// Importamos a lista de banimento
+// i18n
+import { useTranslation } from "react-i18next";
+import LSselector from "../../LSselector";
+
+// Ban List
 import { BAN_PLAYER_IDS } from "../hosts";
+
+// Biometria e SecureStore
+import * as LocalAuthentication from "expo-local-authentication";
+import * as SecureStore from "expo-secure-store";
+
+// Ícones
+import { Ionicons } from "@expo/vector-icons";
 
 // --------------- Funções Auxiliares ---------------
 function checkPasswordStrength(password: string) {
@@ -67,6 +75,7 @@ function validateEmail(mail: string): boolean {
   const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return regex.test(mail);
 }
+
 function validatePassword(pw: string): boolean {
   // Ao menos 1 maiúscula, 1 minúscula, 1 dígito, 1 especial, >=8 chars
   const upper = /[A-Z]/.test(pw);
@@ -74,6 +83,17 @@ function validatePassword(pw: string): boolean {
   const digit = /\d/.test(pw);
   const special = /[^A-Za-z0-9]/.test(pw);
   return upper && lower && digit && special && pw.length >= 8;
+}
+
+// Funções de SecureStore
+async function saveBiometricToken() {
+  await SecureStore.setItemAsync("userBiometricToken", "enabled");
+}
+async function deleteBiometricToken() {
+  await SecureStore.deleteItemAsync("userBiometricToken");
+}
+async function getBiometricToken() {
+  return SecureStore.getItemAsync("userBiometricToken");
 }
 
 // --------------- Componente Principal ---------------
@@ -124,85 +144,30 @@ export default function LoginScreen() {
     ).start();
   }, [logoScale]);
 
-  // --------------- Checa AsyncStorage p/ ver se user quer permanecer logado ---------------
+  // --------------- Tenta login com biometria se usuário já tiver optado ---------------
   useEffect(() => {
     (async () => {
-      const stay = await AsyncStorage.getItem("@stayLogged");
-      if (stay === "true") {
-        setStayLogged(true);
+      const stored = await getBiometricToken(); // "enabled" ou null
+      if (stored === "enabled") {
+        const canAuth = await LocalAuthentication.hasHardwareAsync();
+        if (!canAuth) return;
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        if (!enrolled) return;
+
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: "Autenticar com biometria",
+          fallbackLabel: "Usar senha",
+          cancelLabel: "Cancelar",
+        });
+
+        if (result.success) {
+          // Se biometria for ok, pula login e vai home
+          console.log("Biometria ok!");
+          router.push("/(tabs)/home");
+        }
       }
     })();
-  }, []);
-
-  // --------------- Observa estado do Auth ---------------
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
-      if (user) {
-        setLoading(true);
-
-        // Buscar doc "login/{uid}"
-        const docRef = doc(db, "login", user.uid);
-        const snap = await getDoc(docRef);
-        if (!snap.exists()) {
-          Alert.alert(
-            t("login.alerts.incomplete_account"),
-            t("login.alerts.incomplete_account")
-          );
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        const data = snap.data();
-        if (!data.playerId || !data.pin) {
-          Alert.alert(
-            t("login.alerts.missing_data"),
-            t("login.alerts.missing_data")
-          );
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        // === Verifica banimento ===
-        // Se o playerId estiver em BAN_PLAYER_IDS => ban
-        if (BAN_PLAYER_IDS.includes(data.playerId)) {
-          // Exibe modal de ban
-          setBanModalVisible(true);
-
-          // Força signOut pra não entrar no app
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        // Se não banido, prossegue
-        const docName = data.name || "Jogador";
-
-        // Salva no AsyncStorage
-        await AsyncStorage.setItem("@userId", data.playerId);
-        await AsyncStorage.setItem("@userPin", data.pin);
-        await AsyncStorage.setItem("@userName", docName);
-
-        // Se o user não quer ficar logado, faz signOut ao fechar app
-        // => definimos ou não a persistência do login aqui
-        if (stayLogged) {
-          // Armazena preferencia
-          await AsyncStorage.setItem("@stayLogged", "true");
-        } else {
-          // Apaga preferencia
-          await AsyncStorage.removeItem("@stayLogged");
-        }
-
-        Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
-        router.push("/(tabs)/home");
-        setLoading(false);
-      } else {
-        console.log("Sem user logado");
-      }
-    });
-    return () => unsubscribe();
-  }, [router, t, stayLogged]);
+  }, [router]);
 
   // --------------- Observa password p/ medir força (em signup) ---------------
   useEffect(() => {
@@ -212,18 +177,98 @@ export default function LoginScreen() {
     }
   }, [mode, password]);
 
-  // --------------- Ações ---------------
+  // --------------- Observa estado do Auth (FireAuth) ---------------
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+      if (user) {
+        setLoading(true);
+
+        // Buscar doc "login/{uid}"
+        const docRef = doc(db, "login", user.uid);
+        const snap = await getDoc(docRef);
+        if (!snap.exists()) {
+          Alert.alert("Erro", "Conta incompleta no Firestore.");
+          await signOut(auth);
+          setLoading(false);
+          return;
+        }
+
+        const data = snap.data();
+        if (!data.playerId || !data.pin) {
+          Alert.alert("Erro", "Conta sem playerId/pin.");
+          await signOut(auth);
+          setLoading(false);
+          return;
+        }
+
+        // Verifica ban
+        if (BAN_PLAYER_IDS.includes(data.playerId)) {
+          // Exibe modal de ban
+          setBanModalVisible(true);
+          // Força signOut
+          await signOut(auth);
+          setLoading(false);
+          return;
+        }
+
+        // Se não banido
+        const docName = data.name || "Jogador";
+
+        // Salva no AsyncStorage
+        await AsyncStorage.setItem("@userId", data.playerId);
+        await AsyncStorage.setItem("@userPin", data.pin);
+        await AsyncStorage.setItem("@userName", docName);
+
+        // Se "stayLogged" = true, pergunta se quer habilitar biometria
+        if (stayLogged) {
+          askEnableBiometry();
+        }
+
+        Alert.alert("Bem-vindo", `Olá, ${docName}!`);
+        router.push("/(tabs)/home");
+        setLoading(false);
+      } else {
+        console.log("Sem user logado");
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
+
+  // --------------- Pergunta se usuário quer habilitar biometria ---------------
+  async function askEnableBiometry() {
+    const canAuth = await LocalAuthentication.hasHardwareAsync();
+    if (!canAuth) return; // se não suportar, não faz nada
+    const enrolled = await LocalAuthentication.isEnrolledAsync();
+    if (!enrolled) return; // se não tiver biometria cadastrada, não faz nada
+
+    Alert.alert(
+      "Login por Biometria",
+      "Deseja habilitar login por biometria para entrar sem digitar senha?",
+      [
+        { text: "Não", style: "cancel" },
+        {
+          text: "Sim",
+          onPress: async () => {
+            await saveBiometricToken(); // "enabled"
+            Alert.alert("Sucesso", "Login biométrico habilitado!");
+          },
+        },
+      ]
+    );
+  }
+
+  // --------------- Ações de Signup/Login ---------------
   async function handleSignUp() {
     if (!email || !password || !playerId || !pin || !playerName) {
-      Alert.alert(t("login.alerts.empty_fields"));
+      Alert.alert("Erro", "Preencha todos os campos!");
       return;
     }
     if (!validateEmail(email)) {
-      Alert.alert(t("login.alerts.invalid_email"));
+      Alert.alert("Erro", "Email inválido.");
       return;
     }
     if (!validatePassword(password)) {
-      Alert.alert(t("login.alerts.weak_password"));
+      Alert.alert("Erro", "Senha fraca! Use 8+ chars c/ maiúscula, minúscula, dígito, especial.");
       return;
     }
     try {
@@ -231,7 +276,7 @@ export default function LoginScreen() {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       console.log("Conta criada, UID=", cred.user.uid);
 
-      // Salva doc "login/{uid}"
+      // Salva doc "login/{uid}" no Firestore
       const docRef = doc(db, "login", cred.user.uid);
       await setDoc(docRef, {
         email,
@@ -241,16 +286,11 @@ export default function LoginScreen() {
         createdAt: new Date().toISOString(),
       });
 
-      Alert.alert(
-        t("login.alerts.signup_success", {
-          playerId: playerId,
-          pin: pin,
-        })
-      );
-      // onAuthStateChanged redireciona...
+      Alert.alert("Sucesso", `Conta criada. ID=${playerId}, PIN=${pin}.`);
+      // onAuthStateChanged redireciona
     } catch (err: any) {
       console.log("Erro no SignUp:", err);
-      Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
+      Alert.alert("Erro no signup", err.message || "");
     } finally {
       setLoading(false);
     }
@@ -258,7 +298,7 @@ export default function LoginScreen() {
 
   async function handleSignIn() {
     if (!email || !password) {
-      Alert.alert(t("login.alerts.empty_fields"));
+      Alert.alert("Erro", "Digite email e senha");
       return;
     }
     setLoading(true);
@@ -267,13 +307,13 @@ export default function LoginScreen() {
       // onAuthStateChanged fará o resto
     } catch (err: any) {
       console.log("Erro no SignIn:", err);
-      let msg = t("login.alerts.login_error", { error: "" });
+      let msg = "Falha ao logar.";
       if (err.code === "auth/wrong-password") {
-        msg = t("login.alerts.wrong_password");
+        msg = "Senha incorreta.";
       } else if (err.code === "auth/user-not-found") {
-        msg = t("login.alerts.user_not_found");
+        msg = "Usuário não encontrado.";
       }
-      Alert.alert(t("login.alerts.login_error", { error: "" }), msg);
+      Alert.alert("Erro de Login", msg);
     } finally {
       setLoading(false);
     }
@@ -281,20 +321,15 @@ export default function LoginScreen() {
 
   async function handleResetPassword() {
     if (!email) {
-      Alert.alert(
-        t("login.alerts.password_reset_error", { error: "" }),
-        t("login.alerts.invalid_email")
-      );
+      Alert.alert("Erro", "Digite um email");
       return;
     }
     try {
       await sendPasswordResetEmail(auth, email);
-      Alert.alert(t("login.alerts.password_reset_sent"));
+      Alert.alert("Verifique seu email", "Link de redefinição enviado.");
     } catch (err: any) {
       console.log("Erro ao resetar senha:", err);
-      Alert.alert(
-        t("login.alerts.password_reset_error", { error: err.message || "" })
-      );
+      Alert.alert("Erro ao resetar", err.message || "");
     }
   }
 
@@ -303,9 +338,7 @@ export default function LoginScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={PRIMARY} />
-        <Text style={{ color: SECONDARY, marginTop: 8 }}>
-          {t("login.loading")}
-        </Text>
+        <Text style={{ color: SECONDARY, marginTop: 8 }}>Carregando...</Text>
       </View>
     );
   }
@@ -318,7 +351,7 @@ export default function LoginScreen() {
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
 
-          {/* Modal de Ban (caso banModalVisible = true) */}
+          {/* Ban Modal */}
           <Modal
             animationType="fade"
             transparent={true}
@@ -356,16 +389,14 @@ export default function LoginScreen() {
           />
 
           <Text style={styles.title}>
-            {mode === "signup"
-              ? t("login.title_signup")
-              : t("login.title_login")}
+            {mode === "signup" ? "Criar Conta" : "Fazer Login"}
           </Text>
 
-          {/* E-mail */}
-          <Text style={styles.label}>{t("login.email_label")}</Text>
+          {/* Email */}
+          <Text style={styles.label}>Email</Text>
           <TextInput
             style={styles.input}
-            placeholder={t("login.email_placeholder") || ""}
+            placeholder="Digite seu email..."
             placeholderTextColor={INPUT_BORDER}
             value={email}
             onChangeText={setEmail}
@@ -374,11 +405,11 @@ export default function LoginScreen() {
           />
 
           {/* Senha */}
-          <Text style={styles.label}>{t("login.password_label")}</Text>
+          <Text style={styles.label}>Senha</Text>
           <View style={styles.inputWithIcon}>
             <TextInput
               style={[styles.input, { flex: 1, marginRight: 8 }]}
-              placeholder={t("login.password_placeholder") || ""}
+              placeholder="********"
               placeholderTextColor={INPUT_BORDER}
               secureTextEntry={!showPassword}
               value={password}
@@ -397,17 +428,17 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Esqueci Senha (apenas login) */}
+          {/* Esqueci a senha (somente no login) */}
           {mode === "login" && (
             <TouchableOpacity
               style={{ marginTop: 10, alignSelf: "flex-end" }}
               onPress={handleResetPassword}
             >
-              <Text style={styles.forgotText}>{t("login.forgot_password")}</Text>
+              <Text style={styles.forgotText}>Esqueci a senha</Text>
             </TouchableOpacity>
           )}
 
-          {/* Se for signup, mostra força da senha */}
+          {/* Força da senha (somente signup) */}
           {mode === "signup" && (
             <Text
               style={[
@@ -415,37 +446,37 @@ export default function LoginScreen() {
                 { color: getPasswordStrengthColor(passwordStrength) },
               ]}
             >
-              {t("login.password_strength", { strength: passwordStrength })}
+              Força da senha: {passwordStrength}
             </Text>
           )}
 
           {/* ID, PIN e Nome caso signup */}
           {mode === "signup" && (
             <>
-              <Text style={styles.label}>{t("login.player_name_label")}</Text>
+              <Text style={styles.label}>Nome</Text>
               <TextInput
                 style={styles.input}
-                placeholder={t("login.player_name_placeholder") || ""}
+                placeholder="Seu nome..."
                 placeholderTextColor={INPUT_BORDER}
                 value={playerName}
                 onChangeText={setPlayerName}
               />
 
-              <Text style={styles.label}>{t("login.player_id_label")}</Text>
+              <Text style={styles.label}>Player ID</Text>
               <TextInput
                 style={styles.input}
-                placeholder={t("login.player_id_placeholder") || ""}
+                placeholder="Ex: 123456"
                 placeholderTextColor={INPUT_BORDER}
                 value={playerId}
                 onChangeText={setPlayerId}
                 keyboardType="numeric"
               />
 
-              <Text style={styles.label}>{t("login.pin_label")}</Text>
+              <Text style={styles.label}>PIN</Text>
               <View style={styles.inputWithIcon}>
                 <TextInput
                   style={[styles.input, { flex: 1, marginRight: 8 }]}
-                  placeholder={t("login.pin_placeholder") || ""}
+                  placeholder="Ex: 9999"
                   placeholderTextColor={INPUT_BORDER}
                   secureTextEntry={!showPin}
                   value={pin}
@@ -466,9 +497,9 @@ export default function LoginScreen() {
             </>
           )}
 
-          {/* Switch: Continuar Conectado */}
+          {/* Switch: Continuar conectado */}
           <View style={styles.switchRow}>
-            <Text style={styles.switchText}>{t("login.stay_logged")} </Text>
+            <Text style={styles.switchText}>Manter Conectado</Text>
             <Switch
               value={stayLogged}
               onValueChange={setStayLogged}
@@ -480,11 +511,11 @@ export default function LoginScreen() {
           {/* Botão principal */}
           {mode === "signup" ? (
             <TouchableOpacity style={styles.signupButton} onPress={handleSignUp}>
-              <Text style={styles.buttonText}>{t("login.signup_button")}</Text>
+              <Text style={styles.buttonText}>Criar Conta</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.button} onPress={handleSignIn}>
-              <Text style={styles.buttonText}>{t("login.login_button")}</Text>
+              <Text style={styles.buttonText}>Login</Text>
             </TouchableOpacity>
           )}
 
@@ -495,7 +526,7 @@ export default function LoginScreen() {
               onPress={() => setMode("login")}
             >
               <Text style={{ color: SECONDARY }}>
-                {t("login.link_to_login")}
+                Já tem conta? Fazer Login
               </Text>
             </TouchableOpacity>
           ) : (
@@ -504,7 +535,7 @@ export default function LoginScreen() {
               onPress={() => setMode("signup")}
             >
               <Text style={{ color: SECONDARY }}>
-                {t("login.link_to_signup")}
+                Não tem conta? Criar Conta
               </Text>
             </TouchableOpacity>
           )}
@@ -620,10 +651,6 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     fontSize: 16,
     fontWeight: "bold",
-  },
-  underline: {
-    color: ACCENT,
-    textDecorationLine: "underline",
   },
   forgotText: {
     color: ACCENT,
