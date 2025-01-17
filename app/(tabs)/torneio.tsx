@@ -8,6 +8,7 @@ import {
   Alert,
   Linking,
   ScrollView,
+  Platform,
   Button,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -170,16 +171,26 @@ export default function TorneioScreen() {
     }
   }
 
-  function handleOpenReport() {
-    if (!linkReport) {
-      Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.no_table"));
-      return;
-    }
-    Linking.openURL(linkReport).catch((err) => {
-      console.log("Erro openURL:", err);
-      Alert.alert(t("common.error"), "Não foi possível abrir a página de report.");
-    });
+function handleOpenReport() {
+  if (!linkReport) {
+    Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.no_table"));
+    return;
   }
+
+  try {
+    if (Platform.OS === "web") {
+      // Para PWAs
+      window.open(linkReport, "_blank");
+    } else {
+      // Para aplicativos nativos (Android/iOS)
+      Linking.openURL(linkReport);
+    }
+  } catch (err) {
+    console.log("Erro ao abrir link:", err);
+    Alert.alert(t("common.error"), "Não foi possível abrir a página de report.");
+  }
+}
+
 
   if (loading) {
     return (
