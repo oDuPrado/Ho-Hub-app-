@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { Calendar } from 'react-native-calendars';
 import {
   View,
   Text,
@@ -13,6 +12,7 @@ import {
   TextInput,
   Image,
   ActivityIndicator,
+  Switch,
 } from "react-native";
 import {
   collection,
@@ -26,6 +26,7 @@ import {
   getDoc,
   where,
   serverTimestamp,
+  getDocs, // <--- Importamos getDocs aqui
 } from "firebase/firestore";
 
 import moment from "moment";
@@ -39,11 +40,11 @@ import {
   JUDGE_PLAYER_IDS,
   HEAD_JUDGE_PLAYER_IDS,
   fetchHostsInfo,
+  vipPlayers,
 } from "../hosts";
 
-import { useTranslation } from "react-i18next"; // <--- i18n
+import { useTranslation } from "react-i18next";
 
-/** Estrutura do Torneio */
 interface Torneio {
   id: string;
   name: string;
@@ -54,16 +55,27 @@ interface Torneio {
   headJudge: string;
   eventType: string;
   judgeAccepted?: boolean;
+  maxVagas?: number;
+  inscricoesAbertura?: string;
+  inscricoesFechamento?: string;
+  prioridadeVip?: boolean;
+  inscricoesVipAbertura?: string;
+  inscricoesVipFechamento?: string;
 }
 
-/** Estrutura de Inscrição */
 interface Inscricao {
   userId: string;
   deckId?: string;
   createdAt: string;
 }
 
-/** Estrutura de Deck (para nome etc.) */
+interface Espera {
+  userId: string;
+  deckId?: string;
+  createdAt: string;
+  vip: boolean;
+}
+
 interface DeckData {
   id: string;
   name: string;
@@ -71,7 +83,7 @@ interface DeckData {
 }
 
 export default function CalendarScreen() {
-  const { t } = useTranslation(); // <--- i18n Hook
+  const { t } = useTranslation();
 
   const [playerId, setPlayerId] = useState("");
   const [isHost, setIsHost] = useState(false);
@@ -79,7 +91,7 @@ export default function CalendarScreen() {
   const [torneios, setTorneios] = useState<Torneio[]>([]);
   const [currentMonth, setCurrentMonth] = useState(moment());
 
-  // Lookup de nomes
+  // Lookup de nomes (juiz e head judge)
   const [judgeMap, setJudgeMap] = useState<Record<string, string>>({});
   const [headJudgeMap, setHeadJudgeMap] = useState<Record<string, string>>({});
 
@@ -92,6 +104,16 @@ export default function CalendarScreen() {
   const [editJudge, setEditJudge] = useState("");
   const [editHeadJudge, setEditHeadJudge] = useState("");
   const [editEventType, setEditEventType] = useState("Cup");
+
+  // Novos estados para suportar grande ou pequena escala
+  const [editMaxVagas, setEditMaxVagas] = useState<number | null>(null);
+  const [editInscricoesAbertura, setEditInscricoesAbertura] = useState<string>("");
+  const [editInscricoesFechamento, setEditInscricoesFechamento] = useState<string>("");
+  const [editPrioridadeVip, setEditPrioridadeVip] = useState<boolean>(false);
+
+  // Novos campos para horários de VIP
+  const [editInscricoesVipAbertura, setEditInscricoesVipAbertura] = useState<string>("");
+  const [editInscricoesVipFechamento, setEditInscricoesVipFechamento] = useState<string>("");
 
   // Modal DETALHES
   const [detalhesModalVisible, setDetalhesModalVisible] = useState(false);
@@ -109,13 +131,15 @@ export default function CalendarScreen() {
 
   // Modal INSCRIÇÃO (usuário)
   const [inscricaoModalVisible, setInscricaoModalVisible] = useState(false);
-  const [inscricaoTorneioId, setInscricaoTorneioId] = useState<string | null>(
-    null
-  );
+  const [inscricaoTorneioId, setInscricaoTorneioId] = useState<string | null>(null);
   const [userDecks, setUserDecks] = useState<DeckData[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState("");
 
-  // Para armazenar cartas do deck atual
+  // Lista de Espera
+  const [espera, setEspera] = useState<Espera[]>([]);
+  const [esperaModalVisible, setEsperaModalVisible] = useState(false);
+
+  // Cartas do deck
   const [deckCards, setDeckCards] = useState<
     {
       category: string;
@@ -151,7 +175,7 @@ export default function CalendarScreen() {
         console.log("Erro ao obter playerId:", error);
       }
 
-      // Carrega Judge
+      // Carrega Juiz
       const jArray = await fetchHostsInfo(JUDGE_PLAYER_IDS);
       const jMapObj: Record<string, string> = {};
       jArray.forEach((j) => {
@@ -169,12 +193,12 @@ export default function CalendarScreen() {
       setHeadJudgeOptions(hjArray);
       setHeadJudgeMap(hjMapObj);
 
-      // Carrega mapping p/ imagens
+      // Carrega mapping p/ imagens de cartas
       loadSetIdMap();
     })();
   }, []);
 
-  // Carrega torneios do Firestore p/ mês atual
+  // Carrega torneios do Firestore para o mês atual
   useEffect(() => {
     const colRef = collection(db, "calendar", "torneios", "list");
     const unsub = onSnapshot(colRef, (snap) => {
@@ -191,9 +215,14 @@ export default function CalendarScreen() {
           headJudge: d.headJudge || "",
           eventType: d.eventType || "Cup",
           judgeAccepted: d.judgeAccepted || false,
+          maxVagas: d.maxVagas || null,
+          inscricoesAbertura: d.inscricoesAbertura || "",
+          inscricoesFechamento: d.inscricoesFechamento || "",
+          prioridadeVip: d.prioridadeVip || false,
+          inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+          inscricoesVipFechamento: d.inscricoesVipFechamento || "",
         });
       });
-      // filtra por mes
       const start = currentMonth.clone().startOf("month");
       const end = currentMonth.clone().endOf("month");
       const filtered = arr.filter((t) => {
@@ -232,7 +261,6 @@ export default function CalendarScreen() {
     }
   }
 
-  // --------------- Navegação de mês ---------------
   function handlePrevMonth() {
     setCurrentMonth((prev) => prev.clone().subtract(1, "month"));
   }
@@ -249,8 +277,15 @@ export default function CalendarScreen() {
     setEditJudge("");
     setEditHeadJudge("");
     setEditEventType("Cup");
+    setEditMaxVagas(null);
+    setEditInscricoesAbertura("");
+    setEditInscricoesFechamento("");
+    setEditPrioridadeVip(false);
+    setEditInscricoesVipAbertura("");
+    setEditInscricoesVipFechamento("");
     setModalVisible(true);
   }
+
   function openEditModal(t: Torneio) {
     setEditId(t.id);
     setEditName(t.name);
@@ -259,6 +294,14 @@ export default function CalendarScreen() {
     setEditJudge(t.judge);
     setEditHeadJudge(t.headJudge);
     setEditEventType(t.eventType);
+
+    setEditMaxVagas(t.maxVagas ?? null);
+    setEditInscricoesAbertura(t.inscricoesAbertura ?? "");
+    setEditInscricoesFechamento(t.inscricoesFechamento ?? "");
+    setEditPrioridadeVip(t.prioridadeVip ?? false);
+    setEditInscricoesVipAbertura(t.inscricoesVipAbertura ?? "");
+    setEditInscricoesVipFechamento(t.inscricoesVipFechamento ?? "");
+
     setModalVisible(true);
   }
 
@@ -283,7 +326,13 @@ export default function CalendarScreen() {
           judge: editJudge,
           judgeAccepted: false,
           headJudge: editHeadJudge,
-          eventType: editEventType, // Certifique-se de salvar o tipo do evento
+          eventType: editEventType,
+          maxVagas: editMaxVagas,
+          inscricoesAbertura: editInscricoesAbertura,
+          inscricoesFechamento: editInscricoesFechamento,
+          prioridadeVip: editPrioridadeVip,
+          inscricoesVipAbertura: editInscricoesVipAbertura,
+          inscricoesVipFechamento: editInscricoesVipFechamento,
         });
       } else {
         // Criar novo torneio
@@ -294,8 +343,14 @@ export default function CalendarScreen() {
           createdBy: playerId,
           judge: editJudge,
           headJudge: editHeadJudge,
-          eventType: editEventType, // Certifique-se de salvar o tipo do evento
+          eventType: editEventType,
           judgeAccepted: false,
+          maxVagas: editMaxVagas,
+          inscricoesAbertura: editInscricoesAbertura,
+          inscricoesFechamento: editInscricoesFechamento,
+          prioridadeVip: editPrioridadeVip,
+          inscricoesVipAbertura: editInscricoesVipAbertura,
+          inscricoesVipFechamento: editInscricoesVipFechamento,
         });
         if (editJudge) {
           sendNotificationToJudge(editJudge, docRef.id, editName.trim());
@@ -307,7 +362,6 @@ export default function CalendarScreen() {
       Alert.alert(t("common.error"), t("calendar.alerts.save_error"));
     }
   }
-  
 
   async function sendNotificationToJudge(
     judgeId: string,
@@ -322,7 +376,7 @@ export default function CalendarScreen() {
         torneioName,
         message: t("calendar.alerts.judge_invite_message", {
           torneioName: torneioName,
-        }) /* <--- Falta criar se quiser */,
+        }),
         timestamp: serverTimestamp(),
       });
     } catch (err) {
@@ -334,7 +388,7 @@ export default function CalendarScreen() {
   async function handleDeleteTorneio(torneio: Torneio) {
     Alert.alert(
       t("common.confirm"),
-      t("calendar.alerts.delete_confirm", { name: torneio.name }), // Use o nome corretamente
+      t("calendar.alerts.delete_confirm", { name: torneio.name }),
       [
         { text: t("calendar.form.cancel_button"), style: "cancel" },
         {
@@ -343,7 +397,7 @@ export default function CalendarScreen() {
           onPress: async () => {
             try {
               const colRef = collection(db, "calendar", "torneios", "list");
-              const docRef = doc(colRef, torneio.id); // Use torneio.id aqui
+              const docRef = doc(colRef, torneio.id);
               await deleteDoc(docRef);
             } catch (err) {
               console.log("Erro handleDeleteTorneio:", err);
@@ -354,18 +408,101 @@ export default function CalendarScreen() {
       ]
     );
   }
-  
+
+  function isVip(pid: string): boolean {
+    return vipPlayers.includes(pid);
+  }
 
   // --------------- Inscrever ---------------
   async function handleInscrever(t: Torneio) {
-    setDetalhesTorneio(t); // Define os detalhes do torneio no estado
+    const agora = moment();
+
+    // Se prioridadeVip estiver ativa e o jogador for VIP, checa se há horário de VIP
+    if (t.prioridadeVip && isVip(playerId)) {
+      if (
+        t.inscricoesVipAbertura &&
+        agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))
+      ) {
+        Alert.alert(
+          "Inscrições VIP Não Abertas",
+          `As inscrições VIP para este torneio abrem às ${t.inscricoesVipAbertura}.`
+        );
+        return;
+      }
+      if (
+        t.inscricoesVipFechamento &&
+        agora.isAfter(moment(t.inscricoesVipFechamento, "HH:mm"))
+      ) {
+        Alert.alert(
+          "Inscrições VIP Encerradas",
+          "As inscrições VIP para este torneio já foram encerradas."
+        );
+        return;
+      }
+    } else {
+      // Se não é VIP ou não tem prioridade de VIP
+      if (
+        t.inscricoesAbertura &&
+        agora.isBefore(moment(t.inscricoesAbertura, "HH:mm"))
+      ) {
+        Alert.alert(
+          "Inscrições Não Abertas",
+          `As inscrições para este torneio abrem às ${t.inscricoesAbertura}.`
+        );
+        return;
+      }
+      if (
+        t.inscricoesFechamento &&
+        agora.isAfter(moment(t.inscricoesFechamento, "HH:mm"))
+      ) {
+        Alert.alert(
+          "Inscrições Encerradas",
+          "As inscrições para este torneio já foram encerradas."
+        );
+        return;
+      }
+    }
+
+    // Verifica se o jogador já está inscrito
+    const colRef = collection(db, "calendar", "torneios", "list", t.id, "inscricoes");
+    const snap = await getDoc(doc(colRef, playerId));
+    if (snap.exists()) {
+      Alert.alert("Aviso", "Você já está inscrito neste torneio.");
+      return;
+    }
+
+    // Verifica se há limite de vagas. Precisamos contar quantas inscrições já existem
+    let totalInscricoes: Inscricao[] = [];
+    await onSnapshot(colRef, () => {
+      // O onSnapshot retorna uma função de unsubscribe; não precisamos dela aqui
+    });
+
+    // Agora usamos getDocs para obter todos os players inscritos
+    const allDocs = await getDocs(colRef);
+    totalInscricoes = [];
+    allDocs.forEach((docSnap) => {
+      totalInscricoes.push({
+        userId: docSnap.id,
+        deckId: docSnap.data().deckId,
+        createdAt: docSnap.data().createdAt || "",
+      });
+    });
+
+    if (t.maxVagas && totalInscricoes.length >= t.maxVagas) {
+      // Se estiver cheio, envia pra lista de espera
+      handleWaitlist(t, isVip(playerId));
+      return;
+    }
+
+    // Continua fluxo normal de inscrição
+    setDetalhesTorneio(t);
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
-  
+
     const decksRef = collection(db, "decks");
-    onSnapshot(query(decksRef, where("playerId", "==", playerId)), (snap) => {
+    onSnapshot(query(decksRef, where("playerId", "==", playerId)), (resp) => {
       const arr: DeckData[] = [];
-      snap.forEach((docSnap) => {
+      resp.forEach((docSnap) => {
         arr.push({
           id: docSnap.id,
           name: docSnap.data().name || `Deck ${docSnap.id}`,
@@ -376,22 +513,35 @@ export default function CalendarScreen() {
     });
     setInscricaoModalVisible(true);
   }
-  
+
+  async function handleWaitlist(t: Torneio, vip: boolean) {
+    Alert.alert(
+      "Lista de Espera",
+      "O torneio está lotado. Você foi adicionado à lista de espera."
+    );
+
+    const waitColRef = collection(db, "calendar", "torneios", "list", t.id, "espera");
+    await setDoc(doc(waitColRef, playerId), {
+      userId: playerId,
+      createdAt: new Date().toISOString(),
+      vip,
+    });
+  }
 
   async function handleSalvarInscricao() {
     if (!inscricaoTorneioId) return;
-  
-    console.log("Tipo do torneio:", detalhesTorneio?.eventType);
-  
-    // Verifica se é necessário um deck (não é necessário para "Liguinha")
+
     if (detalhesTorneio?.eventType !== "Liguinha" && !selectedDeckId) {
       Alert.alert(
         t("common.error"),
-        t("calendar.alerts.registration_error", "Você precisa escolher um deck para se inscrever neste torneio.")
+        t(
+          "calendar.alerts.registration_error",
+          "Você precisa escolher um deck para se inscrever neste torneio."
+        )
       );
       return;
     }
-  
+
     try {
       const colRef = collection(
         db,
@@ -416,16 +566,16 @@ export default function CalendarScreen() {
       console.log("Erro handleSalvarInscricao:", err);
       Alert.alert(
         t("common.error"),
-        t("calendar.alerts.registration_error", "Ocorreu um erro ao salvar sua inscrição.")
+        t(
+          "calendar.alerts.registration_error",
+          "Ocorreu um erro ao salvar sua inscrição."
+        )
       );
     }
   }
-  
-  
-  
+
   // --------------- Detalhes do Torneio ---------------
   async function handleOpenDetalhes(t: Torneio) {
-    console.log("Detalhes do torneio:", t);
     setDetalhesTorneio(t);
     setDetalhesModalVisible(true);
   }
@@ -436,6 +586,9 @@ export default function CalendarScreen() {
 
   // --------------- Ver Inscrições ---------------
   async function openInscricoesModal(t: Torneio) {
+    setDetalhesTorneio(t);
+
+    // Carrega inscrições
     const colRef = collection(db, "calendar", "torneios", "list", t.id, "inscricoes");
     onSnapshot(colRef, (snap) => {
       const arr: Inscricao[] = [];
@@ -474,16 +627,53 @@ export default function CalendarScreen() {
       });
     });
 
+    // Carrega lista de espera
+    const waitColRef = collection(db, "calendar", "torneios", "list", t.id, "espera");
+    onSnapshot(waitColRef, async (wanp) => {
+      const arr: Espera[] = [];
+      const userIdsToLoad = new Set<string>();
+    
+      wanp.forEach((ds) => {
+        arr.push({
+          userId: ds.id,
+          deckId: ds.data().deckId,
+          createdAt: ds.data().createdAt || "",
+          vip: ds.data().vip || false,
+        });
+        userIdsToLoad.add(ds.id); // Guarda o ID para buscar o nome depois
+      });
+    
+      // Ordena: VIP primeiro
+      arr.sort((a, b) => {
+        if (a.vip && !b.vip) return -1;
+        if (!a.vip && b.vip) return 1;
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+    
+      // Atualiza estado da lista de espera
+      setEspera(arr);
+    
+      // Para cada userId, buscar o fullname no Firestore e atualizar o playerNameMap
+      userIdsToLoad.forEach(async (uId) => {
+        const pRef = doc(db, "players", uId);
+        const pSnap = await getDoc(pRef);
+        if (pSnap.exists()) {
+          const nm = pSnap.data().fullname || `Jogador ${uId}`;
+          setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+        }
+      });
+    });
+
     setInscricoesModalVisible(true);
   }
+
   function closeInscricoesModal() {
     setInscricoesModalVisible(false);
     setInscricoes([]);
+    setEspera([]);
   }
 
-  //-------------- EXCLUIR INSCRTIOS ---------------------------
-
-  async function handleExcluirInscricao(tournamentId: string, playerId: string) {
+  async function handleExcluirInscricao(tournamentId: string, pId: string) {
     try {
       const inscricaoRef = doc(
         db,
@@ -492,72 +682,141 @@ export default function CalendarScreen() {
         "list",
         tournamentId,
         "inscricoes",
-        playerId
+        pId
       );
       await deleteDoc(inscricaoRef);
       alert("Inscrição excluída com sucesso!");
+
+      // Verifica a lista de espera para chamar o primeiro
+      await handleSubirListaEspera(tournamentId);
     } catch (error) {
       console.error("Erro ao excluir inscrição:", error);
       alert("Não foi possível excluir a inscrição.");
     }
   }
 
+  async function handleSubirListaEspera(tournamentId: string) {
+    try {
+      const waitColRef = collection(db, "calendar", "torneios", "list", tournamentId, "espera");
+      // Carrega a lista toda
+      const docsSnap = await getDocs(waitColRef);
+      if (docsSnap.empty) return;
+
+      const arr: Espera[] = [];
+      docsSnap.forEach((ds) => {
+        arr.push({
+          userId: ds.id,
+          deckId: ds.data().deckId,
+          createdAt: ds.data().createdAt || "",
+          vip: ds.data().vip || false,
+        });
+      });
+      // Ordena VIP e data
+      arr.sort((a, b) => {
+        if (a.vip && !b.vip) return -1;
+        if (!a.vip && b.vip) return 1;
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+
+      const primeiro = arr[0];
+      if (!primeiro) return;
+
+      // Move este jogador para inscrições
+      const inscricaoRef = doc(
+        db,
+        "calendar",
+        "torneios",
+        "list",
+        tournamentId,
+        "inscricoes",
+        primeiro.userId
+      );
+      await setDoc(inscricaoRef, {
+        userId: primeiro.userId,
+        deckId: primeiro.deckId || null,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Remove da coleção de espera
+      const waitDocRef = doc(
+        db,
+        "calendar",
+        "torneios",
+        "list",
+        tournamentId,
+        "espera",
+        primeiro.userId
+      );
+      await deleteDoc(waitDocRef);
+
+      // Notifica jogador
+      sendNotificationToPlayer(primeiro.userId, tournamentId);
+    } catch (err) {
+      console.error("Erro ao subir lista de espera:", err);
+    }
+  }
+
+  async function sendNotificationToPlayer(uId: string, tournamentId: string) {
+    try {
+      const notifRef = doc(collection(db, "players", uId, "notifications"));
+      await setDoc(notifRef, {
+        type: "waitlist_update",
+        torneioId: tournamentId,
+        message: "Você foi promovido da lista de espera para uma inscrição!",
+        timestamp: serverTimestamp(),
+      });
+    } catch (err) {
+      console.log("Erro ao notificar jogador sobre lista de espera:", err);
+    }
+  }
+
   // --------------- Juiz: Confirmar ou Recusar ---------------
   async function confirmJudge(tournament: Torneio) {
+    try {
+      const colRef = collection(db, "calendar", "torneios", "list");
+      const docRef = doc(colRef, tournament.id);
+      await updateDoc(docRef, { judgeAccepted: true });
 
-  try {
-    const colRef = collection(db, "calendar", "torneios", "list");
-    const docRef = doc(colRef, tournament.id);
-    await updateDoc(docRef, { judgeAccepted: true });
+      Alert.alert(
+        t("common.success"),
+        t("calendar.alerts.judge_confirmed", { tournamentName: tournament.name })
+      );
 
-    // Exibe alerta de sucesso
-    Alert.alert(
-      t("common.success"),
-      t("calendar.alerts.judge_confirmed", { tournamentName: tournament.name })
-    );
-
-    // Envia notificação para o criador do torneio
-    sendNotifToHost(
-      tournament.createdBy,
-      tournament.id,
-      tournament.name,
-      t("calendar.alerts.judge_notif_host_confirmed")
-    );
-  } catch (err) {
-    console.log("Erro confirmJudge:", err);
-
-    // Exibe alerta de erro
-    Alert.alert(t("common.error"), t("calendar.alerts.judge_notif_host_confirmed"));
+      sendNotifToHost(
+        tournament.createdBy,
+        tournament.id,
+        tournament.name,
+        t("calendar.alerts.judge_notif_host_confirmed")
+      );
+    } catch (err) {
+      console.log("Erro confirmJudge:", err);
+      Alert.alert(t("common.error"), t("calendar.alerts.judge_notif_host_confirmed"));
+    }
   }
-}
 
-async function declineJudge(tournament: Torneio) {
+  async function declineJudge(tournament: Torneio) {
+    try {
+      const colRef = collection(db, "calendar", "torneios", "list");
+      const docRef = doc(colRef, tournament.id);
+      await updateDoc(docRef, { judge: "", judgeAccepted: false });
 
-  try {
-    const colRef = collection(db, "calendar", "torneios", "list");
-    const docRef = doc(colRef, tournament.id);
-    await updateDoc(docRef, { judge: "", judgeAccepted: false });
+      Alert.alert(
+        t("common.success"),
+        t("calendar.alerts.judge_declined", { tournamentName: tournament.name })
+      );
 
-    // Exibe alerta de sucesso
-    Alert.alert(
-      t("common.success"),
-      t("calendar.alerts.judge_declined", { tournamentName: tournament.name })
-    );
-
-    // Envia notificação para o criador do torneio
-    sendNotifToHost(
-      tournament.createdBy,
-      tournament.id,
-      tournament.name,
-      t("calendar.alerts.judge_notif_host_declined")
-    );
-  } catch (err) {
-    console.log("Erro declineJudge:", err);
-
-    // Exibe alerta de erro
-    Alert.alert(t("common.error"), t("calendar.alerts.judge_decline_error"));
+      sendNotifToHost(
+        tournament.createdBy,
+        tournament.id,
+        tournament.name,
+        t("calendar.alerts.judge_notif_host_declined")
+      );
+    } catch (err) {
+      console.log("Erro declineJudge:", err);
+      Alert.alert(t("common.error"), t("calendar.alerts.judge_decline_error"));
+    }
   }
-}
+
   async function sendNotifToHost(
     hostId: string,
     torneioId: string,
@@ -585,7 +844,6 @@ async function declineJudge(tournament: Torneio) {
       const deckRef = doc(db, "decks", deckId);
       const deckSnap = await getDoc(deckRef);
       if (!deckSnap.exists()) {
-        console.log("Deck inexistente:", deckId);
         setDeckCards([]);
         return;
       }
@@ -626,7 +884,9 @@ async function declineJudge(tournament: Torneio) {
       const imageResults = await Promise.all(imagePromises);
       const newCardImages: Record<string, string> = {};
       imageResults.forEach((result) => {
-        if (result.url) newCardImages[result.key] = result.url;
+        if (result.url) {
+          newCardImages[result.key] = result.url;
+        }
       });
 
       setCardImages(newCardImages);
@@ -637,6 +897,7 @@ async function declineJudge(tournament: Torneio) {
       setLoadingImages(false);
     }
   }
+
   async function fetchCardImage(
     cardName: string,
     expansion?: string,
@@ -674,7 +935,7 @@ async function declineJudge(tournament: Torneio) {
         onRequestClose={() => setDeckPdfModalVisible(false)}
       >
         <SafeAreaView style={styles.modalContainer}>
-          <Text style={styles.modalTitle}>{/* Falta i18n? */}Detalhes do Deck</Text>
+          <Text style={styles.modalTitle}>Detalhes do Deck</Text>
           <Text style={{ color: "#ccc", textAlign: "center", marginBottom: 20 }}>
             {t("calendar.registration.title")}:
             {deckNameMap[selectedDeckIdForPdf] || `ID ${selectedDeckIdForPdf}`}
@@ -692,9 +953,7 @@ async function declineJudge(tournament: Torneio) {
                         <Text style={styles.cardTitle}>
                           {card.category}: {card.name}
                         </Text>
-                        <Text style={styles.cardSub}>
-                          Qtd: {card.quantity}
-                        </Text>
+                        <Text style={styles.cardSub}>Qtd: {card.quantity}</Text>
                         {card.expansion && (
                           <Text style={styles.cardSub}>
                             Expansão: {card.expansion}
@@ -743,22 +1002,23 @@ async function declineJudge(tournament: Torneio) {
     );
   }
 
-  // -------------- Render card --------------
   function renderCard(tor: Torneio) {
     const dt = moment(tor.date, "DD/MM/YYYY");
     const isFuture = dt.isSameOrAfter(moment(), "day");
     const eventLabel = tor.eventType || "Cup";
-
     const judgeName = judgeMap[tor.judge] || t("calendar.card.judge_label");
-    const headJudgeName = headJudgeMap[tor.headJudge] || t("calendar.card.head_judge_label");
-    const isThisJudgePending = tor.judge === playerId && tor.judgeAccepted === false;
+    const headJudgeName =
+      headJudgeMap[tor.headJudge] || t("calendar.card.head_judge_label");
+    const isThisJudgePending =
+      tor.judge === playerId && tor.judgeAccepted === false;
     const canAccessDetails = isHost || (tor.judge === playerId && tor.judgeAccepted);
 
     return (
       <View style={styles.card} key={`t-${tor.id}`}>
         <Text style={styles.cardTitle}>{tor.name}</Text>
         <Text style={styles.cardSub}>
-          {tor.date} {t("calendar.form.time_label")?.split(" ")[0] || "às"} {tor.time} | [{eventLabel}]
+          {tor.date} {t("calendar.form.time_label")?.split(" ")[0] || "às"}{" "}
+          {tor.time} | [{eventLabel}]
         </Text>
         <Text style={styles.cardSub}>
           {t("calendar.card.creator_label")}: {tor.createdBy}
@@ -840,9 +1100,13 @@ async function declineJudge(tournament: Torneio) {
     );
   }
 
-  // -------------- Modal de Detalhes --------------
   function renderDetalhesModal() {
     if (!detalhesTorneio) return null;
+
+    const inscritosCount = inscricoes.length;
+    const maxStr = detalhesTorneio.maxVagas
+      ? detalhesTorneio.maxVagas.toString()
+      : t("common.unlimited");
 
     return (
       <Modal
@@ -850,7 +1114,7 @@ async function declineJudge(tournament: Torneio) {
         animationType="slide"
         onRequestClose={closeDetalhes}
       >
-        <SafeAreaView style={styles.modalContainer}>
+        <SafeAreaView style={[styles.modalContainer, { paddingBottom: 40 }]}>
           <ScrollView contentContainerStyle={{ padding: 16 }}>
             <Text style={styles.modalTitle}>{t("calendar.details.title")}</Text>
 
@@ -863,7 +1127,9 @@ async function declineJudge(tournament: Torneio) {
             <Text style={styles.modalLabel}>{t("calendar.details.time_label")}</Text>
             <Text style={styles.modalInput}>{detalhesTorneio.time}</Text>
 
-            <Text style={styles.modalLabel}>{t("calendar.details.event_type_label")}</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.details.event_type_label")}
+            </Text>
             <Text style={styles.modalInput}>{detalhesTorneio.eventType}</Text>
 
             <Text style={styles.modalLabel}>{t("calendar.details.judge_label")}</Text>
@@ -872,10 +1138,44 @@ async function declineJudge(tournament: Torneio) {
               {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
             </Text>
 
-            <Text style={styles.modalLabel}>{t("calendar.details.head_judge_label")}</Text>
+            <Text style={styles.modalLabel}>
+              {t("calendar.details.head_judge_label")}
+            </Text>
             <Text style={styles.modalInput}>
               {headJudgeMap[detalhesTorneio.headJudge] || "Sem head judge"}
             </Text>
+
+            <Text style={styles.modalLabel}>Número de Vagas</Text>
+            <Text style={styles.modalInput}>{maxStr}</Text>
+
+            <Text style={styles.modalLabel}>Inscrições Feitas</Text>
+            <Text style={styles.modalInput}>{inscricoes.length}</Text>
+
+            <Text style={styles.modalLabel}>Horário de Abertura</Text>
+            <Text style={styles.modalInput}>
+              {detalhesTorneio.inscricoesAbertura || "Não definido"}
+            </Text>
+
+            <Text style={styles.modalLabel}>Horário de Fechamento</Text>
+            <Text style={styles.modalInput}>
+              {detalhesTorneio.inscricoesFechamento || "Não definido"}
+            </Text>
+
+            {detalhesTorneio.prioridadeVip && (
+              <>
+                <Text style={styles.modalLabel}>Abertura para VIPs (separado)</Text>
+                <Text style={styles.modalInput}>
+                  {detalhesTorneio.inscricoesVipAbertura || "Não definido"}
+                </Text>
+
+                <Text style={styles.modalLabel}>
+                  Fechamento para VIPs (separado)
+                </Text>
+                <Text style={styles.modalInput}>
+                  {detalhesTorneio.inscricoesVipFechamento || "Não definido"}
+                </Text>
+              </>
+            )}
 
             <TouchableOpacity
               style={[styles.button, { marginTop: 20 }]}
@@ -900,10 +1200,76 @@ async function declineJudge(tournament: Torneio) {
     );
   }
 
-  // -------------- Sub-modal Inscrições --------------
+  function renderEsperaModal() {
+    if (!detalhesTorneio) return null;
+
+    return (
+      <Modal
+        visible={esperaModalVisible}
+        animationType="slide"
+        onRequestClose={() => setEsperaModalVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>Lista de Espera</Text>
+            {espera.length === 0 ? (
+              <Text style={{ color: "#ccc", marginVertical: 10 }}>
+                Nenhum jogador na lista de espera.
+              </Text>
+            ) : (
+              espera.map((e, idx) => (
+                <View
+                  key={`espera-${idx}`}
+                  style={[
+                    styles.inscricaoItem,
+                    { flexDirection: "column", justifyContent: "flex-start" },
+                  ]}
+                >
+                  <Text style={styles.inscricaoItemText}>
+                    Jogador: {playerNameMap[e.userId] || e.userId}
+                  </Text>
+                  <Text style={styles.inscricaoItemText}>
+                    VIP: {e.vip ? "Sim" : "Não"}
+                  </Text>
+                  <Text style={styles.inscricaoItemText}>
+                    Data/Hora: {formatIsoDate(e.createdAt)}
+                  </Text>
+                </View>
+              ))
+            )}
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 20 }]}
+              onPress={() => setEsperaModalVisible(false)}
+            >
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
   function renderInscricoesModal() {
-    if (!detalhesTorneio) return null; // Garante que detalhesTorneio está definido
-  
+    if (!detalhesTorneio) return null;
+
+    let etapaInscricoes = "Normal";
+    const agora = moment();
+    if (detalhesTorneio.prioridadeVip) {
+      if (
+        detalhesTorneio.inscricoesVipAbertura &&
+        agora.isBefore(moment(detalhesTorneio.inscricoesVipAbertura, "HH:mm"))
+      ) {
+        etapaInscricoes = "Aguardando VIP";
+      } else if (
+        detalhesTorneio.inscricoesVipFechamento &&
+        agora.isBefore(moment(detalhesTorneio.inscricoesVipFechamento, "HH:mm"))
+      ) {
+        etapaInscricoes = "Inscrições VIP";
+      } else {
+        etapaInscricoes = "Inscrições Gerais";
+      }
+    }
+
     return (
       <Modal
         visible={inscricoesModalVisible}
@@ -915,8 +1281,11 @@ async function declineJudge(tournament: Torneio) {
             <Text style={styles.modalTitle}>
               {t("calendar.inscriptions.title", "Inscrições / Decks")}
             </Text>
-  
-            {/* Verifica se há inscrições */}
+
+            <Text style={{ color: "#fff", marginBottom: 10 }}>
+              Etapa Atual: {etapaInscricoes}
+            </Text>
+
             {inscricoes.length === 0 ? (
               <Text style={{ color: "#ccc", marginVertical: 10 }}>
                 {t("calendar.inscriptions.none", "Nenhuma inscrição encontrada.")}
@@ -930,7 +1299,6 @@ async function declineJudge(tournament: Torneio) {
                     { flexDirection: "row", justifyContent: "space-between" },
                   ]}
                 >
-                  {/* Informações da Inscrição */}
                   <TouchableOpacity
                     style={{ flex: 1 }}
                     onPress={() =>
@@ -955,28 +1323,30 @@ async function declineJudge(tournament: Torneio) {
                       Data/Hora: {formatIsoDate(ins.createdAt)}
                     </Text>
                   </TouchableOpacity>
-  
-                  {/* Botão de Exclusão */}
-                  <TouchableOpacity
-                    onPress={() =>
-                      handleExcluirInscricao(detalhesTorneio.id, ins.userId)
-                    }
-                    style={{
-                      backgroundColor: "#fe5f55",
-                      paddingHorizontal: 10,
-                      paddingVertical: 6,
-                      borderRadius: 4,
-                      alignSelf: "center",
-                      marginLeft: 10,
-                    }}
-                  >
-                    <Text style={{ color: "#fff", fontWeight: "bold" }}>Excluir</Text>
-                  </TouchableOpacity>
+
+                  {isHost && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        handleExcluirInscricao(detalhesTorneio.id, ins.userId)
+                      }
+                      style={{
+                        backgroundColor: "#fe5f55",
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 4,
+                        alignSelf: "center",
+                        marginLeft: 10,
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                        Excluir
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))
             )}
-  
-            {/* Botão para Fechar o Modal */}
+
             <TouchableOpacity
               style={[styles.button, { marginTop: 20 }]}
               onPress={closeInscricoesModal}
@@ -985,26 +1355,95 @@ async function declineJudge(tournament: Torneio) {
                 {t("calendar.details.close_button", "Fechar")}
               </Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 10, backgroundColor: "#777" }]}
+              onPress={() => setEsperaModalVisible(true)}
+            >
+              <Text style={styles.buttonText}>Lista de Espera</Text>
+            </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
       </Modal>
     );
   }
-  
 
-  // -------------------------------- RENDER PRINCIPAL --------------------------------
+  function renderInscricaoModal() {
+    return (
+      <Modal
+        visible={inscricaoModalVisible}
+        animationType="slide"
+        onRequestClose={() => setInscricaoModalVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>
+              {t("calendar.registration.title")}
+            </Text>
+
+            {detalhesTorneio?.eventType !== "Liguinha" ? (
+              <>
+                {userDecks.length === 0 ? (
+                  <Text style={{ color: "#fff", marginBottom: 10 }}>
+                    {t("calendar.registration.no_decks")}
+                  </Text>
+                ) : (
+                  userDecks.map((dk) => (
+                    <TouchableOpacity
+                      key={`dk-${dk.id}`}
+                      style={[
+                        styles.deckOption,
+                        selectedDeckId === dk.id && { backgroundColor: "#666" },
+                      ]}
+                      onPress={() => setSelectedDeckId(dk.id)}
+                    >
+                      <Text style={styles.deckOptionText}>
+                        {dk.playerId} | {dk.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </>
+            ) : (
+              <Text style={{ color: "#ccc", marginBottom: 10 }}>
+                {t(
+                  "calendar.registration.no_deck_required",
+                  "Não é necessário enviar um deck para este torneio."
+                )}
+              </Text>
+            )}
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: "#999" }]}
+                onPress={() => setInscricaoModalVisible(false)}
+              >
+                <Text style={styles.buttonText}>
+                  {t("calendar.form.cancel_button")}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
+                <Text style={styles.buttonText}>
+                  {t("calendar.registration.submit_button")}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handlePrevMonth}>
-          {/* t("calendar.header.prev_month") => "<" */}
           <Text style={styles.headerButton}>{t("calendar.header.prev_month")}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
           {currentMonth.format("MMMM [de] YYYY")}
         </Text>
         <TouchableOpacity onPress={handleNextMonth}>
-          {/* t("calendar.header.next_month") => ">" */}
           <Text style={styles.headerButton}>{t("calendar.header.next_month")}</Text>
         </TouchableOpacity>
       </View>
@@ -1021,17 +1460,17 @@ async function declineJudge(tournament: Torneio) {
         {torneios.map((t) => renderCard(t))}
       </ScrollView>
 
+      {/* Modal CRIAR/EDITAR */}
       <Modal
         visible={modalVisible}
         animationType="slide"
         onRequestClose={() => setModalVisible(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
+        <SafeAreaView style={[styles.modalContainer, { paddingBottom: 10 }]}>
           <ScrollView style={{ padding: 16 }}>
             <Text style={styles.modalTitle}>
               {editId
-                ? /* Falta i18n: "Editar Torneio" */
-                  t("calendar.edit_tournament", "Editar Torneio")
+                ? t("calendar.edit_tournament", "Editar Torneio")
                 : t("calendar.create_tournament")}
             </Text>
 
@@ -1125,6 +1564,60 @@ async function declineJudge(tournament: Torneio) {
               ))}
             </Picker>
 
+            <Text style={styles.modalLabel}>Máximo de Vagas</Text>
+            <TextInput
+              style={styles.modalInput}
+              keyboardType="numeric"
+              value={editMaxVagas?.toString() || ""}
+              onChangeText={(v) => setEditMaxVagas(Number(v) || null)}
+            />
+
+            <Text style={styles.modalLabel}>Início das Inscrições (HH:mm)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editInscricoesAbertura}
+              onChangeText={setEditInscricoesAbertura}
+            />
+
+            <Text style={styles.modalLabel}>Fechamento das Inscrições (HH:mm)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editInscricoesFechamento}
+              onChangeText={setEditInscricoesFechamento}
+            />
+
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
+              <Text style={{ color: "#fff", marginRight: 10 }}>
+                Prioridade para VIPs
+              </Text>
+              <Switch
+                value={editPrioridadeVip}
+                onValueChange={setEditPrioridadeVip}
+              />
+            </View>
+
+            {editPrioridadeVip && (
+              <>
+                <Text style={styles.modalLabel}>
+                  Início das Inscrições (VIP) (HH:mm)
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editInscricoesVipAbertura}
+                  onChangeText={setEditInscricoesVipAbertura}
+                />
+
+                <Text style={styles.modalLabel}>
+                  Fechamento das Inscrições (VIP) (HH:mm)
+                </Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editInscricoesVipFechamento}
+                  onChangeText={setEditInscricoesVipFechamento}
+                />
+              </>
+            )}
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.button, { backgroundColor: "#999" }]}
@@ -1144,76 +1637,11 @@ async function declineJudge(tournament: Torneio) {
         </SafeAreaView>
       </Modal>
 
-      {/* Modal DETALHES */}
       {detalhesModalVisible && renderDetalhesModal()}
-
-      {/* Sub-modal INSCRIÇÕES */}
       {renderInscricoesModal()}
-
-      {/* Sub-modal PDF do Deck */}
       {renderDeckPdfModal()}
-
-      {/* Modal INSCRIÇÃO (Deck) */}
-      <Modal
-          visible={inscricaoModalVisible}
-          animationType="slide"
-          onRequestClose={() => setInscricaoModalVisible(false)}
-        >
-          <SafeAreaView style={styles.modalContainer}>
-            <ScrollView style={{ padding: 16 }}>
-              <Text style={styles.modalTitle}>
-                {t("calendar.registration.title")}
-              </Text>
-
-              {/* Verifica se é "Liguinha" */}
-              {detalhesTorneio?.eventType !== "Liguinha" ? (
-                <>
-                  {userDecks.length === 0 ? (
-                    <Text style={{ color: "#fff", marginBottom: 10 }}>
-                      {t("calendar.registration.no_decks")}
-                    </Text>
-                  ) : (
-                    userDecks.map((dk) => (
-                      <TouchableOpacity
-                        key={`dk-${dk.id}`}
-                        style={[
-                          styles.deckOption,
-                          selectedDeckId === dk.id && { backgroundColor: "#666" },
-                        ]}
-                        onPress={() => setSelectedDeckId(dk.id)}
-                      >
-                        <Text style={styles.deckOptionText}>
-                          {dk.playerId} | {dk.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                  )}
-                </>
-              ) : (
-                <Text style={{ color: "#ccc", marginBottom: 10 }}>
-                  {t("calendar.registration.no_deck_required", "Não é necessário enviar um deck para este torneio.")}
-                </Text>
-              )}
-
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={[styles.button, { backgroundColor: "#999" }]}
-                  onPress={() => setInscricaoModalVisible(false)}
-                >
-                  <Text style={styles.buttonText}>
-                    {t("calendar.form.cancel_button")}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
-                  <Text style={styles.buttonText}>
-                    {t("calendar.registration.submit_button")}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
-
+      {renderEsperaModal()}
+      {renderInscricaoModal()}
     </SafeAreaView>
   );
 }
@@ -1225,7 +1653,6 @@ function formatIsoDate(isoStr: string) {
   return m.format("DD/MM/YYYY HH:mm");
 }
 
-// ----------- Estilos -----------
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
