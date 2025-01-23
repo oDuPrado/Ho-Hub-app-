@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Picker } from "@react-native-picker/picker";
+import { Calendar } from 'react-native-calendars';
 import {
   View,
   Text,
@@ -273,7 +274,7 @@ export default function CalendarScreen() {
     try {
       const colRef = collection(db, "calendar", "torneios", "list");
       if (editId) {
-        // Edit
+        // Editar torneio existente
         const docRef = doc(colRef, editId);
         await updateDoc(docRef, {
           name: editName.trim(),
@@ -282,10 +283,10 @@ export default function CalendarScreen() {
           judge: editJudge,
           judgeAccepted: false,
           headJudge: editHeadJudge,
-          eventType: editEventType,
+          eventType: editEventType, // Certifique-se de salvar o tipo do evento
         });
       } else {
-        // Create
+        // Criar novo torneio
         const docRef = await addDoc(colRef, {
           name: editName.trim(),
           date: editDate,
@@ -293,10 +294,9 @@ export default function CalendarScreen() {
           createdBy: playerId,
           judge: editJudge,
           headJudge: editHeadJudge,
-          eventType: editEventType,
+          eventType: editEventType, // Certifique-se de salvar o tipo do evento
           judgeAccepted: false,
         });
-        // Notifica juiz, se existir
         if (editJudge) {
           sendNotificationToJudge(editJudge, docRef.id, editName.trim());
         }
@@ -307,6 +307,7 @@ export default function CalendarScreen() {
       Alert.alert(t("common.error"), t("calendar.alerts.save_error"));
     }
   }
+  
 
   async function sendNotificationToJudge(
     judgeId: string,
@@ -357,9 +358,10 @@ export default function CalendarScreen() {
 
   // --------------- Inscrever ---------------
   async function handleInscrever(t: Torneio) {
+    setDetalhesTorneio(t); // Define os detalhes do torneio no estado
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
-
+  
     const decksRef = collection(db, "decks");
     onSnapshot(query(decksRef, where("playerId", "==", playerId)), (snap) => {
       const arr: DeckData[] = [];
@@ -374,13 +376,22 @@ export default function CalendarScreen() {
     });
     setInscricaoModalVisible(true);
   }
+  
 
   async function handleSalvarInscricao() {
     if (!inscricaoTorneioId) return;
-    if (!selectedDeckId) {
-      Alert.alert(t("common.error"), t("calendar.alerts.registration_error"));
+  
+    console.log("Tipo do torneio:", detalhesTorneio?.eventType);
+  
+    // Verifica se é necessário um deck (não é necessário para "Liguinha")
+    if (detalhesTorneio?.eventType !== "Liguinha" && !selectedDeckId) {
+      Alert.alert(
+        t("common.error"),
+        t("calendar.alerts.registration_error", "Você precisa escolher um deck para se inscrever neste torneio.")
+      );
       return;
     }
+  
     try {
       const colRef = collection(
         db,
@@ -393,19 +404,28 @@ export default function CalendarScreen() {
       const docRef = doc(colRef, playerId);
       await setDoc(docRef, {
         userId: playerId,
-        deckId: selectedDeckId,
+        deckId: detalhesTorneio?.eventType === "Liguinha" ? null : selectedDeckId,
         createdAt: new Date().toISOString(),
       });
-      Alert.alert(t("common.success"), t("calendar.alerts.success_registration"));
+      Alert.alert(
+        t("common.success"),
+        t("calendar.alerts.success_registration", "Inscrição realizada com sucesso!")
+      );
       setInscricaoModalVisible(false);
     } catch (err) {
       console.log("Erro handleSalvarInscricao:", err);
-      Alert.alert(t("common.error"), t("calendar.alerts.registration_error"));
+      Alert.alert(
+        t("common.error"),
+        t("calendar.alerts.registration_error", "Ocorreu um erro ao salvar sua inscrição.")
+      );
     }
   }
-
+  
+  
+  
   // --------------- Detalhes do Torneio ---------------
   async function handleOpenDetalhes(t: Torneio) {
+    console.log("Detalhes do torneio:", t);
     setDetalhesTorneio(t);
     setDetalhesModalVisible(true);
   }
@@ -459,6 +479,27 @@ export default function CalendarScreen() {
   function closeInscricoesModal() {
     setInscricoesModalVisible(false);
     setInscricoes([]);
+  }
+
+  //-------------- EXCLUIR INSCRTIOS ---------------------------
+
+  async function handleExcluirInscricao(tournamentId: string, playerId: string) {
+    try {
+      const inscricaoRef = doc(
+        db,
+        "calendar",
+        "torneios",
+        "list",
+        tournamentId,
+        "inscricoes",
+        playerId
+      );
+      await deleteDoc(inscricaoRef);
+      alert("Inscrição excluída com sucesso!");
+    } catch (error) {
+      console.error("Erro ao excluir inscrição:", error);
+      alert("Não foi possível excluir a inscrição.");
+    }
   }
 
   // --------------- Juiz: Confirmar ou Recusar ---------------
@@ -861,6 +902,8 @@ async function declineJudge(tournament: Torneio) {
 
   // -------------- Sub-modal Inscrições --------------
   function renderInscricoesModal() {
+    if (!detalhesTorneio) return null; // Garante que detalhesTorneio está definido
+  
     return (
       <Modal
         visible={inscricoesModalVisible}
@@ -870,50 +913,76 @@ async function declineJudge(tournament: Torneio) {
         <SafeAreaView style={styles.modalContainer}>
           <ScrollView style={{ padding: 16 }}>
             <Text style={styles.modalTitle}>
-              {/* Falta no JSON: "calendar.inscriptions.title" */}
               {t("calendar.inscriptions.title", "Inscrições / Decks")}
             </Text>
-
+  
+            {/* Verifica se há inscrições */}
             {inscricoes.length === 0 ? (
               <Text style={{ color: "#ccc", marginVertical: 10 }}>
                 {t("calendar.inscriptions.none", "Nenhuma inscrição encontrada.")}
               </Text>
             ) : (
               inscricoes.map((ins, idx) => (
-                <TouchableOpacity
+                <View
                   key={`ins-${idx}`}
-                  style={styles.inscricaoItem}
-                  onPress={() =>
-                    ins.deckId
-                      ? (setSelectedDeckIdForPdf(ins.deckId),
-                        loadDeckCards(ins.deckId),
-                        setDeckPdfModalVisible(true))
-                      : null
-                  }
+                  style={[
+                    styles.inscricaoItem,
+                    { flexDirection: "row", justifyContent: "space-between" },
+                  ]}
                 >
-                  <Text style={styles.inscricaoItemText}>
-                    {t("jogador.header", "Jogador")}:{" "}
-                    {playerNameMap[ins.userId] || ins.userId}
-                  </Text>
-                  <Text style={styles.inscricaoItemText}>
-                    Deck:{" "}
-                    {ins.deckId
-                      ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})`
-                      : "Sem deck"}
-                  </Text>
-                  <Text style={styles.inscricaoItemText}>
-                    Data/Hora: {formatIsoDate(ins.createdAt)}
-                  </Text>
-                </TouchableOpacity>
+                  {/* Informações da Inscrição */}
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={() =>
+                      ins.deckId
+                        ? (setSelectedDeckIdForPdf(ins.deckId),
+                          loadDeckCards(ins.deckId),
+                          setDeckPdfModalVisible(true))
+                        : null
+                    }
+                  >
+                    <Text style={styles.inscricaoItemText}>
+                      {t("jogador.header", "Jogador")}:{" "}
+                      {playerNameMap[ins.userId] || ins.userId}
+                    </Text>
+                    <Text style={styles.inscricaoItemText}>
+                      Deck:{" "}
+                      {ins.deckId
+                        ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})`
+                        : "Sem deck"}
+                    </Text>
+                    <Text style={styles.inscricaoItemText}>
+                      Data/Hora: {formatIsoDate(ins.createdAt)}
+                    </Text>
+                  </TouchableOpacity>
+  
+                  {/* Botão de Exclusão */}
+                  <TouchableOpacity
+                    onPress={() =>
+                      handleExcluirInscricao(detalhesTorneio.id, ins.userId)
+                    }
+                    style={{
+                      backgroundColor: "#fe5f55",
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 4,
+                      alignSelf: "center",
+                      marginLeft: 10,
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "bold" }}>Excluir</Text>
+                  </TouchableOpacity>
+                </View>
               ))
             )}
-
+  
+            {/* Botão para Fechar o Modal */}
             <TouchableOpacity
               style={[styles.button, { marginTop: 20 }]}
               onPress={closeInscricoesModal}
             >
               <Text style={styles.buttonText}>
-                {t("calendar.details.close_button")}
+                {t("calendar.details.close_button", "Fechar")}
               </Text>
             </TouchableOpacity>
           </ScrollView>
@@ -921,6 +990,7 @@ async function declineJudge(tournament: Torneio) {
       </Modal>
     );
   }
+  
 
   // -------------------------------- RENDER PRINCIPAL --------------------------------
   return (
@@ -1085,53 +1155,65 @@ async function declineJudge(tournament: Torneio) {
 
       {/* Modal INSCRIÇÃO (Deck) */}
       <Modal
-        visible={inscricaoModalVisible}
-        animationType="slide"
-        onRequestClose={() => setInscricaoModalVisible(false)}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>
-              {t("calendar.registration.title")}
-            </Text>
-            {userDecks.length === 0 && (
-              <Text style={{ color: "#fff", marginBottom: 10 }}>
-                {t("calendar.registration.no_decks")}
+          visible={inscricaoModalVisible}
+          animationType="slide"
+          onRequestClose={() => setInscricaoModalVisible(false)}
+        >
+          <SafeAreaView style={styles.modalContainer}>
+            <ScrollView style={{ padding: 16 }}>
+              <Text style={styles.modalTitle}>
+                {t("calendar.registration.title")}
               </Text>
-            )}
-            {userDecks.map((dk) => (
-              <TouchableOpacity
-                key={`dk-${dk.id}`}
-                style={[
-                  styles.deckOption,
-                  selectedDeckId === dk.id && { backgroundColor: "#666" },
-                ]}
-                onPress={() => setSelectedDeckId(dk.id)}
-              >
-                <Text style={styles.deckOptionText}>
-                  {dk.playerId} | {dk.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
 
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.button, { backgroundColor: "#999" }]}
-                onPress={() => setInscricaoModalVisible(false)}
-              >
-                <Text style={styles.buttonText}>
-                  {t("calendar.form.cancel_button")}
+              {/* Verifica se é "Liguinha" */}
+              {detalhesTorneio?.eventType !== "Liguinha" ? (
+                <>
+                  {userDecks.length === 0 ? (
+                    <Text style={{ color: "#fff", marginBottom: 10 }}>
+                      {t("calendar.registration.no_decks")}
+                    </Text>
+                  ) : (
+                    userDecks.map((dk) => (
+                      <TouchableOpacity
+                        key={`dk-${dk.id}`}
+                        style={[
+                          styles.deckOption,
+                          selectedDeckId === dk.id && { backgroundColor: "#666" },
+                        ]}
+                        onPress={() => setSelectedDeckId(dk.id)}
+                      >
+                        <Text style={styles.deckOptionText}>
+                          {dk.playerId} | {dk.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </>
+              ) : (
+                <Text style={{ color: "#ccc", marginBottom: 10 }}>
+                  {t("calendar.registration.no_deck_required", "Não é necessário enviar um deck para este torneio.")}
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
-                <Text style={styles.buttonText}>
-                  {t("calendar.registration.submit_button")}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+              )}
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.button, { backgroundColor: "#999" }]}
+                  onPress={() => setInscricaoModalVisible(false)}
+                >
+                  <Text style={styles.buttonText}>
+                    {t("calendar.form.cancel_button")}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
+                  <Text style={styles.buttonText}>
+                    {t("calendar.registration.submit_button")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
+
     </SafeAreaView>
   );
 }
