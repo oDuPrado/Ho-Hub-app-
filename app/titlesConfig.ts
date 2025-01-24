@@ -31,7 +31,9 @@ export interface TitleItem {
   description: string;
   category: TitleCategory;
   condition: (stats: PlayerStats) => boolean;
+  unlocked?: boolean; // Adicionada a propriedade opcional
 }
+
 
 const titles: TitleItem[] = [
   {
