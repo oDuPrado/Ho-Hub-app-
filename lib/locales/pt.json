@@ -1,6 +1,6 @@
 {
     "login": {
-      "title_login": "Entrar",
+      "title_login": "login",
       "title_signup": "Criar Conta",
       "email_label": "E-mail",
       "email_placeholder": "seuemail@exemplo.com",
@@ -14,7 +14,7 @@
       "player_id_placeholder": "Ex: 5062577",
       "pin_label": "PIN",
       "pin_placeholder": "****",
-      "stay_logged": "Continuar Conectado (em breve)",
+      "stay_logged": "Continuar Conectado",
       "signup_button": "Cadastrar",
       "login_button": "Entrar",
       "link_to_login": "Já tem conta? Entre Aqui",

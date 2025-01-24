@@ -55,8 +55,8 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
 
     let iconName = "star";
     if (item.category === "SÉRIA") iconName = "trophy";
-    if (item.category === "ÚNICA") iconName = "md-ribbon";
-
+    if (item.category === "ÚNICA") iconName = "ribbon";
+    
     const borderColor = TITLE_COLORS[item.category];
 
     const frontInterpolate = flipAnim.interpolate({

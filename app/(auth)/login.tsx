@@ -18,6 +18,7 @@ import {
   ScrollView,
   Modal,
   Image,
+  ImageBackground,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -28,13 +29,15 @@ import {
   sendPasswordResetEmail,
   signOut,
   User,
+  setPersistence,
+  browserLocalPersistence, // Se estivesse em Web, mas aqui é Mobile
 } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 
 import { auth, db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next"; // i18n
-import LSselector from "../../LSselector"; 
+import LSselector from "../../LSselector";
 
 // Importamos a lista de banimento
 import { BAN_PLAYER_IDS } from "../hosts";
@@ -125,24 +128,29 @@ export default function LoginScreen() {
   }, [logoScale]);
 
   // --------------- Checa AsyncStorage p/ ver se user quer permanecer logado ---------------
-  useEffect(() => {
-    (async () => {
+useEffect(() => {
+  (async () => {
+    try {
       const stay = await AsyncStorage.getItem("@stayLogged");
       if (stay === "true") {
-        setStayLogged(true);
+        setStayLogged(true); // Atualiza o estado
       }
-    })();
-  }, []);
+    } catch (error) {
+      console.error("Erro ao carregar @stayLogged:", error);
+    }
+  })();
+}, []);
 
-  // --------------- Observa estado do Auth ---------------
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
-      if (user) {
-        setLoading(true);
-
+// --------------- Observa estado do Auth ---------------
+useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+    if (user) {
+      setLoading(true);
+      try {
         // Buscar doc "login/{uid}"
         const docRef = doc(db, "login", user.uid);
         const snap = await getDoc(docRef);
+
         if (!snap.exists()) {
           Alert.alert(
             t("login.alerts.incomplete_account"),
@@ -165,12 +173,11 @@ export default function LoginScreen() {
         }
 
         // === Verifica banimento ===
-        // Se o playerId estiver em BAN_PLAYER_IDS => ban
         if (BAN_PLAYER_IDS.includes(data.playerId)) {
           // Exibe modal de ban
           setBanModalVisible(true);
 
-          // Força signOut pra não entrar no app
+          // Força signOut pra não entrar
           await signOut(auth);
           setLoading(false);
           return;
@@ -184,25 +191,33 @@ export default function LoginScreen() {
         await AsyncStorage.setItem("@userPin", data.pin);
         await AsyncStorage.setItem("@userName", docName);
 
-        // Se o user não quer ficar logado, faz signOut ao fechar app
-        // => definimos ou não a persistência do login aqui
+        // Armazena preferencia de stayLogged
         if (stayLogged) {
-          // Armazena preferencia
           await AsyncStorage.setItem("@stayLogged", "true");
         } else {
-          // Apaga preferencia
           await AsyncStorage.removeItem("@stayLogged");
+          // Se não quer permanecer logado, força signOut ao fechar o app
+          await signOut(auth);
+          setLoading(false);
+          return;
         }
 
         Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
         router.push("/(tabs)/home");
+      } catch (error) {
+        console.error("Erro ao verificar autenticação:", error);
+        Alert.alert(t("login.alerts.error"), t("login.alerts.error"));
+      } finally {
         setLoading(false);
-      } else {
-        console.log("Sem user logado");
       }
-    });
-    return () => unsubscribe();
-  }, [router, t, stayLogged]);
+    } else {
+      console.log("Sem user logado no momento...");
+    }
+  });
+
+  return () => unsubscribe();
+}, [router, t, stayLogged]);
+
 
   // --------------- Observa password p/ medir força (em signup) ---------------
   useEffect(() => {
@@ -228,6 +243,12 @@ export default function LoginScreen() {
     }
     try {
       setLoading(true);
+
+      // Se o usuário quer ficar logado, no Firebase nativo do RN,
+      // a persistência já é local, mas podemos reforçar via
+      // setPersistence(auth, getReactNativePersistence(AsyncStorage)) (caso configuremos).
+      // Para simplificar, confiamos no onAuthStateChanged + AsyncStorage.
+
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       console.log("Conta criada, UID=", cred.user.uid);
 
@@ -247,7 +268,7 @@ export default function LoginScreen() {
           pin: pin,
         })
       );
-      // onAuthStateChanged redireciona...
+      // onAuthStateChanged vai redirecionar ao home
     } catch (err: any) {
       console.log("Erro no SignUp:", err);
       Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
@@ -317,7 +338,6 @@ export default function LoginScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
-
           {/* Modal de Ban (caso banModalVisible = true) */}
           <Modal
             animationType="fade"
@@ -350,7 +370,7 @@ export default function LoginScreen() {
 
           {/* Logo animada */}
           <Animated.Image
-            source={require("../../assets/images/pokemon_ms_logo.jpg")}
+            source={require("../../assets/images/logo.jpg")}
             style={[styles.logo, { transform: [{ scale: logoScale }] }]}
             resizeMode="contain"
           />
@@ -407,7 +427,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Se for signup, mostra força da senha */}
+          {/* Força da senha (signup) */}
           {mode === "signup" && (
             <Text
               style={[
@@ -419,7 +439,7 @@ export default function LoginScreen() {
             </Text>
           )}
 
-          {/* ID, PIN e Nome caso signup */}
+          {/* ID, PIN e Nome (apenas no signup) */}
           {mode === "signup" && (
             <>
               <Text style={styles.label}>{t("login.player_name_label")}</Text>
@@ -516,7 +536,7 @@ export default function LoginScreen() {
 
 // --------------- ESTILOS ---------------
 const { width, height } = Dimensions.get("window");
-const BACKGROUND = "#1E1E1E";
+const BACKGROUND = "#1E1E1";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
 const INPUT_BG = "#292929";
@@ -542,10 +562,10 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   logo: {
-    width: width * 0.4,
-    height: height * 0.2,
-    marginTop: 40,
-    marginBottom: 30,
+    width: width * 0.45,
+    height: height * 0.21,
+    marginTop: 30,
+    marginBottom: 35,
   },
   title: {
     color: PRIMARY,
@@ -620,10 +640,6 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     fontSize: 16,
     fontWeight: "bold",
-  },
-  underline: {
-    color: ACCENT,
-    textDecorationLine: "underline",
   },
   forgotText: {
     color: ACCENT,
