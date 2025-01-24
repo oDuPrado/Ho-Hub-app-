@@ -332,7 +332,9 @@ useEffect(() => {
   }
 
   return (
-    <SafeAreaView style={styles.safeContainer}>
+    <ImageBackground
+      source={require("../../assets/images/background_login.jpg")} // Caminho da imagem de fundo
+      style={styles.background}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -530,7 +532,7 @@ useEffect(() => {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </ImageBackground>
   );
 }
 
@@ -546,9 +548,11 @@ const SWITCH_THUMB = PRIMARY;
 const ACCENT = "#FF6F61";
 
 const styles = StyleSheet.create({
-  safeContainer: {
+  background: {
     flex: 1,
-    backgroundColor: BACKGROUND,
+    width: width,
+    height: height,
+    resizeMode: "cover", // Garante que a imagem cubra toda a tela
   },
   loadingContainer: {
     flex: 1,
