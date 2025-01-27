@@ -167,8 +167,8 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
 
           <ScrollView style={{ marginTop: 20 }}>
             {renderCategory("Tier 0 - Únicas", getTitlesByCategory("ÚNICA"))}
-            {renderCategory("Tier 1 - Sérias", getTitlesByCategory("SÉRIA"))}
-            {renderCategory("Tier 2 - Engraçadas", getTitlesByCategory("ENGRAÇADA"))}
+            {renderCategory("Tier 1 - Épicas", getTitlesByCategory("SÉRIA"))}
+            {renderCategory("Tier 2 - 4FUN", getTitlesByCategory("ENGRAÇADA"))}
           </ScrollView>
         </Animated.View>
 

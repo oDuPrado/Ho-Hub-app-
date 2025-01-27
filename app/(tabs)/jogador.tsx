@@ -47,12 +47,10 @@ interface MatchData {
 }
 
 /** Estrutura p/ histórico de torneios (subcoleção places). */
-export interface TournamentHistoryItem {
-  tournamentId: string;
-  tournamentName: string;
-  place: number;
-  totalPlayers: number;
-  roundCount: number;
+interface PlaceDoc {
+  userid: string;
+  fullname: string;
+  // Se tiver mais campos, coloque aqui
 }
 
 /** Estrutura p/ dados de jogador ao buscar no Firestore. */
@@ -91,25 +89,11 @@ export default function PlayerScreen() {
     losses: 0,
     draws: 0,
     matchesTotal: 0,
-    tournamentsPlayed: 0,
-    top8Count: 0,
-    positiveStreak: 0,
-    negativeStreak: 0,
     uniqueOpponents: 0,
-    comebackWins: 0,
-    flawlessTournamentWins: 0,
-    regionalWins: 0,
-    bigTournamentWins: 0,
-    helpedBeginners: 0,
-    luckyWins: 0,
-    memeDeckWins: 0,
-    matchesAfterMidnight: 0,
-    matchesAfterMidnightWins: 0,
-    ownedTitlesCount: 0,
-    beatAllPlayersInTournament: 0,
-    firstTournamentWinner: false,
-    firstAchieved: false,
+    tournamentPlacements: [],
   });
+
+  // STREAK
   const [currentStreak, setCurrentStreak] = useState<string>("Sem Streak");
 
   // TÍTULOS
@@ -195,7 +179,7 @@ export default function PlayerScreen() {
           (m) => m.player1_id === storedId || m.player2_id === storedId
         );
 
-        // Calcula stats
+        // Calcula stats BÁSICAS (ainda sem places)
         const computedStats = computeBasicStats(storedId, userMatches);
         setStats(computedStats);
 
@@ -203,7 +187,7 @@ export default function PlayerScreen() {
         const cStreak = computeCurrentStreak(storedId, userMatches);
         setCurrentStreak(cStreak);
 
-        // Títulos
+        // Títulos (por enquanto sem tournamentPlacements)
         const titlesUnlocked = computeTitles(computedStats);
         // Marca unlocked
         const enriched = titles.map((t) => ({
@@ -220,7 +204,7 @@ export default function PlayerScreen() {
   }, [router]);
 
   // =======================================
-  // FUNÇÕES DE PARTIDAS
+  // FUNÇÃO PARA BUSCAR TODAS AS PARTIDAS
   // =======================================
   async function fetchAllMatches(): Promise<MatchData[]> {
     const snap = await getDocs(collectionGroup(db, "matches"));
@@ -231,6 +215,32 @@ export default function PlayerScreen() {
     return arr;
   }
 
+  // =======================================
+  // FUNÇÃO PARA BUSCAR 'PLACES' (COLOCAÇÕES)
+  // SOMENTE QUANDO O JOGADOR ABRIR OS TÍTULOS
+  // =======================================
+  async function fetchAllPlacesForUser(uId: string): Promise<number[]> {
+    const snap = await getDocs(collectionGroup(db, "places"));
+    const placements: number[] = [];
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as PlaceDoc;
+      // 'docSnap.id' costuma ser a colocação: "1", "2", "3", etc.
+      if (data.userid === uId) {
+        // converte para number
+        const placeNum = parseInt(docSnap.id, 10);
+        if (!isNaN(placeNum)) {
+          placements.push(placeNum);
+        }
+      }
+    });
+
+    return placements;
+  }
+
+  // =======================================
+  // FUNÇÃO BÁSICA DE STATS (W, L, D, etc.)
+  // =======================================
   function computeBasicStats(uId: string, userMatches: MatchData[]): PlayerStats {
     let w = 0,
       l = 0,
@@ -259,16 +269,21 @@ export default function PlayerScreen() {
       }
     });
 
+    // Retorna só W, L, D e Unique Opponents
+    // (a tournamentPlacements será preenchido separadamente se quisermos)
     return {
-      ...stats,
       wins: w,
       losses: l,
       draws: d,
       matchesTotal: userMatches.length,
       uniqueOpponents: oppSet.size,
+      tournamentPlacements: [], // Por enquanto vazio
     };
   }
 
+  // =======================================
+  // COMPUTAR STREAK
+  // =======================================
   function computeCurrentStreak(uId: string, userMatches: MatchData[]): string {
     if (userMatches.length === 0) return "Sem Streak";
     userMatches.sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -316,6 +331,9 @@ export default function PlayerScreen() {
     return "Sem Streak";
   }
 
+  // =======================================
+  // REVALIDA TÍTULOS
+  // =======================================
   function computeTitles(ps: PlayerStats): TitleItem[] {
     const result: TitleItem[] = [];
     for (let t of titles) {
@@ -325,6 +343,39 @@ export default function PlayerScreen() {
     }
     return result;
   }
+
+  // =======================================
+  // MANIPULADOR PARA ABRIR MODAL DE TÍTULOS
+  // -> Busca "places" do jogador, atualiza stats,
+  //    re-calcula títulos e só então abre o modal
+  // =======================================
+  const handleOpenTitles = async () => {
+    try {
+      // 1. Buscar as colocações do jogador (subcoleção places)
+      const userPlacements = await fetchAllPlacesForUser(userId);
+
+      // 2. Atualizar 'stats' com as tournamentPlacements
+      const updatedStats: PlayerStats = {
+        ...stats,
+        tournamentPlacements: userPlacements,
+      };
+      setStats(updatedStats);
+
+      // 3. Recalcular títulos com stats atualizadas
+      const revalidatedTitles = computeTitles(updatedStats);
+      const enriched = titles.map((t) => ({
+        ...t,
+        unlocked: revalidatedTitles.some((tt) => tt.id === t.id),
+      }));
+      setUnlockedTitles(enriched);
+
+      // 4. Agora sim abrir o modal
+      setTitlesModalVisible(true);
+    } catch (err) {
+      console.log("Erro ao buscar places:", err);
+      Alert.alert("Erro", "Falha ao buscar colocações do jogador.");
+    }
+  };
 
   // =======================================
   // HISTÓRICO
@@ -766,7 +817,7 @@ export default function PlayerScreen() {
         {/* BOTÕES */}
         <TouchableOpacity
           style={[styles.titlesButton, { backgroundColor: "#000000" }]}
-          onPress={() => setTitlesModalVisible(true)}
+          onPress={handleOpenTitles} // <-- agora chamamos a função que busca places
         >
           <Text style={styles.titlesButtonText}>Ver Títulos</Text>
         </TouchableOpacity>
@@ -810,7 +861,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 10,
   },
-  // Botões com estilo preto e branco
   titlesButton: {
     borderWidth: 1,
     borderColor: "#FFFFFF",
@@ -849,7 +899,6 @@ const styles = StyleSheet.create({
     top: 10,
     left: 10,
   },
-
   searchContainer: {
     backgroundColor: CARD_BG,
     borderRadius: 8,

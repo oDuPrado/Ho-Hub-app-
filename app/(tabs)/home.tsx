@@ -13,6 +13,7 @@ import {
   Linking,
   Modal,
   FlatList,
+  ImageBackground,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -21,6 +22,7 @@ import { auth, db } from "../../lib/firebaseConfig";
 import { collectionGroup, getDocs, doc, getDoc } from "firebase/firestore";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
+import { FontAwesome5 } from "@expo/vector-icons"; // Ícone de sininho
 
 interface NotificationItem {
   id: number;
@@ -268,112 +270,119 @@ export default function HomeScreen() {
   const wr = total > 0 ? ((winsCount / total) * 100).toFixed(1) : "0";
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#1E1E1E" }}>
-      {/* Cabeçalho com botão de notificações */}
-      <View style={styles.headerBar}>
-        <Text style={styles.headerTitle}>Home</Text>
-        <TouchableOpacity style={styles.notifButton} onPress={openNotificationsModal}>
-          <Text style={styles.notifText}>Notificações</Text>
-          {notificationCount > 0 && (
-            <View style={styles.notifBadge}>
-              <Text style={styles.notifBadgeText}>{notificationCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.container}>
-        <Animated.Image
-          source={require("../../assets/images/pokemon_ms_logo.jpg")}
-          style={[styles.logo, { transform: [{ scale: scaleAnim }] }]}
-          resizeMode="contain"
-        />
-
-        <Animated.Text style={[styles.title, { opacity: fadeAnim }]}>
-          {t("home.welcome", { username: userName })}
-        </Animated.Text>
-
-        <View style={styles.statsSection}>
-          <Text style={styles.sectionTitle}>{t("home.stats.total_matches")}</Text>
-
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{winsCount}</Text>
-              <Text style={styles.statLabel}>{t("home.stats.wins")}</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{lossesCount}</Text>
-              <Text style={styles.statLabel}>{t("home.stats.losses")}</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{drawCount}</Text>
-              <Text style={styles.statLabel}>{t("home.stats.draws")}</Text>
-            </View>
-          </View>
-
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{total}</Text>
-              <Text style={styles.statLabel}>{t("home.stats.total_matches")}</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{wr}%</Text>
-              <Text style={styles.statLabel}>{t("home.stats.winrate")}</Text>
-            </View>
-          </View>
-
-          <View style={styles.rivalContainer}>
-            <Text style={styles.rivalLabel}>{t("home.stats.rival")}:</Text>
-            <Text style={styles.rivalValue}>{biggestRival}</Text>
-          </View>
-        </View>
-
-        <View style={styles.buttonsContainer}>
-          <TouchableOpacity style={styles.collectionsButton} onPress={openCollectionModal}>
-            <Text style={styles.collectionsButtonText}>
-              {t("home.buttons.collections", "Coleções Validas")}
-            </Text>
-          </TouchableOpacity>
-
-          <View style={styles.bottomButtonsRow}>
-            <TouchableOpacity
-              style={styles.donateButton}
-              onPress={() => Linking.openURL("https://picpay.me/marco.macedo10/0.5")}
-            >
-              <Text style={styles.donateText}>{t("home.buttons.donate", "Doar")}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Text style={styles.logoutText}>{t("home.buttons.logout")}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Modal de Coleções */}
-        <Modal visible={collectionsModalVisible} animationType="slide">
-          <ScrollView contentContainerStyle={styles.modalContainer}>
-            <Text style={styles.modalTitle}>
-              {t("home.collections_modal.title", "Coleções Válidas")}
-            </Text>
-            {loadingCollections ? (
-              <ActivityIndicator size="large" color="#E3350D" />
-            ) : (
-              validCollections.map((set) => (
-                <View key={set.id} style={styles.collectionCard}>
-                  <Text style={styles.collectionName}>{set.name}</Text>
-                  <Text style={styles.collectionSeries}>{set.series}</Text>
-                </View>
-              ))
+    // Background usando ImageBackground
+    <ImageBackground
+      source={require("../../assets/images/background_login.jpg")}
+      style={styles.backgroundImage}
+    >
+      {/* View principal, para empilhar conteúdo */}
+      <View style={{ flex: 1 }}>
+        {/* Ícone de sininho no canto superior direito */}
+        <View style={styles.notificationContainer}>
+          <TouchableOpacity style={styles.notifButton} onPress={openNotificationsModal}>
+            <FontAwesome5 name="bell" size={26} color="#FFF" />
+            {notificationCount > 0 && (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>{notificationCount}</Text>
+              </View>
             )}
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={closeCollectionModal}
-            >
-              <Text style={styles.modalCloseButtonText}>{t("common.close")}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.container}>
+          {/* Logo */}
+          <Animated.Image
+            source={require("../../assets/images/logo.jpg")}
+            style={[styles.logo, { transform: [{ scale: scaleAnim }] }]}
+            resizeMode="contain"
+          />
+
+          <Animated.Text style={[styles.title, { opacity: fadeAnim }]}>
+            {t("home.welcome", { username: userName })}
+          </Animated.Text>
+
+          <View style={styles.statsSection}>
+            <Text style={styles.sectionTitle}>{t("home.stats.total_matches")}</Text>
+
+            <View style={styles.statsRow}>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{winsCount}</Text>
+                <Text style={styles.statLabel}>{t("home.stats.wins")}</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{lossesCount}</Text>
+                <Text style={styles.statLabel}>{t("home.stats.losses")}</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{drawCount}</Text>
+                <Text style={styles.statLabel}>{t("home.stats.draws")}</Text>
+              </View>
+            </View>
+
+            <View style={styles.statsRow}>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{total}</Text>
+                <Text style={styles.statLabel}>{t("home.stats.total_matches")}</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{wr}%</Text>
+                <Text style={styles.statLabel}>{t("home.stats.winrate")}</Text>
+              </View>
+            </View>
+
+            <View style={styles.rivalContainer}>
+              <Text style={styles.rivalLabel}>{t("home.stats.rival")}:</Text>
+              <Text style={styles.rivalValue}>{biggestRival}</Text>
+            </View>
+          </View>
+
+          <View style={styles.buttonsContainer}>
+            <TouchableOpacity style={styles.collectionsButton} onPress={openCollectionModal}>
+              <Text style={styles.collectionsButtonText}>
+                {t("home.buttons.collections", "Coleções Validas")}
+              </Text>
             </TouchableOpacity>
-          </ScrollView>
-        </Modal>
-      </ScrollView>
+
+            <View style={styles.bottomButtonsRow}>
+              <TouchableOpacity
+                style={styles.donateButton}
+                onPress={() => Linking.openURL("https://picpay.me/marco.macedo10/0.5")}
+              >
+                <Text style={styles.donateText}>{t("home.buttons.donate", "Doar")}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                <Text style={styles.logoutText}>{t("home.buttons.logout")}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Modal de Coleções */}
+          <Modal visible={collectionsModalVisible} animationType="slide">
+            <ScrollView contentContainerStyle={styles.modalContainer}>
+              <Text style={styles.modalTitle}>
+                {t("home.collections_modal.title", "Coleções Válidas")}
+              </Text>
+              {loadingCollections ? (
+                <ActivityIndicator size="large" color="#E3350D" />
+              ) : (
+                validCollections.map((set) => (
+                  <View key={set.id} style={styles.collectionCard}>
+                    <Text style={styles.collectionName}>{set.name}</Text>
+                    <Text style={styles.collectionSeries}>{set.series}</Text>
+                  </View>
+                ))
+              )}
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={closeCollectionModal}
+              >
+                <Text style={styles.modalCloseButtonText}>{t("common.close")}</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </Modal>
+        </ScrollView>
+      </View>
 
       {/* Modal de Notificações */}
       <Modal visible={notifModalVisible} animationType="slide" transparent>
@@ -414,43 +423,37 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  backgroundImage: {
+    flex: 1,
+    resizeMode: "cover",
+  },
   loaderContainer: {
     flex: 1,
     backgroundColor: "#1E1E1E",
     justifyContent: "center",
     alignItems: "center",
   },
-  headerBar: {
-    backgroundColor: "#292929",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  headerTitle: {
-    color: "#FFF",
-    fontSize: 20,
-    fontWeight: "bold",
+  notificationContainer: {
+    position: "absolute",
+    top: 20,
+    right: 20,
+    zIndex: 999,
   },
   notifButton: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  notifText: {
-    color: "#FFF",
-    marginRight: 8,
   },
   notifBadge: {
     backgroundColor: "#E3350D",
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 2,
+    marginLeft: 4,
   },
   notifBadgeText: {
     color: "#FFF",
@@ -459,14 +462,13 @@ const styles = StyleSheet.create({
   },
   container: {
     flexGrow: 1,
-    backgroundColor: "#1E1E1E",
     alignItems: "center",
     padding: 20,
   },
   logo: {
     width: 120,
     height: 120,
-    marginTop: 20,
+    marginTop: 40,
     marginBottom: 20,
   },
   title: {
@@ -480,7 +482,7 @@ const styles = StyleSheet.create({
   statsSection: {
     width: "100%",
     padding: 15,
-    backgroundColor: "#2A2A2A",
+    backgroundColor: "rgba(42,42,42,0.9)",
     borderRadius: 8,
     borderWidth: 1.5,
     borderColor: "#4D4D4D",
