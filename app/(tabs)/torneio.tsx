@@ -4,6 +4,7 @@ import {
   View,
   Text,
   StyleSheet,
+  ActivityIndicator,
   Alert,
   Linking,
   ScrollView,
@@ -13,15 +14,14 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import * as Notifications from "expo-notifications";
-import { useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next"; 
 import { 
   Appbar, 
   Card, 
-  Button 
+  Button, 
+  ActivityIndicator as PaperActivityIndicator 
 } from "react-native-paper";
-import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import LottieView from "lottie-react-native"; // <--- Lottie
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -45,22 +45,19 @@ export default function TorneioScreen() {
   const intervalRef = useRef<any>(null);
   const [fetchCount, setFetchCount] = useState(0);
 
-  // Pedir permissão e buscar dados
   useEffect(() => {
     requestNotificationPermission();
     fetchTournamentData();
 
-    // Define intervalo de 30s
     intervalRef.current = setInterval(() => {
       setFetchCount((prev) => prev + 1);
-    }, 30000);
+    }, 10000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
 
-  // A cada ciclo, recarrega
   useEffect(() => {
     fetchTournamentData();
   }, [fetchCount]);
@@ -84,7 +81,6 @@ export default function TorneioScreen() {
   async function fetchTournamentData() {
     try {
       setLoading(true);
-
       const storedId = await AsyncStorage.getItem("@userId");
       const storedName = await AsyncStorage.getItem("@userName");
       if (!storedId) {
@@ -200,188 +196,156 @@ export default function TorneioScreen() {
   if (loading) {
     return (
       <View style={styles.loader}>
-        {/* Usando Lottie para loading */}
-        <LottieView
-          source={require("../../assets/images/lotties/loading.json")}
-          autoPlay
-          loop
-          style={{ width: 200, height: 200 }}
-        />
+        {/* Usando o ActivityIndicator do Paper */}
+        <PaperActivityIndicator animating={true} size="large" color={RED} />
       </View>
     );
   }
 
   return (
     <>
-      {/* AppBar com Logo centralizada */}
-      <Appbar.Header style={styles.appBar}>
+      {/* AppBar */}
+      <Appbar.Header style={{ backgroundColor: BLACK }}>
         <Image
           source={require("../../assets/images/logo.jpg")}
           style={styles.logo}
           resizeMode="contain"
         />
-        <Appbar.Content 
-          title="Torneio"
-          titleStyle={styles.appBarTitle}
+        <Appbar.Content
+          title="Info do jogador"
+          titleStyle={{ color: RED, fontWeight: "bold", fontSize: 20 }}
         />
       </Appbar.Header>
 
-      {/* Gradient de fundo */}
-      <LinearGradient
-        colors={[BLACK, "#121212", "#0A0A0A"]}
-        style={styles.gradientBackground}
-      >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Título principal */}
-          <Text style={styles.mainTitle}>
-            {t("torneio.info.ongoing_title").toUpperCase()}
-          </Text>
+      {/* Conteúdo principal */}
+      <ScrollView style={styles.container}>
+        <Text style={styles.mainTitle}>
+          {t("torneio.info.ongoing_title").toUpperCase()}
+        </Text>
 
-          {/* Card do Jogador */}
-          <Card style={styles.card}>
-            <Card.Title
-              title={userName}
-              subtitle={t("torneio.info.player_label")}
-              left={(props) => (
-                <MaterialCommunityIcons
-                  {...props}
-                  name="account"
-                  size={40}
-                  color={RED}
-                />
-              )}
-              titleStyle={styles.cardTitle}
-              subtitleStyle={styles.cardSubtitle}
-            />
-          </Card>
+        {/* Card do Jogador */}
+        <Card style={styles.card}>
+          <Card.Title
+            title={userName}
+            subtitle={t("torneio.info.player_label")}
+            left={(props) => (
+              <MaterialCommunityIcons
+                {...props}
+                name="account"
+                size={40}
+                color={RED}
+              />
+            )}
+            titleStyle={styles.cardTitle}
+            subtitleStyle={styles.cardSubtitle}
+          />
+        </Card>
 
-          {/* Card do Oponente */}
-          <Card style={styles.card}>
-            <Card.Title
-              title={opponentName ?? t("torneio.alerts.no_opponent")}
-              subtitle={t("torneio.info.opponent_label")}
-              left={(props) => (
-                <MaterialCommunityIcons
-                  {...props}
-                  name="account"
-                  size={40}
-                  color={RED}
-                />
-              )}
-              titleStyle={styles.cardTitle}
-              subtitleStyle={styles.cardSubtitle}
-            />
-          </Card>
+        {/* Card do Oponente */}
+        <Card style={styles.card}>
+          <Card.Title
+            title={opponentName ?? t("torneio.alerts.no_opponent")}
+            subtitle={t("torneio.info.opponent_label")}
+            left={(props) => (
+              <MaterialCommunityIcons
+                {...props}
+                name="account"
+                size={40}
+                color={RED}
+              />
+            )}
+            titleStyle={styles.cardTitle}
+            subtitleStyle={styles.cardSubtitle}
+          />
+        </Card>
 
-          {/* Card da Rodada */}
-          <Card style={styles.card}>
-            <Card.Title
-              title={currentRound ? String(currentRound) : t("torneio.alerts.no_round")}
-              subtitle={t("torneio.info.current_round")}
-              left={(props) => (
-                <MaterialCommunityIcons
-                  {...props}
-                  name="flag-checkered"
-                  size={40}
-                  color={RED}
-                />
-              )}
-              titleStyle={styles.cardTitle}
-              subtitleStyle={styles.cardSubtitle}
-            />
-          </Card>
+        {/* Card da Rodada Atual */}
+        <Card style={styles.card}>
+          <Card.Title
+            title={currentRound ? String(currentRound) : t("torneio.alerts.no_round")}
+            subtitle={t("torneio.info.current_round")}
+            left={(props) => (
+              <MaterialCommunityIcons
+                {...props}
+                name="flag-checkered"
+                size={40}
+                color={RED}
+              />
+            )}
+            titleStyle={styles.cardTitle}
+            subtitleStyle={styles.cardSubtitle}
+          />
+        </Card>
 
-          {/* Card da Mesa */}
-          <Card style={styles.card}>
-            <Card.Title
-              title={mesaNumber ?? t("torneio.info.not_found")}
-              subtitle={t("torneio.info.your_table")}
-              left={(props) => (
-                <MaterialCommunityIcons
-                  {...props}
-                  name="table"
-                  size={40}
-                  color={RED}
-                />
-              )}
-              titleStyle={styles.cardTitle}
-              subtitleStyle={styles.cardSubtitle}
-            />
-          </Card>
+        {/* Card da Mesa */}
+        <Card style={styles.card}>
+          <Card.Title
+            title={mesaNumber ?? t("torneio.info.not_found")}
+            subtitle={t("torneio.info.your_table")}
+            left={(props) => (
+              <MaterialCommunityIcons
+                {...props}
+                name="table"
+                size={40}
+                color={RED}
+              />
+            )}
+            titleStyle={styles.cardTitle}
+            subtitleStyle={styles.cardSubtitle}
+          />
+        </Card>
 
-          {/* Botão para Reportar Resultado */}
-          <View style={styles.btnContainer}>
-            <Button
-              mode="contained"
-              onPress={handleOpenReport}
-              style={styles.btnReport}
-              labelStyle={{ color: WHITE, fontSize: 16 }}
-              icon="check"
-            >
-              {t("torneio.buttons.report_result")}
-            </Button>
-          </View>
-        </ScrollView>
-      </LinearGradient>
+        {/* Botão para Reportar Resultado */}
+        <View style={styles.btnContainer}>
+          <Button
+            mode="contained"
+            onPress={handleOpenReport}
+            style={styles.btnReport}
+            labelStyle={{ color: WHITE, fontSize: 16 }}
+            icon="check"
+          >
+            {t("torneio.buttons.report_result")}
+          </Button>
+        </View>
+      </ScrollView>
     </>
   );
 }
 
-/* --------------------------
-   PALETA DE CORES E ESTILOS
---------------------------- */
+/* PALETA DE CORES E ESTILOS */
 const RED = "#E3350D";
 const BLACK = "#1E1E1E";
-const WHITE = "#FFFFFF";
 const DARK_GRAY = "#292929";
+const WHITE = "#FFFFFF";
 
 const styles = StyleSheet.create({
-  appBar: {
-    backgroundColor: BLACK,
-    elevation: 6,
-  },
-  appBarTitle: {
-    color: RED,
-    fontWeight: "bold",
-    fontSize: 20,
-    textAlign: "center",
-  },
-  logo: {
-    width: 50,
-    height: 50,
-    marginLeft: 10,
-  },
   loader: {
     flex: 1,
     backgroundColor: BLACK,
     justifyContent: "center",
     alignItems: "center",
   },
-  gradientBackground: {
+  container: {
     flex: 1,
-  },
-  scrollContent: {
+    backgroundColor: BLACK,
     padding: 16,
+  },
+  logo: {
+    width: 50,
+    height: 50,
+    marginRight: 8,
   },
   mainTitle: {
     color: RED,
     fontSize: 22,
     fontWeight: "bold",
-    marginVertical: 20,
+    marginBottom: 20,
     textAlign: "center",
+    marginTop: 20,
   },
   card: {
-    marginBottom: 12,
+    marginBottom: 10,
     backgroundColor: DARK_GRAY,
-    borderRadius: 12,
-
-    // Sombra no Android:
-    elevation: 4,
-    // Sombra no iOS:
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
   },
   cardTitle: {
     color: WHITE,
@@ -398,7 +362,7 @@ const styles = StyleSheet.create({
   btnReport: {
     backgroundColor: RED,
     borderRadius: 8,
-    paddingVertical: 8,
-    width: "75%",
+    paddingVertical: 6,
+    width: "70%",
   },
 });
