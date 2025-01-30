@@ -4,18 +4,24 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   Linking,
   ScrollView,
   Platform,
-  Button,
+  Image,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-
 import * as Notifications from "expo-notifications";
-import { useTranslation } from "react-i18next"; // <--- i18n
+import { useTranslation } from "react-i18next";
+import { 
+  Appbar, 
+  Card, 
+  Button 
+} from "react-native-paper";
+import { LinearGradient } from "expo-linear-gradient";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import LottieView from "lottie-react-native"; // <--- Lottie
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -27,10 +33,9 @@ Notifications.setNotificationHandler({
 
 export default function TorneioScreen() {
   const router = useRouter();
-  const { t } = useTranslation(); // <--- i18n
+  const { t } = useTranslation();
 
   const [loading, setLoading] = useState(true);
-
   const [userName, setUserName] = useState<string>(t("torneio.info.none"));
   const [mesaNumber, setMesaNumber] = useState<string | null>(null);
   const [currentRound, setCurrentRound] = useState<number | null>(null);
@@ -40,19 +45,22 @@ export default function TorneioScreen() {
   const intervalRef = useRef<any>(null);
   const [fetchCount, setFetchCount] = useState(0);
 
+  // Pedir permissão e buscar dados
   useEffect(() => {
     requestNotificationPermission();
     fetchTournamentData();
 
+    // Define intervalo de 30s
     intervalRef.current = setInterval(() => {
       setFetchCount((prev) => prev + 1);
-    }, 10000);
+    }, 30000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
 
+  // A cada ciclo, recarrega
   useEffect(() => {
     fetchTournamentData();
   }, [fetchCount]);
@@ -171,127 +179,226 @@ export default function TorneioScreen() {
     }
   }
 
-function handleOpenReport() {
-  if (!linkReport) {
-    Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.no_table"));
-    return;
-  }
-
-  try {
-    if (Platform.OS === "web") {
-      // Para PWAs
-      window.open(linkReport, "_blank");
-    } else {
-      // Para aplicativos nativos (Android/iOS)
-      Linking.openURL(linkReport);
+  function handleOpenReport() {
+    if (!linkReport) {
+      Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.no_table"));
+      return;
     }
-  } catch (err) {
-    console.log("Erro ao abrir link:", err);
-    Alert.alert(t("common.error"), "Não foi possível abrir a página de report.");
-  }
-}
 
+    try {
+      if (Platform.OS === "web") {
+        window.open(linkReport, "_blank");
+      } else {
+        Linking.openURL(linkReport);
+      }
+    } catch (err) {
+      console.log("Erro ao abrir link:", err);
+      Alert.alert(t("common.error"), "Não foi possível abrir a página de report.");
+    }
+  }
 
   if (loading) {
     return (
       <View style={styles.loader}>
-        <ActivityIndicator size="large" color={RED} />
+        {/* Usando Lottie para loading */}
+        <LottieView
+          source={require("../../assets/images/lotties/loading.json")}
+          autoPlay
+          loop
+          style={{ width: 200, height: 200 }}
+        />
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>{t("torneio.info.ongoing_title")}</Text>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.label}>{t("torneio.info.player_label")}:</Text>
-        <Text style={styles.value}>{userName}</Text>
-      </View>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.label}>{t("torneio.info.opponent_label")}:</Text>
-        <Text style={styles.value}>{opponentName ?? t("torneio.alerts.no_opponent")}</Text>
-      </View>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.label}>{t("torneio.info.current_round")}:</Text>
-        <Text style={styles.value}>
-          {currentRound ?? t("torneio.alerts.no_round")}
-        </Text>
-      </View>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.label}>{t("torneio.info.your_table")}:</Text>
-        <Text style={styles.value}>{mesaNumber ?? t("torneio.info.not_found")}</Text>
-      </View>
-
-      <View style={styles.actions}>
-        <Button
-          title={t("torneio.buttons.report_result")}
-          color={RED}
-          onPress={handleOpenReport}
+    <>
+      {/* AppBar com Logo centralizada */}
+      <Appbar.Header style={styles.appBar}>
+        <Image
+          source={require("../../assets/images/logo.jpg")}
+          style={styles.logo}
+          resizeMode="contain"
         />
-      </View>
-    </ScrollView>
+        <Appbar.Content 
+          title="Torneio"
+          titleStyle={styles.appBarTitle}
+        />
+      </Appbar.Header>
+
+      {/* Gradient de fundo */}
+      <LinearGradient
+        colors={[BLACK, "#121212", "#0A0A0A"]}
+        style={styles.gradientBackground}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Título principal */}
+          <Text style={styles.mainTitle}>
+            {t("torneio.info.ongoing_title").toUpperCase()}
+          </Text>
+
+          {/* Card do Jogador */}
+          <Card style={styles.card}>
+            <Card.Title
+              title={userName}
+              subtitle={t("torneio.info.player_label")}
+              left={(props) => (
+                <MaterialCommunityIcons
+                  {...props}
+                  name="account"
+                  size={40}
+                  color={RED}
+                />
+              )}
+              titleStyle={styles.cardTitle}
+              subtitleStyle={styles.cardSubtitle}
+            />
+          </Card>
+
+          {/* Card do Oponente */}
+          <Card style={styles.card}>
+            <Card.Title
+              title={opponentName ?? t("torneio.alerts.no_opponent")}
+              subtitle={t("torneio.info.opponent_label")}
+              left={(props) => (
+                <MaterialCommunityIcons
+                  {...props}
+                  name="account"
+                  size={40}
+                  color={RED}
+                />
+              )}
+              titleStyle={styles.cardTitle}
+              subtitleStyle={styles.cardSubtitle}
+            />
+          </Card>
+
+          {/* Card da Rodada */}
+          <Card style={styles.card}>
+            <Card.Title
+              title={currentRound ? String(currentRound) : t("torneio.alerts.no_round")}
+              subtitle={t("torneio.info.current_round")}
+              left={(props) => (
+                <MaterialCommunityIcons
+                  {...props}
+                  name="flag-checkered"
+                  size={40}
+                  color={RED}
+                />
+              )}
+              titleStyle={styles.cardTitle}
+              subtitleStyle={styles.cardSubtitle}
+            />
+          </Card>
+
+          {/* Card da Mesa */}
+          <Card style={styles.card}>
+            <Card.Title
+              title={mesaNumber ?? t("torneio.info.not_found")}
+              subtitle={t("torneio.info.your_table")}
+              left={(props) => (
+                <MaterialCommunityIcons
+                  {...props}
+                  name="table"
+                  size={40}
+                  color={RED}
+                />
+              )}
+              titleStyle={styles.cardTitle}
+              subtitleStyle={styles.cardSubtitle}
+            />
+          </Card>
+
+          {/* Botão para Reportar Resultado */}
+          <View style={styles.btnContainer}>
+            <Button
+              mode="contained"
+              onPress={handleOpenReport}
+              style={styles.btnReport}
+              labelStyle={{ color: WHITE, fontSize: 16 }}
+              icon="check"
+            >
+              {t("torneio.buttons.report_result")}
+            </Button>
+          </View>
+        </ScrollView>
+      </LinearGradient>
+    </>
   );
 }
 
+/* --------------------------
+   PALETA DE CORES E ESTILOS
+--------------------------- */
 const RED = "#E3350D";
 const BLACK = "#1E1E1E";
 const WHITE = "#FFFFFF";
 const DARK_GRAY = "#292929";
-const LIGHT_GRAY = "#4D4D4D";
 
 const styles = StyleSheet.create({
+  appBar: {
+    backgroundColor: BLACK,
+    elevation: 6,
+  },
+  appBarTitle: {
+    color: RED,
+    fontWeight: "bold",
+    fontSize: 20,
+    textAlign: "center",
+  },
+  logo: {
+    width: 50,
+    height: 50,
+    marginLeft: 10,
+  },
   loader: {
     flex: 1,
     backgroundColor: BLACK,
     justifyContent: "center",
     alignItems: "center",
   },
-  container: {
+  gradientBackground: {
     flex: 1,
-    backgroundColor: BLACK,
-    paddingHorizontal: 16,
-    paddingVertical: 20,
   },
-  title: {
+  scrollContent: {
+    padding: 16,
+  },
+  mainTitle: {
     color: RED,
-    fontSize: 24,
-    textAlign: "center",
+    fontSize: 22,
     fontWeight: "bold",
-    marginBottom: 20,
-    textTransform: "uppercase",
-  },
-  infoBox: {
-    backgroundColor: DARK_GRAY,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 15,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: LIGHT_GRAY,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  label: {
-    color: WHITE,
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  value: {
-    color: RED,
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  actions: {
     marginVertical: 20,
+    textAlign: "center",
+  },
+  card: {
+    marginBottom: 12,
+    backgroundColor: DARK_GRAY,
+    borderRadius: 12,
+
+    // Sombra no Android:
+    elevation: 4,
+    // Sombra no iOS:
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  cardTitle: {
+    color: WHITE,
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  cardSubtitle: {
+    color: "#ccc",
+  },
+  btnContainer: {
+    marginTop: 20,
     alignItems: "center",
+  },
+  btnReport: {
+    backgroundColor: RED,
+    borderRadius: 8,
+    paddingVertical: 8,
+    width: "75%",
   },
 });
