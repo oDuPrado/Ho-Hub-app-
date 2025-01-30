@@ -1,5 +1,6 @@
+// lib/firebaseConfig.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth"; // 🔥 Apenas `getAuth`
+import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // Configuração do Firebase
@@ -12,9 +13,16 @@ const firebaseConfig = {
   appId: "1:581066450250:web:8a462cd2627aaa654f4db3",
 };
 
-// Inicializa ou pega o app
-const firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Inicializa o Firebase App
+let firebaseApp;
+if (!getApps().length) {
+  firebaseApp = initializeApp(firebaseConfig);
+} else {
+  firebaseApp = getApp();
+}
 
-// 🔥 Apenas pegue o auth normalmente
+// Configura Auth (sem React Native Persistence)
 export const auth = getAuth(firebaseApp);
+
+// Configura Firestore
 export const db = getFirestore(firebaseApp);

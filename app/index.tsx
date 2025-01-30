@@ -1,24 +1,19 @@
+// app/index.tsx
 import { useEffect, useState } from "react";
 import { View, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
-import { auth } from "../lib/firebaseConfig"; // 🔥 Importando auth
-import { onAuthStateChanged } from "firebase/auth"; 
 
 export default function IndexScreen() {
   const router = useRouter();
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        router.push("/(tabs)/home"); // 🔥 Se tiver user, manda direto pra home
-      } else {
-        router.push("/(auth)/login"); // 🔥 Se não tiver user, vai pro login
-      }
+    // Exemplo: ver se user está logado c/ AsyncStorage, etc.
+    // Se NÃO logado, push("/(auth)/login"). Se logado, push("/(tabs)/home").
+    setTimeout(() => {
+      router.push("/(auth)/login");
       setIsChecking(false);
-    });
-
-    return () => unsubscribe(); // Cleanup do listener
+    }, 800);
   }, []);
 
   if (isChecking) {
@@ -28,6 +23,5 @@ export default function IndexScreen() {
       </View>
     );
   }
-
-  return null;
+  return null; // Ja redirecionou
 }
