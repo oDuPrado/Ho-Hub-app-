@@ -1,32 +1,24 @@
 import { useEffect, useState } from "react";
 import { View, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage"; // ✅ Importando o AsyncStorage
-import { auth } from "../lib/firebaseConfig"; // ✅ Importando o Firebase auth
+import { auth } from "../lib/firebaseConfig"; // 🔥 Importando auth
+import { onAuthStateChanged } from "firebase/auth"; 
 
 export default function IndexScreen() {
   const router = useRouter();
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const stay = await AsyncStorage.getItem("@stayLogged");
-        
-        if (stay === "true" && auth.currentUser) {
-          // ✅ Se o usuário está logado e optou por "manter conectado", vai direto pro home
-          router.push("/(tabs)/home");
-        } else {
-          // ✅ Se não, redireciona para a tela de login
-          router.push("/(auth)/login");
-        }
-      } catch (error) {
-        console.error("Erro ao verificar autenticação:", error);
-        router.push("/(auth)/login"); // ✅ Caso ocorra erro, manda pro login para evitar loop
-      } finally {
-        setIsChecking(false);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        router.push("/(tabs)/home"); // 🔥 Se tiver user, manda direto pra home
+      } else {
+        router.push("/(auth)/login"); // 🔥 Se não tiver user, vai pro login
       }
-    })();
+      setIsChecking(false);
+    });
+
+    return () => unsubscribe(); // Cleanup do listener
   }, []);
 
   if (isChecking) {
@@ -37,5 +29,5 @@ export default function IndexScreen() {
     );
   }
 
-  return null; // ✅ Como já redirecionamos, não precisa retornar nada
+  return null;
 }
