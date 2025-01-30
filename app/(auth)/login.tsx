@@ -27,6 +27,7 @@ import {
   signInWithEmailAndPassword,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  initializeAuth,
   signOut,
   User,
   setPersistence,
@@ -196,10 +197,6 @@ useEffect(() => {
           await AsyncStorage.setItem("@stayLogged", "true");
         } else {
           await AsyncStorage.removeItem("@stayLogged");
-          // Se não quer permanecer logado, força signOut ao fechar o app
-          await signOut(auth);
-          setLoading(false);
-          return;
         }
 
         Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
