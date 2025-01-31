@@ -51,7 +51,7 @@ export default function TorneioScreen() {
 
     intervalRef.current = setInterval(() => {
       setFetchCount((prev) => prev + 1);
-    }, 10000);
+    }, 60000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -156,24 +156,29 @@ export default function TorneioScreen() {
     try {
       const storedRound = await AsyncStorage.getItem("@lastNotifiedRound");
       const lastNotifiedRound = storedRound ? parseInt(storedRound, 10) : 0;
-
+  
       if (rnd > lastNotifiedRound) {
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: `${t("torneio.alerts.new_round")} (Rodada ${rnd})`,
+            title: `🔥 ${t("torneio.alerts.new_round")} - Rodada ${rnd}`,
             body: oppName
-              ? `Você está na mesa ${mesa}, enfrentando ${oppName}. Boa sorte!`
-              : `Você está na mesa ${mesa}. Boa sorte!`,
+              ? `🎭 Oponente: ${oppName}\n📍 Mesa: ${mesa}\n🏆 Boa sorte!`
+              : `📍 Você está na mesa ${mesa}.\n🏆 Boa sorte!`,
             data: { screen: "TorneioScreen" },
+            color: "#E3350D", // Cor do projeto
+            sound: "default", // Som de notificação
+            vibrate: [200, 100, 200], // Vibração customizada
+            priority: "high",
           },
           trigger: null,
         });
+  
         await AsyncStorage.setItem("@lastNotifiedRound", String(rnd));
       }
     } catch (e) {
       console.log("Falha ao notificar round:", e);
     }
-  }
+  }  
 
   function handleOpenReport() {
     if (!linkReport) {
@@ -212,7 +217,7 @@ export default function TorneioScreen() {
           resizeMode="contain"
         />
         <Appbar.Content
-          title="Info do jogador"
+          title={userName}
           titleStyle={{ color: RED, fontWeight: "bold", fontSize: 20 }}
         />
       </Appbar.Header>
@@ -249,7 +254,7 @@ export default function TorneioScreen() {
             left={(props) => (
               <MaterialCommunityIcons
                 {...props}
-                name="account"
+                name="sword-cross"
                 size={40}
                 color={RED}
               />
