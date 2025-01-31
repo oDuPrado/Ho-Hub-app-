@@ -43,12 +43,15 @@
       "chats": "Chats",
       "torneio": "Torneio",
       "noticias": "Notícias",
-      "iapikachu": "IApikachu",
+      "iapikachu": "ScauterIA",
       "cartas": "Cartas",
       "trocas": "Trocas",
       "decks": "Decks",
       "jogador": "Jogador",
-      "sugestao": "Sugestão"
+      "sugestao": "Sugestão",
+      "cadastros":"Cadastros",
+      "classico":"Classicos"
+
     },
   
     "analytics": {
@@ -245,7 +248,8 @@
         "interest_registered": "Interesse registrado. O dono recebeu a notificação.",
         "deleted": "Card removido do feed.",
         "delete_confirm": "Excluir \"{{cardName}}\"?",
-        "delete_failed": "Falha ao excluir."
+        "delete_failed": "Falha ao excluir.",
+        "no_posts":"Sem post no Momento"
       },
       "buttons": {
         "my_cards": "Meus",
@@ -253,6 +257,11 @@
         "interest": "Tenho Interesse",
         "delete": "Excluir Card",
         "close": "Fechar"
+      },
+      "details": {
+        "owner": "Dono",
+        "interested": "Jogadores Interesados",
+        "no_interested": "Nenhum jogador Interesado"
       }
     },
   
@@ -371,6 +380,10 @@
         "limit_reached": "Você já tem 5 cartas publicadas simultaneamente.",
         "no_card_selected": "Nenhuma carta selecionada.",
         "no_price": "Informe um valor ou ex: 'R$ 10,00'."
+      },
+      "details": {
+      "updated_at": "Preço atualizado em",
+      "open_tcgplayer": "Abrir TCGPlayer"
       }
     },
 

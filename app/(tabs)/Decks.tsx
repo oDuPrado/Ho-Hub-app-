@@ -1,5 +1,5 @@
+// app/(tabs)/decks.tsx
 import React, { useEffect, useState } from "react";
-import { useRouter } from "expo-router";
 import {
   View,
   Text,
@@ -26,9 +26,11 @@ import {
 } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../../lib/firebaseConfig";
-import "react-native-get-random-values";
 import { v4 as uuidv4 } from "uuid";
-import { useTranslation } from "react-i18next"; // <--- i18n
+import { useTranslation } from "react-i18next";
+
+import * as Animatable from "react-native-animatable";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 interface CardLine {
   _tempId: string;
@@ -37,6 +39,7 @@ interface CardLine {
   expansion?: string | null;
   cardNumber?: string | null;
 }
+
 interface DeckData {
   id: string;
   name: string;
@@ -47,8 +50,7 @@ interface DeckData {
 }
 
 export default function DecksScreen() {
-  const router = useRouter();
-  const { t } = useTranslation(); // <--- i18n
+  const { t } = useTranslation();
 
   const [deckName, setDeckName] = useState("");
   const [deckContent, setDeckContent] = useState("");
@@ -56,6 +58,9 @@ export default function DecksScreen() {
   const [decks, setDecks] = useState<DeckData[]>([]);
   const [authUid, setAuthUid] = useState("");
   const [playerId, setPlayerId] = useState("");
+
+  // Loading
+  const [loading, setLoading] = useState(false);
 
   // Modal de edição
   const [modalVisible, setModalVisible] = useState(false);
@@ -65,40 +70,27 @@ export default function DecksScreen() {
   const [editTrainers, setEditTrainers] = useState<CardLine[]>([]);
   const [editEnergies, setEditEnergies] = useState<CardLine[]>([]);
 
-  // --------------------------------------------
-  // Função para calcular total de cartas em CardLine[]
-  // --------------------------------------------
-  const calculateTotalFromCards = (cards: CardLine[]): number => {
-    return cards.reduce((sum, card) => sum + card.quantity, 0);
-  };
-
-  // --------------------------------------------
-  // Efeito: Pega UID do auth e playerId do AsyncStorage
-  // --------------------------------------------
   useEffect(() => {
     const user = auth.currentUser;
     if (user?.uid) {
       setAuthUid(user.uid);
     }
-
     (async () => {
       try {
-        const storedPlayerId = await AsyncStorage.getItem("@userId");
-        if (storedPlayerId) {
-          setPlayerId(storedPlayerId);
+        const storedId = await AsyncStorage.getItem("@userId");
+        if (storedId) {
+          setPlayerId(storedId);
         }
       } catch (err) {
-        console.log("Erro ao obter @userId do AsyncStorage", err);
+        console.log("Erro ao obter @userId:", err);
       }
     })();
   }, []);
 
-  // --------------------------------------------
-  // Efeito: onSnapshot p/ decks
-  // --------------------------------------------
   useEffect(() => {
     if (!playerId) return;
 
+    setLoading(true);
     const decksRef = collection(db, "decks");
     const q = query(decksRef, where("playerId", "==", playerId));
     const unsubscribe = onSnapshot(
@@ -117,9 +109,11 @@ export default function DecksScreen() {
           });
         });
         setDecks(newDecks);
+        setLoading(false);
       },
       (error) => {
         console.log("Erro no onSnapshot decks:", error);
+        setLoading(false);
       }
     );
 
@@ -137,9 +131,6 @@ export default function DecksScreen() {
     }));
   }
 
-  // --------------------------------------------
-  // parseDeckContent
-  // --------------------------------------------
   function parseDeckContent(content: string) {
     const lines = content.split("\n").map((l) => l.trim());
     const pokemons: CardLine[] = [];
@@ -171,13 +162,9 @@ export default function DecksScreen() {
       }
 
       const parsedLine = parseSingleLine(line);
-      if (currentBlock === "POKEMON") {
-        pokemons.push(parsedLine);
-      } else if (currentBlock === "TRAINER") {
-        trainers.push(parsedLine);
-      } else if (currentBlock === "ENERGY") {
-        energies.push(parsedLine);
-      }
+      if (currentBlock === "POKEMON") pokemons.push(parsedLine);
+      else if (currentBlock === "TRAINER") trainers.push(parsedLine);
+      else if (currentBlock === "ENERGY") energies.push(parsedLine);
     }
     return { pokemons, trainers, energies };
   }
@@ -200,7 +187,7 @@ export default function DecksScreen() {
     let i = startIndex;
     while (i < tokens.length) {
       const t = tokens[i];
-      const reg3letters = /^[A-Z]{3}$/;
+      const reg3letters = /^[A-Z]{3}$/; // Ex: "SWS" "BST"
       if (reg3letters.test(t)) {
         expansion = t;
         if (i + 1 < tokens.length) {
@@ -244,12 +231,9 @@ export default function DecksScreen() {
     }));
   }
 
-  // --------------------------------------------
-  // handleCreateDeck
-  // --------------------------------------------
   async function handleCreateDeck() {
     if (!authUid) {
-      Alert.alert(t("common.error"), "authUid ausente ou não logado.");
+      Alert.alert(t("common.error"), "Usuário não logado (authUid).");
       return;
     }
     if (!deckName.trim()) {
@@ -257,9 +241,7 @@ export default function DecksScreen() {
       return;
     }
 
-    const parsed = parseDeckContent(deckContent);
-    const { pokemons, trainers, energies } = parsed;
-
+    const { pokemons, trainers, energies } = parseDeckContent(deckContent);
     const safePokemons = sanitizeCardLines(pokemons);
     const safeTrainers = sanitizeCardLines(trainers);
     const safeEnergies = sanitizeCardLines(energies);
@@ -282,44 +264,38 @@ export default function DecksScreen() {
     }
 
     try {
+      setLoading(true);
       const decksRef = collection(db, "decks");
       await addDoc(decksRef, {
         authUid,
-        playerId: playerId ?? "",
+        playerId,
         name: deckName.trim(),
         createdAt: new Date().toISOString(),
-        pokemons: safePokemons.map((c) => ({
-          quantity: c.quantity,
-          name: c.name,
-          expansion: c.expansion || null,
-          cardNumber: c.cardNumber || null,
-        })),
-        trainers: safeTrainers.map((c) => ({
-          quantity: c.quantity,
-          name: c.name,
-          expansion: c.expansion || null,
-          cardNumber: c.cardNumber || null,
-        })),
-        energies: safeEnergies.map((c) => ({
-          quantity: c.quantity,
-          name: c.name,
-          expansion: c.expansion || null,
-          cardNumber: c.cardNumber || null,
-        })),
+        pokemons: safePokemons.map(toFirestoreCard),
+        trainers: safeTrainers.map(toFirestoreCard),
+        energies: safeEnergies.map(toFirestoreCard),
       });
+      setLoading(false);
       Alert.alert(t("common.success"), t("decks.create_success"));
       setDeckName("");
       setDeckContent("");
     } catch (err) {
       console.log("Erro ao criar deck:", err);
       Alert.alert(t("common.error"), t("decks.create_error"));
+      setLoading(false);
     }
   }
 
-  // --------------------------------------------
-  // handleDeleteDeck
-  // --------------------------------------------
-  async function handleDeleteDeck(deckId: string, deckNameToShow: string) {
+  function toFirestoreCard(c: CardLine) {
+    return {
+      quantity: c.quantity,
+      name: c.name,
+      expansion: c.expansion || null,
+      cardNumber: c.cardNumber || null,
+    };
+  }
+
+  async function handleDeleteDeck(deckId: string, deckName: string) {
     try {
       const deckRef = doc(db, "decks", deckId);
       const deckSnap = await getDoc(deckRef);
@@ -328,26 +304,23 @@ export default function DecksScreen() {
         Alert.alert(t("common.error"), "Deck não encontrado.");
         return;
       }
-
       const deckData = deckSnap.data();
       if (deckData.playerId !== playerId) {
         Alert.alert(t("common.error"), "Você não tem permissão.");
         return;
       }
 
+      setLoading(true);
       await deleteDoc(deckRef);
+      setLoading(false);
       Alert.alert(t("common.success"), t("decks.delete_success"));
-
-      setDecks((prevDecks) => prevDecks.filter((d) => d.id !== deckId));
     } catch (err) {
       console.log("Erro ao excluir deck:", err);
       Alert.alert(t("common.error"), t("decks.delete_error"));
+      setLoading(false);
     }
   }
 
-  // --------------------------------------------
-  // openEditModal
-  // --------------------------------------------
   function openEditModal(deck: DeckData) {
     setEditDeckId(deck.id);
     setEditDeckName(deck.name);
@@ -357,34 +330,27 @@ export default function DecksScreen() {
     setModalVisible(true);
   }
 
-  function addLine(cat: "POKEMON" | "TRAINER" | "ENERGY") {
-    const newCard: CardLine = {
+  function addLine(category: "POKEMON" | "TRAINER" | "ENERGY") {
+    const newLine: CardLine = {
       _tempId: uuidv4(),
       quantity: 1,
       name: "",
     };
-    if (cat === "POKEMON") {
-      setEditPokemons((prev) => [...prev, newCard]);
-    } else if (cat === "TRAINER") {
-      setEditTrainers((prev) => [...prev, newCard]);
+    if (category === "POKEMON") setEditPokemons((prev) => [...prev, newLine]);
+    else if (category === "TRAINER") setEditTrainers((prev) => [...prev, newLine]);
+    else setEditEnergies((prev) => [...prev, newLine]);
+  }
+
+  function removeLine(category: "POKEMON" | "TRAINER" | "ENERGY", id: string) {
+    if (category === "POKEMON") {
+      setEditPokemons((prev) => prev.filter((c) => c._tempId !== id));
+    } else if (category === "TRAINER") {
+      setEditTrainers((prev) => prev.filter((c) => c._tempId !== id));
     } else {
-      setEditEnergies((prev) => [...prev, newCard]);
+      setEditEnergies((prev) => prev.filter((c) => c._tempId !== id));
     }
   }
 
-  function removeLine(cat: "POKEMON" | "TRAINER" | "ENERGY", _tempId: string) {
-    if (cat === "POKEMON") {
-      setEditPokemons((prev) => prev.filter((p) => p._tempId !== _tempId));
-    } else if (cat === "TRAINER") {
-      setEditTrainers((prev) => prev.filter((p) => p._tempId !== _tempId));
-    } else {
-      setEditEnergies((prev) => prev.filter((p) => p._tempId !== _tempId));
-    }
-  }
-
-  // --------------------------------------------
-  // handleSaveEdit
-  // --------------------------------------------
   async function handleSaveEdit() {
     if (!editDeckId) return;
 
@@ -395,58 +361,66 @@ export default function DecksScreen() {
     }
 
     try {
-      const safePokemons = sanitizeCardLines(editPokemons);
-      const safeTrainers = sanitizeCardLines(editTrainers);
-      const safeEnergies = sanitizeCardLines(editEnergies);
-
+      setLoading(true);
       const deckRef = doc(db, "decks", editDeckId);
       await updateDoc(deckRef, {
         name: editDeckName.trim(),
-        pokemons: safePokemons.map((c) => ({
-          quantity: c.quantity,
-          name: c.name,
-          expansion: c.expansion || null,
-          cardNumber: c.cardNumber || null,
-        })),
-        trainers: safeTrainers.map((c) => ({
-          quantity: c.quantity,
-          name: c.name,
-          expansion: c.expansion || null,
-          cardNumber: c.cardNumber || null,
-        })),
-        energies: safeEnergies.map((c) => ({
-          quantity: c.quantity,
-          name: c.name,
-          expansion: c.expansion || null,
-          cardNumber: c.cardNumber || null,
-        })),
+        pokemons: editPokemons.map(toFirestoreCard),
+        trainers: editTrainers.map(toFirestoreCard),
+        energies: editEnergies.map(toFirestoreCard),
       });
+      setLoading(false);
       Alert.alert(t("common.success"), t("decks.update_success"));
       setModalVisible(false);
     } catch (err) {
       console.log("Erro ao atualizar deck:", err);
       Alert.alert(t("common.error"), t("decks.update_error"));
+      setLoading(false);
     }
   }
 
-  // --------------------------------------------
+  function calculateTotalFromCards(cards: CardLine[]) {
+    return cards.reduce((acc, c) => acc + c.quantity, 0);
+  }
+
   // Render
-  // --------------------------------------------
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#1E1E1E" }}>
+      {/* Header manual */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>{t("decks.heading", "Meus Decks")}</Text>
+      </View>
+
       <KeyboardAvoidingView
-        style={styles.container}
+        style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Text style={styles.heading}>{t("decks.heading")}</Text>
+        {loading && (
+          <View style={styles.loadingOverlay}>
+            <Animatable.Text
+              animation="pulse"
+              iterationCount="infinite"
+              style={styles.loadingText}
+            >
+              Carregando...
+            </Animatable.Text>
+          </View>
+        )}
 
-        <ScrollView style={{ flex: 1 }}>
+        <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 80 }}>
+          {/* Lista de decks */}
           {decks.map((deck) => (
-            <View key={`deck-${deck.id}`} style={styles.deckCard}>
-              <TouchableOpacity onPress={() => openEditModal(deck)}>
+            <Animatable.View
+              key={deck.id}
+              style={styles.deckCard}
+              animation="fadeInUp"
+            >
+              <TouchableOpacity
+                onPress={() => openEditModal(deck)}
+                style={{ flex: 1, marginRight: 8 }}
+              >
                 <Text style={styles.deckTitle}>{deck.name}</Text>
                 <Text style={styles.deckInfo}>
-                  {t("common.close")}:{" "}
                   {deck.createdAt
                     ? new Date(deck.createdAt).toLocaleString()
                     : "Desconhecido"}
@@ -463,28 +437,31 @@ export default function DecksScreen() {
 
               <TouchableOpacity
                 style={styles.deleteButton}
-                onPress={() =>
+                onPress={() => {
                   Alert.alert(
-                    t("common.confirmation_title"),
+                    t("common.confirmation_title", "Confirmação"),
                     t("decks.delete_confirm", { deckName: deck.name }),
                     [
-                      { text: t("calendar.form.cancel_button"), style: "cancel" },
+                      { text: t("calendar.form.cancel_button", "Cancelar"), style: "cancel" },
                       {
-                        text: t("common.delete"),
+                        text: t("common.delete", "Excluir"),
                         style: "destructive",
                         onPress: () => handleDeleteDeck(deck.id, deck.name),
                       },
                     ]
-                  )
-                }
+                  );
+                }}
               >
+                <MaterialCommunityIcons name="delete" size={20} color="#FFF" />
                 <Text style={styles.deleteButtonText}>{t("common.delete")}</Text>
               </TouchableOpacity>
-            </View>
+            </Animatable.View>
           ))}
 
           {/* Form p/ criar deck */}
-          <View style={styles.form}>
+          <Animatable.View animation="fadeInUp" delay={100} style={styles.form}>
+            <Text style={styles.formTitle}>{t("decks.create_button", "Criar Deck")}</Text>
+
             <Text style={styles.label}>{t("decks.label_name")}</Text>
             <TextInput
               style={styles.input}
@@ -508,7 +485,7 @@ export default function DecksScreen() {
             <TouchableOpacity style={styles.button} onPress={handleCreateDeck}>
               <Text style={styles.buttonText}>{t("decks.create_button")}</Text>
             </TouchableOpacity>
-          </View>
+          </Animatable.View>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -516,327 +493,227 @@ export default function DecksScreen() {
       <Modal
         visible={modalVisible}
         animationType="slide"
+        transparent
         onRequestClose={() => setModalVisible(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
-          <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalHeading}>{t("decks.edit_title")}</Text>
-
-            <Text style={styles.label}>{t("decks.label_name")}</Text>
-            <TextInput
-              style={styles.input}
-              value={editDeckName}
-              onChangeText={setEditDeckName}
-            />
-
-            {/* Pokémons */}
-            <Text style={styles.sectionTitle}>{t("decks.pokemons")}</Text>
-            {editPokemons.map((card) => (
-              <View style={styles.cardLineContainer} key={`pk-${card._tempId}`}>
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  keyboardType="numeric"
-                  value={String(card.quantity)}
-                  onChangeText={(val) => {
-                    const num = parseInt(val || "") || 0;
-                    setEditPokemons((prev) => {
-                      const copy = [...prev];
-                      const idx = copy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        copy[idx].quantity = num;
-                      }
-                      return copy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 3 }]}
-                  placeholder="Nome"
-                  value={card.name}
-                  onChangeText={(v) => {
-                    setEditPokemons((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].name = v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  placeholder="EXP"
-                  value={card.expansion ?? ""}
-                  onChangeText={(v) => {
-                    setEditPokemons((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].expansion = v === "" ? null : v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  placeholder="No."
-                  value={card.cardNumber ?? ""}
-                  onChangeText={(v) => {
-                    setEditPokemons((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].cardNumber = v === "" ? null : v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => removeLine("POKEMON", card._tempId)}
-                >
-                  <Text style={styles.removeButtonText}>X</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <TouchableOpacity
-              style={[styles.buttonSmall, { backgroundColor: "#555" }]}
-              onPress={() => addLine("POKEMON")}
-            >
-              <Text style={styles.buttonText}>+ {t("decks.pokemons")}</Text>
-            </TouchableOpacity>
-
-            {/* Treinadores */}
-            <Text style={styles.sectionTitle}>{t("decks.trainers")}</Text>
-            {editTrainers.map((card) => (
-              <View style={styles.cardLineContainer} key={`tr-${card._tempId}`}>
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  keyboardType="numeric"
-                  value={String(card.quantity)}
-                  onChangeText={(val) => {
-                    const num = parseInt(val || "") || 0;
-                    setEditTrainers((prev) => {
-                      const copy = [...prev];
-                      const idx = copy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        copy[idx].quantity = num;
-                      }
-                      return copy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 3 }]}
-                  placeholder="Nome"
-                  value={card.name}
-                  onChangeText={(v) => {
-                    setEditTrainers((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].name = v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  placeholder="EXP"
-                  value={card.expansion ?? ""}
-                  onChangeText={(v) => {
-                    setEditTrainers((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].expansion = v === "" ? null : v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  placeholder="No."
-                  value={card.cardNumber ?? ""}
-                  onChangeText={(v) => {
-                    setEditTrainers((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].cardNumber = v === "" ? null : v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => removeLine("TRAINER", card._tempId)}
-                >
-                  <Text style={styles.removeButtonText}>X</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <TouchableOpacity
-              style={[styles.buttonSmall, { backgroundColor: "#555" }]}
-              onPress={() => addLine("TRAINER")}
-            >
-              <Text style={styles.buttonText}>+ {t("decks.trainers")}</Text>
-            </TouchableOpacity>
-
-            {/* Energias */}
-            <Text style={styles.sectionTitle}>{t("decks.energies")}</Text>
-            {editEnergies.map((card) => (
-              <View style={styles.cardLineContainer} key={`en-${card._tempId}`}>
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  keyboardType="numeric"
-                  value={String(card.quantity)}
-                  onChangeText={(val) => {
-                    const num = parseInt(val || "") || 0;
-                    setEditEnergies((prev) => {
-                      const copy = [...prev];
-                      const idx = copy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        copy[idx].quantity = num;
-                      }
-                      return copy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 3 }]}
-                  placeholder="Nome"
-                  value={card.name}
-                  onChangeText={(v) => {
-                    setEditEnergies((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].name = v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  placeholder="EXP"
-                  value={card.expansion ?? ""}
-                  onChangeText={(v) => {
-                    setEditEnergies((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].expansion = v === "" ? null : v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-                <TextInput
-                  style={[styles.inputLine, { flex: 1 }]}
-                  placeholder="No."
-                  value={card.cardNumber ?? ""}
-                  onChangeText={(v) => {
-                    setEditEnergies((prev) => {
-                      const cpy = [...prev];
-                      const idx = cpy.findIndex((x) => x._tempId === card._tempId);
-                      if (idx >= 0) {
-                        cpy[idx].cardNumber = v === "" ? null : v;
-                      }
-                      return cpy;
-                    });
-                  }}
-                />
-
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => removeLine("ENERGY", card._tempId)}
-                >
-                  <Text style={styles.removeButtonText}>X</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-            <TouchableOpacity
-              style={[styles.buttonSmall, { backgroundColor: "#555" }]}
-              onPress={() => addLine("ENERGY")}
-            >
-              <Text style={styles.buttonText}>+ {t("decks.energies")}</Text>
-            </TouchableOpacity>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.button, { backgroundColor: "#999" }]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.buttonText}>{t("calendar.form.cancel_button")}</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {/* Header manual do modal */}
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
               </TouchableOpacity>
-
-              <TouchableOpacity style={styles.button} onPress={handleSaveEdit}>
-                <Text style={styles.buttonText}>{t("calendar.form.save_button")}</Text>
-              </TouchableOpacity>
+              <Text style={styles.modalTitle}>{t("decks.edit_title", "Editar Deck")}</Text>
             </View>
-          </ScrollView>
-        </SafeAreaView>
+
+            <ScrollView style={{ flex: 1, padding: 16, backgroundColor: "#1E1E1E" }}>
+              <Text style={styles.label}>{t("decks.label_name")}</Text>
+              <TextInput
+                style={styles.input}
+                value={editDeckName}
+                onChangeText={setEditDeckName}
+                placeholderTextColor="#999"
+              />
+
+              {/* Pokémons */}
+              {renderSection("POKEMON", t("decks.pokemons", "Pokémons"), editPokemons, setEditPokemons)}
+
+              {/* Treinadores */}
+              {renderSection("TRAINER", t("decks.trainers", "Treinadores"), editTrainers, setEditTrainers)}
+
+              {/* Energias */}
+              {renderSection("ENERGY", t("decks.energies", "Energias"), editEnergies, setEditEnergies)}
+
+              {/* Botões do Modal */}
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.button, { backgroundColor: "#777", marginRight: 8 }]}
+                  onPress={() => setModalVisible(false)}
+                >
+                  <Text style={styles.buttonText}>
+                    {t("calendar.form.cancel_button", "Cancelar")}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.button} onPress={handleSaveEdit}>
+                  <Text style={styles.buttonText}>
+                    {t("calendar.form.save_button", "Salvar")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
+
+  function renderSection(
+    category: "POKEMON" | "TRAINER" | "ENERGY",
+    title: string,
+    data: CardLine[],
+    setData: React.Dispatch<React.SetStateAction<CardLine[]>>
+  ) {
+    return (
+      <View style={styles.sectionContainer}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          <TouchableOpacity
+            style={styles.sectionAddBtn}
+            onPress={() => addLine(category)}
+          >
+            <MaterialCommunityIcons name="plus-circle" size={20} color="#4CAF50" />
+            <Text style={styles.sectionAddText}>Adicionar</Text>
+          </TouchableOpacity>
+        </View>
+
+        {data.map((card) => (
+          <View key={card._tempId} style={styles.cardLineContainer}>
+            <TextInput
+              style={[styles.inputLine, { width: 60 }]}
+              keyboardType="numeric"
+              placeholder="Qtd"
+              placeholderTextColor="#999"
+              value={String(card.quantity)}
+              onChangeText={(val) => {
+                const num = parseInt(val || "") || 0;
+                setData((prev) => {
+                  const copy = [...prev];
+                  const idx = copy.findIndex((x) => x._tempId === card._tempId);
+                  if (idx >= 0) copy[idx].quantity = num;
+                  return copy;
+                });
+              }}
+            />
+            <TextInput
+              style={[styles.inputLine, { flex: 2 }]}
+              placeholder="Nome"
+              placeholderTextColor="#999"
+              value={card.name}
+              onChangeText={(val) => {
+                setData((prev) => {
+                  const copy = [...prev];
+                  const idx = copy.findIndex((x) => x._tempId === card._tempId);
+                  if (idx >= 0) copy[idx].name = val;
+                  return copy;
+                });
+              }}
+            />
+            <TextInput
+              style={[styles.inputLine, { width: 60 }]}
+              placeholder="EXP"
+              placeholderTextColor="#999"
+              value={card.expansion ?? ""}
+              onChangeText={(val) => {
+                setData((prev) => {
+                  const copy = [...prev];
+                  const idx = copy.findIndex((x) => x._tempId === card._tempId);
+                  if (idx >= 0) copy[idx].expansion = val === "" ? null : val;
+                  return copy;
+                });
+              }}
+            />
+            <TextInput
+              style={[styles.inputLine, { width: 60 }]}
+              placeholder="No."
+              placeholderTextColor="#999"
+              value={card.cardNumber ?? ""}
+              onChangeText={(val) => {
+                setData((prev) => {
+                  const copy = [...prev];
+                  const idx = copy.findIndex((x) => x._tempId === card._tempId);
+                  if (idx >= 0) copy[idx].cardNumber = val === "" ? null : val;
+                  return copy;
+                });
+              }}
+            />
+
+            <TouchableOpacity
+              style={styles.removeButton}
+              onPress={() => removeLine(category, card._tempId)}
+            >
+              <MaterialCommunityIcons name="close" size={20} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        ))}
+      </View>
+    );
+  }
 }
 
-// ------------- ESTILOS -------------
-const DARK = "#1E1E1E";
-const PRIMARY = "#E3350D";
-const WHITE = "#FFFFFF";
-const GRAY = "#333333";
-
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: DARK,
+  header: {
+    backgroundColor: "#000",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  headerTitle: {
+    color: "#E3350D",
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  loadingOverlay: {
+    position: "absolute",
+    top: 80,
+    width: "100%",
+    alignItems: "center",
+    zIndex: 999,
+  },
+  loadingText: {
+    color: "#E3350D",
+    fontSize: 18,
+    fontWeight: "bold",
   },
   container: {
     flex: 1,
     padding: 16,
   },
-  heading: {
-    fontSize: 22,
-    color: WHITE,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 12,
-  },
   deckCard: {
-    backgroundColor: GRAY,
+    backgroundColor: "#2A2A2A",
     borderRadius: 8,
     padding: 12,
-    marginVertical: 6,
+    marginBottom: 10,
+    flexDirection: "row",
   },
   deckTitle: {
-    color: WHITE,
-    fontSize: 17,
+    color: "#FFF",
+    fontSize: 16,
     fontWeight: "bold",
     marginBottom: 4,
   },
   deckInfo: {
     color: "#bbb",
     fontSize: 13,
+    marginBottom: 2,
+  },
+  deleteButton: {
+    backgroundColor: "#E3350D",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+  },
+  deleteButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginLeft: 4,
   },
   form: {
     backgroundColor: "#2A2A2A",
     borderRadius: 8,
     padding: 16,
-    marginTop: 16,
+    marginTop: 6,
+  },
+  formTitle: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 12,
   },
   label: {
-    color: WHITE,
+    color: "#FFF",
     fontSize: 14,
     marginTop: 8,
   },
@@ -844,10 +721,11 @@ const styles = StyleSheet.create({
     color: "#888",
     fontSize: 12,
     marginBottom: 4,
+    marginTop: 2,
   },
   input: {
     backgroundColor: "#4A4A4A",
-    color: WHITE,
+    color: "#FFF",
     borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -855,34 +733,69 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   button: {
-    backgroundColor: PRIMARY,
+    backgroundColor: "#E3350D",
     paddingVertical: 10,
     borderRadius: 6,
     alignItems: "center",
     marginTop: 12,
   },
   buttonText: {
-    color: WHITE,
+    color: "#FFF",
     fontSize: 16,
     fontWeight: "bold",
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+  },
   modalContainer: {
     flex: 1,
-    backgroundColor: DARK,
+    backgroundColor: "#1E1E1E",
   },
-  modalHeading: {
-    fontSize: 20,
-    color: WHITE,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 16,
+  modalHeader: {
+    backgroundColor: "#000",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  sectionTitle: {
-    color: PRIMARY,
+  modalTitle: {
+    color: "#E3350D",
     fontSize: 18,
     fontWeight: "bold",
+    marginLeft: 10,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 20,
+  },
+  sectionContainer: {
     marginTop: 16,
-    marginBottom: 8,
+    backgroundColor: "#333",
+    borderRadius: 6,
+    padding: 10,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    color: "#E3350D",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  sectionAddBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sectionAddText: {
+    color: "#4CAF50",
+    marginLeft: 4,
+    fontWeight: "bold",
   },
   cardLineContainer: {
     flexDirection: "row",
@@ -891,49 +804,16 @@ const styles = StyleSheet.create({
   },
   inputLine: {
     backgroundColor: "#4A4A4A",
-    color: WHITE,
+    color: "#FFF",
     borderRadius: 6,
-    marginHorizontal: 3,
+    marginRight: 4,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 6,
     fontSize: 13,
-  },
-  deleteButton: {
-    backgroundColor: "#FF3B30",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignItems: "center",
-    marginTop: 10,
-    alignSelf: "flex-start",
-  },
-  deleteButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  buttonSmall: {
-    backgroundColor: PRIMARY,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignItems: "center",
-    marginTop: 6,
-    alignSelf: "flex-start",
   },
   removeButton: {
     backgroundColor: "#888",
-    marginLeft: 4,
     padding: 6,
-    borderRadius: 4,
-  },
-  removeButtonText: {
-    color: WHITE,
-    fontWeight: "bold",
-  },
-  modalButtons: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    marginVertical: 20,
+    borderRadius: 6,
   },
 });

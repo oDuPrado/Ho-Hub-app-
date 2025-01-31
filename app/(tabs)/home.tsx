@@ -1,66 +1,117 @@
-import React, { useEffect, useRef, useState } from "react";
+// app/(tabs)/home.tsx
+
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-  Animated,
-  Easing,
-  Alert,
-  ActivityIndicator,
-  Linking,
-  Modal,
-  FlatList,
   ImageBackground,
+  ScrollView,
+  Alert,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Animated,
+  Linking,
+  Easing,
+  Modal,
 } from "react-native";
-import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { signOut } from "firebase/auth";
-import { auth, db } from "../../lib/firebaseConfig";
-import { collectionGroup, getDocs, doc, getDoc } from "firebase/firestore";
-import { useFocusEffect } from "@react-navigation/native";
-import { useTranslation } from "react-i18next";
-import { FontAwesome5 } from "@expo/vector-icons"; // Ícone de sininho
+import { useRouter } from "expo-router";
+import {
+  collectionGroup,
+  getDocs,
+  doc,
+  getDoc,
+  collection,
+} from "firebase/firestore";
 
-interface NotificationItem {
-  id: number;
-  title: string;
-  body: string;
-  timestamp: number;
+import { auth, db } from "../../lib/firebaseConfig";
+import titles, { TitleItem, PlayerStats } from "../titlesConfig";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Animatable from "react-native-animatable";
+
+// ---------- Interfaces ----------
+interface MatchData {
+  id: string;
+  outcomeNumber?: number; // 1 (P1 vence), 2 (P2 vence), 3 (empate), 10 (WO)
+  player1_id?: string;
+  player2_id?: string;
+}
+
+interface RivalData {
+  rivalId: string;
+  rivalName: string;
+  matches: number;
+  userWins: number;
+  rivalWins: number;
+  lastWinner: "user" | "rival" | "empate" | null;
+  wrPercentage: number;
+}
+
+// Avatares
+const avatarList = [
+  { id: 1, uri: require("../../assets/images/avatar/avatar1.jpg") },
+  { id: 2, uri: require("../../assets/images/avatar/avatar2.jpg") },
+  { id: 3, uri: require("../../assets/images/avatar/avatar3.jpg") },
+  { id: 4, uri: require("../../assets/images/avatar/avatar4.jpg") },
+  { id: 5, uri: require("../../assets/images/avatar/avatar5.jpg") },
+  { id: 6, uri: require("../../assets/images/avatar/avatar6.jpg") },
+  { id: 7, uri: require("../../assets/images/avatar/avatar7.jpg") },
+  { id: 8, uri: require("../../assets/images/avatar/avatar8.jpg") },
+];
+
+// Títulos + Progress
+interface TitleWithProgress extends TitleItem {
+  progress: number;
+  locked: boolean;
 }
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { t } = useTranslation();
 
-  const [userName, setUserName] = useState("...");
-  const [userId, setUserId] = useState("");
+  // Loading e Cálculos
   const [loading, setLoading] = useState(true);
+  const [isCalculating, setIsCalculating] = useState(false);
 
-  const [winsCount, setWinsCount] = useState(0);
-  const [lossesCount, setLossesCount] = useState(0);
-  const [drawCount, setDrawCount] = useState(0);
-  const [biggestRival, setBiggestRival] = useState("...");
-  const [matchesTotal, setMatchesTotal] = useState(0);
+  // Usuário
+  const [userId, setUserId] = useState("");
+  const [userName, setUserName] = useState("Jogador");
+  const [avatarUri, setAvatarUri] = useState<any>(null);
 
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  // Stats do jogador
+  const [stats, setStats] = useState<PlayerStats>({
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    matchesTotal: 0,
+    uniqueOpponents: 0,
+    tournamentPlacements: [],
+  });
 
-  // Modal de coleções
+  // Títulos + progresso
+  const [closestTitles, setClosestTitles] = useState<TitleWithProgress[]>([]);
+
+  // Rival
+  const [rivalInfo, setRivalInfo] = useState<RivalData | null>(null);
+
+  // Modal de Rival (quando muda)
+  const [rivalModalVisible, setRivalModalVisible] = useState(false);
+
+  // Modal de Coleções
   const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
   const [validCollections, setValidCollections] = useState<any[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
 
-  // Modal de Notificações
-  const [notifModalVisible, setNotifModalVisible] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [notificationCount, setNotificationCount] = useState(0);
-
+  // ----------------------------------------
+  // Efeito Inicial
+  // ----------------------------------------
   useEffect(() => {
     (async () => {
       try {
+        setLoading(true);
+
+        // Verifica user
         const storedId = await AsyncStorage.getItem("@userId");
         const storedName = await AsyncStorage.getItem("@userName");
         if (!storedId) {
@@ -70,165 +121,340 @@ export default function HomeScreen() {
         setUserId(storedId);
         setUserName(storedName || "Jogador");
 
-        await loadStats(storedId);
+        // Carrega avatar
+        const storedAvatar = await AsyncStorage.getItem("@userAvatar");
+        if (storedAvatar) {
+          const avId = parseInt(storedAvatar, 10);
+          const found = avatarList.find((av) => av.id === avId);
+          if (found) setAvatarUri(found.uri);
+        }
 
-        Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 700,
-            useNativeDriver: true,
-          }),
-          Animated.loop(
-            Animated.sequence([
-              Animated.timing(scaleAnim, {
-                toValue: 1.07,
-                duration: 900,
-                easing: Easing.ease,
-                useNativeDriver: true,
-              }),
-              Animated.timing(scaleAnim, {
-                toValue: 1,
-                duration: 900,
-                easing: Easing.ease,
-                useNativeDriver: true,
-              }),
-            ])
-          ),
-        ]).start();
+        // Buscar partidas
+        const allMatches = await fetchAllMatches();
+        const userMatches = allMatches.filter(
+          (m) => m.player1_id === storedId || m.player2_id === storedId
+        );
+
+        // Stats
+        const newStats = computeBasicStats(storedId, userMatches);
+        setStats(newStats);
+
+        // Calcular Títulos
+        computeTitlesProgress(newStats);
+
+        // Calcular Rival
+        const newRival = await computeBiggestRival(storedId, userMatches);
+        await handleRivalDetection(newRival);
       } catch (err) {
-        console.log("Erro ao carregar stats:", err);
-        router.replace("/(auth)/login");
+        console.log("Erro:", err);
+        Alert.alert("Erro", "Não foi possível carregar dados.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [fadeAnim, scaleAnim, router]);
+  }, [router]);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      const fetchData = async () => {
-        const storedId = await AsyncStorage.getItem("@userId");
-        if (storedId) {
-          setLoading(true);
-          await loadStats(storedId);
-          setLoading(false);
-        }
-        // Ao focar, recarrega contagem de notificações
-        await loadNotifications();
-      };
-      fetchData();
-      return () => {};
-    }, [])
-  );
+  // ----------------------------------------
+  // FUNÇÕES PRINCIPAIS
+  // ----------------------------------------
 
-  async function loadNotifications() {
-    const notifsStr = await AsyncStorage.getItem("@notifications");
-    if (notifsStr) {
-      const arr: NotificationItem[] = JSON.parse(notifsStr);
-      // Ordena por data desc
-      arr.sort((a, b) => b.timestamp - a.timestamp);
-      setNotifications(arr);
-      setNotificationCount(arr.length);
-    } else {
-      setNotifications([]);
-      setNotificationCount(0);
-    }
-  }
-
-  async function clearNotifications() {
-    await AsyncStorage.setItem("@notifications", JSON.stringify([]));
-    setNotifications([]);
-    setNotificationCount(0);
-  }
-
-  async function loadStats(uId: string) {
-    const matchesRef = collectionGroup(db, "matches");
-    const snap = await getDocs(matchesRef);
-
-    let arrMatches: any[] = [];
+  // Buscar TODAS as partidas
+  async function fetchAllMatches(): Promise<MatchData[]> {
+    const snap = await getDocs(collectionGroup(db, "matches"));
+    const arr: MatchData[] = [];
     snap.forEach((docSnap) => {
-      arrMatches.push(docSnap.data());
+      arr.push({ id: docSnap.id, ...docSnap.data() } as MatchData);
     });
+    return arr;
+  }
 
-    let userMatches = arrMatches.filter(
-      (m) => m.player1_id === uId || m.player2_id === uId
-    );
+  // Computar stats simples (wins, losses, draws)
+  function computeBasicStats(uId: string, userMatches: MatchData[]): PlayerStats {
+    let wins = 0,
+      losses = 0,
+      draws = 0;
+    const oppSet = new Set<string>();
 
-    let w = 0,
-      l = 0,
-      d = 0;
-    let rivalCount: Record<string, number> = {};
+    for (let mm of userMatches) {
+      if (!mm.outcomeNumber) continue;
+      const isP1 = mm.player1_id === uId;
+      const rivalId = isP1 ? mm.player2_id : mm.player1_id;
+      if (rivalId && rivalId !== "N/A") oppSet.add(rivalId);
 
-    userMatches.forEach((match) => {
-      const { player1_id, player2_id, outcomeNumber } = match;
-      const isP1 = player1_id === uId;
-      const isP2 = player2_id === uId;
-      const rivalId = isP1 ? player2_id : player1_id;
-
-      if (rivalId && rivalId !== "N/A") {
-        rivalCount[rivalId] = (rivalCount[rivalId] || 0) + 1;
-      }
-
-      if (outcomeNumber === 3) {
-        d++;
-      } else if (outcomeNumber === 1) {
-        if (isP1) w++;
-        else if (isP2) l++;
-      } else if (outcomeNumber === 2) {
-        if (isP2) w++;
-        else if (isP1) l++;
-      } else if (outcomeNumber === 10) {
-        l++;
-      }
-    });
-
-    setWinsCount(w);
-    setLossesCount(l);
-    setDrawCount(d);
-    setMatchesTotal(userMatches.length);
-
-    let max = 0;
-    let rivalMax = "";
-    for (let rid of Object.keys(rivalCount)) {
-      if (rivalCount[rid] > max) {
-        max = rivalCount[rid];
-        rivalMax = rid;
+      switch (mm.outcomeNumber) {
+        case 1:
+          isP1 ? wins++ : losses++;
+          break;
+        case 2:
+          isP1 ? losses++ : wins++;
+          break;
+        case 3:
+          draws++;
+          break;
+        case 10:
+          losses++;
+          break;
       }
     }
 
-    if (!rivalMax) {
-      setBiggestRival(t("home.stats.none_rival"));
-    } else {
-      const docSnap = await getDoc(doc(db, "players", rivalMax));
-      if (!docSnap.exists()) {
-        setBiggestRival(`${t("home.stats.rival")}: ${rivalMax} (${max}x)`);
-      } else {
-        const data = docSnap.data();
-        const rName = data.fullname || `Jogador ${rivalMax}`;
-        setBiggestRival(`${rName} (${max}x)`);
+    return {
+      wins,
+      losses,
+      draws,
+      matchesTotal: userMatches.length,
+      uniqueOpponents: oppSet.size,
+      tournamentPlacements: [],
+    };
+  }
+
+  // Calcular Títulos
+  async function computeTitlesProgress(st: PlayerStats) {
+    setIsCalculating(true);
+
+    const all = titles.map((t) => {
+      const locked = !t.condition(st);
+      const progress = calcProgress(t, st);
+      return { ...t, locked, progress };
+    });
+
+    // Filtra locked e ordena
+    const lockedOnly = all.filter((tw) => tw.locked);
+    lockedOnly.sort((a, b) => b.progress - a.progress);
+
+    // Pega top 3
+    const top3 = lockedOnly.slice(0, 3);
+    setClosestTitles(top3);
+
+    setIsCalculating(false);
+  }
+
+  // Cálculo de progresso (manual)
+  function calcProgress(title: TitleItem, stats: PlayerStats): number {
+    if (title.condition(stats)) return 1; // Já desbloqueado
+    let progress = 0;
+
+    // Comparações manuais
+    switch (title.id) {
+      case 101: // Mestre Kanto
+        progress = stats.wins / 20;
+        break;
+      case 999: // A Jornada Começa
+        progress = stats.wins / 1;
+        break;
+      case 102:
+        progress = stats.wins / 30;
+        break;
+      case 401:
+        progress = stats.wins / 50;
+        break;
+      case 405:
+        progress = stats.matchesTotal / 100;
+        break;
+      case 406:
+        progress = stats.wins / 75;
+        break;
+      case 407:
+        progress = (stats.tournamentPlacements?.filter((p) => p <= 3).length ?? 0) / 3;
+        break;
+      case 408:
+        progress = stats.matchesTotal / 50;
+        break;
+      case 409:
+        progress = stats.uniqueOpponents / 20;
+        break;
+      case 410:
+        progress = stats.wins / 90;
+        break;
+      case 411:
+        progress = (stats.tournamentPlacements?.filter((p) => p <= 3).length ?? 0) / 4;
+        break;
+      case 412:
+        progress = stats.matchesTotal / 150;
+        break;
+      case 413:
+        progress = stats.wins / 120;
+        break;
+      case 414:
+        progress = Math.min(stats.losses / 10, stats.wins / 10);
+        break;
+      case 415:
+        progress = (stats.tournamentPlacements?.filter((p) => p === 1).length ?? 0) / 2;
+        break;
+      default:
+        progress = 0;
+    }
+
+    return Math.min(progress, 1);
+  }
+
+  // ----------------------------------------
+  // RIVAL
+  // ----------------------------------------
+
+  // Buscar "fullname" do rival no Firestore
+  async function getPlayerName(rid: string): Promise<string> {
+    try {
+      const docRef = doc(db, "players", rid);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        return data?.fullname || `User ${rid}`;
       }
+    } catch {
+      return `User ${rid}`;
+    }
+    return `User ${rid}`;
+  }
+
+  async function computeBiggestRival(uId: string, userMatches: MatchData[]): Promise<RivalData | null> {
+    // Monta um map { rivalId: { matches, userWins, rivalWins, lastWinner } }
+    const rivalsMap: Record<string, { matches: number; userWins: number; rivalWins: number; lastWinner: "user"|"rival"|"empate" }> = {};
+
+    userMatches.forEach((mm) => {
+      const isP1 = mm.player1_id === uId;
+      const rId = isP1 ? mm.player2_id : mm.player1_id;
+      if (!rId || rId === "N/A") return;
+
+      if (!rivalsMap[rId]) {
+        rivalsMap[rId] = { matches: 0, userWins: 0, rivalWins: 0, lastWinner: "empate" };
+      }
+
+      rivalsMap[rId].matches += 1;
+
+      const outcome = mm.outcomeNumber || 0;
+      if (outcome === 1) {
+        if (isP1) {
+          rivalsMap[rId].userWins += 1;
+          rivalsMap[rId].lastWinner = "user";
+        } else {
+          rivalsMap[rId].rivalWins += 1;
+          rivalsMap[rId].lastWinner = "rival";
+        }
+      } else if (outcome === 2) {
+        if (isP1) {
+          rivalsMap[rId].rivalWins += 1;
+          rivalsMap[rId].lastWinner = "rival";
+        } else {
+          rivalsMap[rId].userWins += 1;
+          rivalsMap[rId].lastWinner = "user";
+        }
+      } else if (outcome === 3) {
+        rivalsMap[rId].lastWinner = "empate";
+      } else if (outcome === 10) {
+        if (isP1) {
+          rivalsMap[rId].rivalWins += 1;
+          rivalsMap[rId].lastWinner = "rival";
+        } else {
+          rivalsMap[rId].userWins += 1;
+          rivalsMap[rId].lastWinner = "user";
+        }
+      }
+    });
+
+    // Achar rival com maior 'matches'
+    let topRivalId = "";
+    let topMatches = 0;
+
+    for (const rid of Object.keys(rivalsMap)) {
+      if (rivalsMap[rid].matches > topMatches) {
+        topMatches = rivalsMap[rid].matches;
+        topRivalId = rid;
+      }
+    }
+    if (!topRivalId) return null; // sem rival
+
+    const data = rivalsMap[topRivalId];
+    const userWins = data.userWins;
+    const totalMatches = data.matches;
+    const wr = totalMatches > 0 ? (userWins / totalMatches) * 100 : 0;
+
+    const name = await getPlayerName(topRivalId);
+
+    return {
+      rivalId: topRivalId,
+      rivalName: name,
+      matches: totalMatches,
+      userWins,
+      rivalWins: data.rivalWins,
+      lastWinner: data.lastWinner,
+      wrPercentage: wr,
+    };
+  }
+
+  async function handleRivalDetection(newRival: RivalData | null) {
+    if (!newRival) {
+      setRivalInfo(null);
+      return;
+    }
+    // Carrega do AsyncStorage
+    const oldRivalId = await AsyncStorage.getItem("@lastRivalId");
+
+    setRivalInfo(newRival);
+
+    // Se rival mudou
+    if (oldRivalId !== newRival.rivalId) {
+      setRivalModalVisible(true);
+      await AsyncStorage.setItem("@lastRivalId", newRival.rivalId);
     }
   }
 
+  // Função para pegar frases aleatórias conforme o resultado
+const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
+  const phrases = {
+    user: [
+      "Tá voando, hein?! Venceu com estilo! 🚀🔥",
+      "Foi um massacre! O rival nem viu de onde veio. 🎯😎",
+      "Deu aula! O rival ainda tá tentando entender o que aconteceu. 📚😂",
+      "Vitória confirmada! Dá até pra soltar aquele 'EZ'. 😏",
+      "Boa! O rival já tá procurando tutorial no YouTube. 🎥😂"
+    ],
+    rival: [
+      "Eita... levou aquela coça! Tenta de novo! 😂",
+      "O rival mandou um 'GG EZ'... não vai deixar barato, né? 😡🔥",
+      "Bom... pelo menos agora você sabe como perder com estilo. 😆",
+      "Essa foi feia, hein... Mas é errando que se aprende! Ou não. 🤷‍♂️",
+      "A derrota veio, mas o drama é opcional. Levanta e luta de novo! 🥋🔥"
+    ],
+    empate: [
+      "Dois titãs colidiram... e ninguém venceu! ⚡🤜🤛",
+      "Empate... Que tal um desempate pra ver quem é o verdadeiro campeão? 🏆",
+      "Nada definido ainda! Próxima batalha decide tudo. 🔥",
+      "Empate?! Dá pra aceitar isso? Bora revanche AGORA! 🤨",
+      "Equilíbrio total! Um verdadeiro duelo de gigantes. 💥"
+    ]
+  };
+
+  // Escolhe aleatoriamente uma frase da categoria correspondente
+  const chosenPhrases = phrases[result] || [];
+  return chosenPhrases[Math.floor(Math.random() * chosenPhrases.length)];
+};
+
+  // ============= BOTÕES =============
   async function handleLogout() {
     try {
-      await signOut(auth);
+      await auth.signOut();
       await AsyncStorage.removeItem("@userId");
       await AsyncStorage.removeItem("@userName");
       router.replace("/(auth)/login");
     } catch (err) {
-      Alert.alert(t("common.error"), t("home.alerts.no_logout"));
+      Alert.alert("Erro", "Falha ao sair da conta");
       console.log(err);
     }
   }
 
-  /** Exemplo de abrir modal de coleções */
-  function openCollectionModal() {
-    setCollectionsModalVisible(true);
-    loadValidCollections();
+  function handleDonate() {
+    const link = "https://picpay.me/marco.macedo10/0.5";
+    Alert.alert("Doar", "Abrindo link de doação...", [
+      { text: "OK", onPress: () => Linking.openURL(link) },
+    ]);
   }
 
-  async function loadValidCollections() {
+  function handleOpenCollections() {
+    setCollectionsModalVisible(true);
+    fetchValidCollections();
+  }
+
+  async function fetchValidCollections() {
     setLoadingCollections(true);
     try {
       const response = await fetch("https://api.pokemontcg.io/v2/sets");
@@ -240,454 +466,570 @@ export default function HomeScreen() {
         setValidCollections(validSets);
       }
     } catch (error) {
-      console.error("Erro ao carregar coleções válidas:", error);
+      console.error("Erro ao carregar coleções:", error);
     } finally {
       setLoadingCollections(false);
     }
   }
 
-  function closeCollectionModal() {
+  function closeCollectionsModal() {
     setCollectionsModalVisible(false);
   }
 
-  function openNotificationsModal() {
-    setNotifModalVisible(true);
-  }
-
-  function closeNotificationsModal() {
-    setNotifModalVisible(false);
-  }
-
+  // ============= RENDER =============
   if (loading) {
     return (
       <View style={styles.loaderContainer}>
-        <ActivityIndicator size="large" color="#E3350D" />
+        <Animatable.Text
+          style={{ color: "#E3350D", fontSize: 24, fontWeight: "bold" }}
+          animation="pulse"
+          easing="ease-out"
+          iterationCount="infinite"
+        >
+          Carregando...
+        </Animatable.Text>
       </View>
     );
   }
 
-  const total = matchesTotal;
-  const wr = total > 0 ? ((winsCount / total) * 100).toFixed(1) : "0";
+  // Stats
+  const total = stats.matchesTotal;
+  const wr = total > 0 ? ((stats.wins / total) * 100).toFixed(1) : "0";
+
+  const defaultAvatar = require("../../assets/images/avatar/image.jpg");
+  const avatarSource = avatarUri || defaultAvatar;
 
   return (
-    // Background usando ImageBackground
-    <ImageBackground
-      source={require("../../assets/images/background_login.jpg")}
-      style={styles.backgroundImage}
-    >
-      {/* View principal, para empilhar conteúdo */}
-      <View style={{ flex: 1 }}>
-        {/* Ícone de sininho no canto superior direito */}
-        <View style={styles.notificationContainer}>
-          <TouchableOpacity style={styles.notifButton} onPress={openNotificationsModal}>
-            <FontAwesome5 name="bell" size={26} color="#FFF" />
-            {notificationCount > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{notificationCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+    <View style={{ flex: 1, backgroundColor: "#1E1E1E" }}>
+      {/* HEADER */}
+      <View style={styles.header}>
+        <View style={styles.userInfo}>
+          <Image source={avatarSource} style={styles.avatar} />
+          <Text style={styles.userName}>{userName}</Text>
         </View>
-
-        <ScrollView contentContainerStyle={styles.container}>
-          {/* Logo */}
-          <Animated.Image
-            source={require("../../assets/images/logo.jpg")}
-            style={[styles.logo, { transform: [{ scale: scaleAnim }] }]}
-            resizeMode="contain"
-          />
-
-          <Animated.Text style={[styles.title, { opacity: fadeAnim }]}>
-            {t("home.welcome", { username: userName })}
-          </Animated.Text>
-
-          <View style={styles.statsSection}>
-            <Text style={styles.sectionTitle}>{t("home.stats.total_matches")}</Text>
-
-            <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>{winsCount}</Text>
-                <Text style={styles.statLabel}>{t("home.stats.wins")}</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>{lossesCount}</Text>
-                <Text style={styles.statLabel}>{t("home.stats.losses")}</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>{drawCount}</Text>
-                <Text style={styles.statLabel}>{t("home.stats.draws")}</Text>
-              </View>
-            </View>
-
-            <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>{total}</Text>
-                <Text style={styles.statLabel}>{t("home.stats.total_matches")}</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>{wr}%</Text>
-                <Text style={styles.statLabel}>{t("home.stats.winrate")}</Text>
-              </View>
-            </View>
-
-            <View style={styles.rivalContainer}>
-              <Text style={styles.rivalLabel}>{t("home.stats.rival")}:</Text>
-              <Text style={styles.rivalValue}>{biggestRival}</Text>
-            </View>
-          </View>
-
-          <View style={styles.buttonsContainer}>
-            <TouchableOpacity style={styles.collectionsButton} onPress={openCollectionModal}>
-              <Text style={styles.collectionsButtonText}>
-                {t("home.buttons.collections", "Coleções Validas")}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.bottomButtonsRow}>
-              <TouchableOpacity
-                style={styles.donateButton}
-                onPress={() => Linking.openURL("https://picpay.me/marco.macedo10/0.5")}
-              >
-                <Text style={styles.donateText}>{t("home.buttons.donate", "Doar")}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-                <Text style={styles.logoutText}>{t("home.buttons.logout")}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Modal de Coleções */}
-          <Modal visible={collectionsModalVisible} animationType="slide">
-            <ScrollView contentContainerStyle={styles.modalContainer}>
-              <Text style={styles.modalTitle}>
-                {t("home.collections_modal.title", "Coleções Válidas")}
-              </Text>
-              {loadingCollections ? (
-                <ActivityIndicator size="large" color="#E3350D" />
-              ) : (
-                validCollections.map((set) => (
-                  <View key={set.id} style={styles.collectionCard}>
-                    <Text style={styles.collectionName}>{set.name}</Text>
-                    <Text style={styles.collectionSeries}>{set.series}</Text>
-                  </View>
-                ))
-              )}
-              <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={closeCollectionModal}
-              >
-                <Text style={styles.modalCloseButtonText}>{t("common.close")}</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </Modal>
-        </ScrollView>
       </View>
 
-      {/* Modal de Notificações */}
-      <Modal visible={notifModalVisible} animationType="slide" transparent>
-        <View style={styles.notifModalOverlay}>
-          <View style={styles.notifModalContainer}>
-            <Text style={styles.notifModalTitle}>Notificações</Text>
+      <ImageBackground
+        source={require("../../assets/images/background_login.jpg")}
+        style={styles.backgroundImage}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Stats */}
+          <View style={styles.statsContainer}>
+            {renderStatCard("Vitórias", stats.wins, "trophy", "#E3350D", 100)}
+            {renderStatCard("Derrotas", stats.losses, "skull", "#fff", 150)}
+            {renderStatCard("Empates", stats.draws, "handshake", "#f5a623", 200)}
+            {renderStatCard("Partidas", stats.matchesTotal, "sword-cross", "#1DD1A1", 250)}
+            {renderStatCard("WinRate", wr + "%", "chart-line", "#FFC312", 300)}
+            {renderStatCard("Oponentes", stats.uniqueOpponents, "account-group", "#9980FA", 350)}
+          </View>
 
-            {notifications.length === 0 ? (
-              <Text style={styles.noNotifText}>Nenhuma notificação</Text>
+          {/* Rival Card */}
+          {rivalInfo && (
+            <Animatable.View
+              style={styles.rivalCard}
+              animation="fadeInDown"
+              delay={350}
+            >
+              {/* Ícone Rival */}
+              <MaterialCommunityIcons name="sword-cross" size={30} color="#E3350D" />
+              <Animatable.Text
+                animation="pulse"
+                iterationCount="infinite"
+                style={styles.rivalTitle}
+              >
+                Rival Atual
+              </Animatable.Text>
+
+              {/* Corpo do Rival */}
+              <View style={styles.rivalBody}>
+                <Text style={styles.rivalName}>{rivalInfo.rivalName}</Text>
+                <Text style={styles.rivalStats}>
+                  Partidas: {rivalInfo.matches} | WR: {rivalInfo.wrPercentage.toFixed(1)}%
+                </Text>
+                <Text style={[styles.rivalStats, { textAlign: "center" }]}>
+                  Última Partida: {getRandomRivalPhrase(rivalInfo.lastWinner || "empate")}
+                </Text>
+              </View>
+            </Animatable.View>
+          )}
+
+          {/* Títulos + progress */}
+          <Animatable.View
+            animation="fadeInUp"
+            style={styles.titlesContainer}
+            delay={400}
+          >
+            <Text style={styles.titlesHeader}>Títulos Próximos</Text>
+            {isCalculating ? (
+              <ActivityIndicator size="large" color="#E3350D" style={{ marginTop: 20 }} />
+            ) : closestTitles.length === 0 ? (
+              <Text style={styles.noTitlesText}>
+                Você não possui títulos bloqueados!
+              </Text>
             ) : (
-              <FlatList
-                data={notifications}
-                keyExtractor={(item) => String(item.id)}
-                style={{ maxHeight: 300, marginBottom: 20 }}
-                renderItem={({ item }) => (
-                  <View style={styles.notifCard}>
-                    <Text style={styles.notifCardTitle}>{item.title}</Text>
-                    <Text style={styles.notifCardBody}>{item.body}</Text>
-                  </View>
-                )}
-              />
+              closestTitles.map((title, index) => (
+                <TitleProgressCard key={title.id} item={title} delay={index * 100} />
+              ))
             )}
+          </Animatable.View>
+        </ScrollView>
 
-            <View style={styles.notifModalButtonsRow}>
-              <TouchableOpacity
-                style={[styles.notifBtn, { backgroundColor: "#999" }]}
-                onPress={clearNotifications}
-              >
-                <Text style={styles.notifBtnText}>Limpar</Text>
+        {/* BOTÕES NO FUNDO (3) */}
+        <View style={styles.bottomButtons}>
+          {/* Coleções Válidas */}
+          <TouchableOpacity style={styles.validCollectionsButton} onPress={handleOpenCollections}>
+            <MaterialCommunityIcons name={"book" as any} size={20} color="#FFF" />
+            <Text style={[styles.bottomButtonText, { color: "#FFF", marginLeft: 6 }]}>
+              Coleções Válidas
+            </Text>
+          </TouchableOpacity>
+
+          {/* Doar */}
+          <TouchableOpacity style={styles.donateButton} onPress={handleDonate}>
+            <MaterialCommunityIcons name={"hand-coin" as any} size={20} color="#E3350D" />
+            <Text style={[styles.bottomButtonText, { color: "#E3350D" }]}>Doar</Text>
+          </TouchableOpacity>
+
+          {/* Sair */}
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <MaterialCommunityIcons name={"logout" as any} size={20} color="#FFF" />
+            <Text style={[styles.bottomButtonText, { color: "#FFF" }]}>Sair</Text>
+          </TouchableOpacity>
+        </View>
+      </ImageBackground>
+
+      {/* MODAL: Coleções Válidas */}
+      <Modal
+        visible={collectionsModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={closeCollectionsModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={closeCollectionsModal} style={{ marginRight: 10 }}>
+                <MaterialCommunityIcons name={"arrow-left" as any} size={24} color="#FFF" />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.notifBtn, { backgroundColor: "#E3350D" }]}
-                onPress={closeNotificationsModal}
-              >
-                <Text style={styles.notifBtnText}>Fechar</Text>
-              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Coleções Válidas</Text>
+            </View>
+            <View style={{ flex: 1, padding: 16, backgroundColor: "#1E1E1E" }}>
+              {loadingCollections ? (
+                <ActivityIndicator size="large" color="#E3350D" style={{ marginTop: 20 }} />
+              ) : (
+                <ScrollView>
+                  {validCollections.map((set: any) => (
+                    <View key={set.id} style={styles.collectionCard}>
+                      <MaterialCommunityIcons
+                        name={"star-four-points-outline" as any}
+                        size={30}
+                        color="#E3350D"
+                        style={{ marginRight: 10 }}
+                      />
+                      <View>
+                        <Text style={styles.collectionName}>{set.name}</Text>
+                        <Text style={styles.collectionSeries}>{set.series}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
             </View>
           </View>
         </View>
       </Modal>
-    </ImageBackground>
+
+      {/* MODAL de Rival (quando muda) */}
+      <Modal
+        visible={rivalModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setRivalModalVisible(false)}
+      >
+        <View style={styles.rivalModalOverlay}>
+          <Animatable.View style={styles.rivalModalContainer} animation="shake" duration={1200}>
+            <Text style={styles.rivalModalTitle}>Novo Rival Detectado!</Text>
+            {rivalInfo && (
+              <>
+                <MaterialCommunityIcons name="alert-decagram" size={46} color="#E3350D" />
+                <Text style={styles.rivalModalText}>
+                  {rivalInfo.rivalName} chegou para desafiar você!
+                </Text>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={styles.closeRivalModalBtn}
+              onPress={() => setRivalModalVisible(false)}
+            >
+              <Text style={{ color: "#FFF", fontWeight: "bold" }}>Conferir seu Rival</Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </View>
+      </Modal>
+    </View>
+  );
+
+  // RENDER FUNÇÕES
+  function renderStatCard(
+    label: string,
+    value: string | number,
+    iconName: string,
+    iconColor: string,
+    delayAnim: number
+  ) {
+    return (
+      <Animatable.View
+        animation="fadeInUp"
+        style={styles.statCard}
+        delay={delayAnim}
+        key={label}
+      >
+        <MaterialCommunityIcons name={iconName as any} size={26} color={iconColor} />
+        <Text style={styles.statCardValue}>{value}</Text>
+        <Text style={styles.statCardLabel}>{label}</Text>
+      </Animatable.View>
+    );
+  }
+}
+
+// ----------------------------------------------
+// Componente Título com Progresso
+// ----------------------------------------------
+function TitleProgressCard({ item, delay }: { item: any; delay: number }) {
+  const progressAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(progressAnim, {
+      toValue: item.progress,
+      duration: 1200,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false,
+    }).start();
+  }, [item.progress]);
+
+  const widthInterpolate = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+  const progressPercent = Math.round(item.progress * 100);
+
+  return (
+    <Animatable.View
+      animation="fadeInUp"
+      delay={600 + delay}
+      style={styles.titleCard}
+    >
+      <MaterialCommunityIcons
+        name={"star-four-points" as any}
+        size={32}
+        color={item.locked ? "#999" : "#00D840"}
+        style={{ marginRight: 10 }}
+      />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.titleName}>{item.title}</Text>
+        <Text style={styles.titleDesc}>{item.description}</Text>
+        <View style={styles.progressBarContainer}>
+          <Animated.View
+            style={[
+              styles.progressBarFill,
+              {
+                width: widthInterpolate,
+                backgroundColor: item.locked ? "#E3350D" : "#00D840",
+              },
+            ]}
+          />
+        </View>
+        <Text style={styles.progressLabel}>{progressPercent}%</Text>
+      </View>
+    </Animatable.View>
   );
 }
 
+// ============ ESTILOS ============
 const styles = StyleSheet.create({
-  backgroundImage: {
-    flex: 1,
-    resizeMode: "cover",
-  },
   loaderContainer: {
     flex: 1,
     backgroundColor: "#1E1E1E",
     justifyContent: "center",
     alignItems: "center",
   },
-  notificationContainer: {
-    position: "absolute",
-    top: 20,
-    right: 20,
-    zIndex: 999,
-  },
-  notifButton: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  notifBadge: {
-    backgroundColor: "#E3350D",
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginLeft: 4,
-  },
-  notifBadgeText: {
-    color: "#FFF",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
-  container: {
-    flexGrow: 1,
-    alignItems: "center",
-    padding: 20,
-  },
-  logo: {
-    width: 120,
-    height: 120,
-    marginTop: 40,
-    marginBottom: 20,
-  },
-  title: {
-    color: "#E3350D",
-    fontSize: 28,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginVertical: 20,
-    textTransform: "uppercase",
-  },
-  statsSection: {
-    width: "100%",
-    padding: 15,
-    backgroundColor: "rgba(42,42,42,0.9)",
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#4D4D4D",
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    color: "#FFFFFF",
-    fontSize: 22,
-    fontWeight: "bold",
-    marginBottom: 10,
-    textAlign: "center",
-  },
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginVertical: 10,
-  },
-  statCard: {
-    backgroundColor: "#292929",
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    alignItems: "center",
-    width: 90,
-    borderWidth: 1.5,
-    borderColor: "#E3350D",
-  },
-  statNumber: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  statLabel: {
-    color: "#D9D9D9",
-    fontSize: 14,
-    textAlign: "center",
-    marginTop: 5,
-  },
-  rivalContainer: {
-    marginTop: 10,
-    alignItems: "center",
-  },
-  rivalLabel: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  rivalValue: {
-    color: "#E3350D",
-    fontSize: 16,
-    marginTop: 5,
-    textAlign: "center",
-  },
-  buttonsContainer: {
-    alignItems: "center",
-    marginTop: 20,
-    width: "100%",
-  },
-  collectionsButton: {
-    backgroundColor: "#4CAF50",
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#FFF",
-    marginBottom: 10,
-  },
-  collectionsButtonText: {
-    color: "#FFF",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-  bottomButtonsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-    paddingHorizontal: 20,
-  },
-  donateButton: {
+  backgroundImage: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+  },
+  scrollContent: {
+    paddingBottom: 80,
+  },
+  header: {
+    backgroundColor: "#000",
+    paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  userInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  avatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     marginRight: 10,
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: "#E3350D",
-    alignItems: "center",
   },
-  donateText: {
+  userName: {
     color: "#E3350D",
     fontWeight: "bold",
-    fontSize: 16,
-  },
-  logoutButton: {
-    flex: 1,
-    backgroundColor: "#E3350D",
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginLeft: 10,
-    borderWidth: 1.5,
-    borderColor: "#FFFFFF",
-    alignItems: "center",
-  },
-  logoutText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-  modalContainer: {
-    flexGrow: 1,
-    backgroundColor: "#1E1E1E",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalTitle: {
-    color: "#FFFFFF",
-    fontSize: 24,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginVertical: 20,
-  },
-  collectionCard: {
-    backgroundColor: "#333",
-    width: "100%",
-    padding: 20,
-    borderRadius: 8,
-    marginBottom: 15,
-  },
-  collectionName: {
-    fontSize: 18,
-    color: "#FFF",
-    fontWeight: "bold",
-    marginBottom: 6,
-  },
-  collectionSeries: {
-    color: "#CCC",
-    fontSize: 14,
-  },
-  modalCloseButton: {
-    backgroundColor: "#E3350D",
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 20,
-    alignSelf: "center",
-  },
-  modalCloseButtonText: {
-    color: "#FFF",
-    textAlign: "center",
-    fontWeight: "bold",
+    fontSize: 20,
   },
 
-  // Modal de Notificações
-  notifModalOverlay: {
+  // STATS
+  statsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginTop: 16,
+    marginHorizontal: 10,
+  },
+  statCard: {
+    backgroundColor: "#2A2A2A",
+    width: 100,
+    height: 100,
+    borderRadius: 10,
+    margin: 6,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#444",
+  },
+  statCardValue: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginTop: 4,
+    textAlign: "center",
+  },
+  statCardLabel: {
+    color: "#ccc",
+    fontSize: 12,
+    textAlign: "center",
+  },
+
+  // Rival Card
+  rivalCard: {
+    backgroundColor: "#2A2A2A",
+    borderRadius: 10,
+    marginHorizontal: 20,
+    marginTop: 20,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#444",
+    alignItems: "center",
+  },
+  rivalTitle: {
+    color: "#E3350D",
+    fontWeight: "bold",
+    fontSize: 16,
+    marginVertical: 8,
+  },
+  rivalBody: {
+    marginTop: 5,
+    alignItems: "center",
+  },
+  rivalName: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  rivalStats: {
+    color: "#ccc",
+    fontSize: 13,
+    marginTop: 2,
+  },
+
+  // Títulos
+  titlesContainer: {
+    backgroundColor: "#2A2A2A",
+    marginHorizontal: 12,
+    marginTop: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#444",
+    padding: 12,
+  },
+  titlesHeader: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  noTitlesText: {
+    color: "#999",
+    fontStyle: "italic",
+    textAlign: "center",
+  },
+  titleCard: {
+    flexDirection: "row",
+    backgroundColor: "#3A3A3A",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#555",
+  },
+  titleName: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  titleDesc: {
+    color: "#CCC",
+    fontSize: 13,
+    marginBottom: 6,
+  },
+  progressBarContainer: {
+    backgroundColor: "#555",
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+    marginBottom: 2,
+  },
+  progressBarFill: {
+    height: 6,
+  },
+  progressLabel: {
+    color: "#FFF",
+    fontSize: 12,
+    textAlign: "right",
+  },
+
+  // Bottom Buttons
+  bottomButtons: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#000000bb",
+    flexDirection: "row",
+    padding: 8,
+    justifyContent: "space-around",
+    alignItems: "center",
+  },
+  validCollectionsButton: {
+    borderWidth: 1,
+    borderColor: "#FFF",
+    backgroundColor: "transparent",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  donateButton: {
+    borderWidth: 1,
+    borderColor: "#E3350D",
+    backgroundColor: "#FFF",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  logoutButton: {
+    borderWidth: 1,
+    borderColor: "#fff",
+    backgroundColor: "#E3350D",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  bottomButtonText: {
+    fontWeight: "bold",
+    marginLeft: 6,
+    fontSize: 16,
+  },
+
+  // Modal Coleções
+  modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: "#1E1E1E",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#000",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  modalTitle: {
+    color: "#E3350D",
+    fontWeight: "bold",
+    fontSize: 20,
+  },
+  collectionCard: {
+    backgroundColor: "#2A2A2A",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  collectionName: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  collectionSeries: {
+    color: "#ccc",
+    fontSize: 14,
+  },
+
+  // Rival Modal
+  rivalModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center",
     alignItems: "center",
   },
-  notifModalContainer: {
-    width: "80%",
-    backgroundColor: "#1E1E1E",
+  rivalModalContainer: {
+    backgroundColor: "#2A2A2A",
     borderRadius: 10,
-    padding: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#555",
     alignItems: "center",
+    width: "80%",
   },
-  notifModalTitle: {
-    color: "#FFF",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 10,
-  },
-  notifModalButtonsRow: {
-    flexDirection: "row",
-    marginTop: 10,
-  },
-  notifBtn: {
-    padding: 12,
-    borderRadius: 8,
-    marginHorizontal: 8,
-  },
-  notifBtnText: {
-    color: "#FFF",
-    fontWeight: "bold",
-  },
-  noNotifText: {
-    color: "#ccc",
-    fontStyle: "italic",
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  notifCard: {
-    backgroundColor: "#333",
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 6,
-  },
-  notifCardTitle: {
+  rivalModalTitle: {
     color: "#E3350D",
-    fontSize: 16,
     fontWeight: "bold",
+    fontSize: 20,
+    marginBottom: 12,
+    textAlign: "center",
   },
-  notifCardBody: {
+  rivalModalText: {
     color: "#FFF",
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 16,
+    marginVertical: 8,
+    textAlign: "center",
+  },
+  closeRivalModalBtn: {
+    backgroundColor: "#E3350D",
+    borderRadius: 6,
+    marginTop: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
 });

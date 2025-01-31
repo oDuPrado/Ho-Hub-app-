@@ -18,7 +18,7 @@ import { TitleItem } from "../app/titlesConfig";
 type TemplateModalProps = {
   visible: boolean;
   onClose: () => void;
-  unlockedTitles: TitleItem[]; // lista de títulos que o player tem (com .unlocked = true)
+  unlockedTitles: TitleItem[]; // lista de títulos que o player tem (.unlocked = true)
   onSelectTemplate: (templateId: number) => void; // callback de seleção
   currentTemplateId: number; // id do template atual
 };
@@ -30,10 +30,11 @@ export default function TemplateModal({
   onSelectTemplate,
   currentTemplateId,
 }: TemplateModalProps) {
-  // Função pra checar se o template é “liberado”
+
+  // Função para checar se o template é liberado
   const isTemplateUnlocked = (t: TemplateItem) => {
-    if (t.isFree) return true; // se for free, já liberado
-    if (!t.requiredTitleId) return false; // se não tem titleId, mas não é free => sem lock (raro)
+    if (t.isFree) return true;
+    if (!t.requiredTitleId) return false;
     // se for premium, precisa ver se o user tem o título
     const hasTitle = unlockedTitles.some((title) => title.id === t.requiredTitleId && title.unlocked);
     return hasTitle;
@@ -70,8 +71,23 @@ export default function TemplateModal({
                   }}
                   disabled={!unlocked}
                 >
-                  <Text style={styles.templateName}>{template.name}</Text>
+                  <View style={styles.templateHeader}>
+                    <Ionicons
+                      name={template.hasEpicAnimation ? "flash" : "color-wand"}
+                      size={24}
+                      color={template.iconColor}
+                      style={{ marginRight: 8 }}
+                    />
+                    <Text style={styles.templateName}>{template.name}</Text>
+                  </View>
+                  {template.emblemImage && (
+                    <Image
+                      source={require("../assets/images/emblemas/epic.jpg")} // Exemplo, se tiver
+                      style={styles.emblemImage}
+                    />
+                  )}
                   <Text style={styles.templateDesc}>{template.description}</Text>
+
                   {!unlocked && (
                     <View style={styles.lockOverlay}>
                       <Ionicons name="lock-closed" size={24} color="#fff" />
@@ -134,9 +150,9 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
-  templateSelected: {
-    borderColor: "#00fa9a",
-    borderWidth: 2,
+  templateHeader: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   templateName: {
     color: "#fff",
@@ -144,10 +160,19 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginBottom: 4,
   },
+  emblemImage: {
+    width: 32,
+    height: 32,
+    marginVertical: 4,
+  },
   templateDesc: {
     color: "#ccc",
     fontSize: 14,
     marginBottom: 4,
+  },
+  templateSelected: {
+    borderColor: "#00fa9a",
+    borderWidth: 2,
   },
   lockOverlay: {
     position: "absolute",

@@ -16,6 +16,8 @@ import AnalyticsScreen from "./Analise";
 import NoticiasScreen from "./Noticias";
 import SugestaoScreen from "./Sugestao";
 import ChatsListScreen from "./chats";
+import PlayerScreen from "./Cadastros";
+import ClassicosScreen from "./classicos";
 
 const Drawer = createDrawerNavigator();
 
@@ -46,6 +48,26 @@ function DrawerLayout() {
           title: t("drawer.home"),
           drawerIcon: ({ color }) => (
             <Ionicons name="home-outline" size={20} color={color} />
+          ),
+        }}
+        />
+      <Drawer.Screen
+        name="jogador"
+        component={JogadorScreen}
+        options={{
+          title: t("drawer.jogador"),
+          drawerIcon: ({ color }) => (
+            <Ionicons name="person-outline" size={20} color={color} />
+          ),
+        }}
+      />
+      <Drawer.Screen
+        name="classicos"
+        component={ClassicosScreen}
+        options={{
+          title: t("drawer.classico"),
+          drawerIcon: ({ color }) => (
+            <Ionicons name="flame-outline" size={20} color={color} />
           ),
         }}
       />
@@ -82,12 +104,12 @@ function DrawerLayout() {
         />
         
       <Drawer.Screen
-        name="IApikachu"
+        name="ScauterIA"
         component={AnalyticsScreen}
         options={{
           title: t("drawer.iapikachu"),
           drawerIcon: ({ color }) => (
-            <Ionicons name="bulb-outline" size={20} color={color} />
+            <Ionicons name="flash-outline" size={20} color={color} />
           ),
         }}
       />
@@ -98,7 +120,7 @@ function DrawerLayout() {
         options={{
           title: t("drawer.cartas"),
           drawerIcon: ({ color }) => (
-            <Ionicons name="pricetag-outline" size={20} color={color} />
+            <Ionicons name="card-outline" size={20} color={color} />
           ),
         }}
       />
@@ -119,17 +141,17 @@ function DrawerLayout() {
         options={{
           title: t("drawer.decks"),
           drawerIcon: ({ color }) => (
-            <Ionicons name="layers-outline" size={20} color={color} />
+            <Ionicons name="albums-outline" size={20} color={color} />
           ),
         }}
       />
       <Drawer.Screen
-        name="jogador"
-        component={JogadorScreen}
+        name="Cadastros"
+        component={PlayerScreen}
         options={{
-          title: t("drawer.jogador"),
+          title: t("drawer.cadastros"),
           drawerIcon: ({ color }) => (
-            <Ionicons name="person-outline" size={20} color={color} />
+            <Ionicons name="create-outline" size={20} color={color} />
           ),
         }}
       />
@@ -140,7 +162,7 @@ function DrawerLayout() {
         options={{
           title: t("drawer.sugestao"),
           drawerIcon: ({ color }) => (
-            <Ionicons name="bulb-outline" size={20} color={color} />
+            <Ionicons name="chatbubbles-outline" size={20} color={color} />
           ),
         }}
       />

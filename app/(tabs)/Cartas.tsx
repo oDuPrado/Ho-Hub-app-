@@ -19,11 +19,14 @@ import {
   doc,
   getDocs,
   setDoc,
-} from "firebase/firestore"; // (você usa updateDoc também, mas não vi neste code)
+} from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
 
-import { useTranslation } from "react-i18next"; // <--- i18n
+import { useTranslation } from "react-i18next";
+import * as Animatable from "react-native-animatable";
+import { Ionicons } from "@expo/vector-icons";
 
+// -------------------- Tipagens Originais --------------------
 interface CardData {
   id: string;
   name: string;
@@ -65,8 +68,9 @@ interface CreatingState {
   obs: string;
 }
 
+// -------------------- Componente Principal --------------------
 export default function CardsSearchScreen() {
-  const { t } = useTranslation(); // <--- i18n Hook
+  const { t } = useTranslation();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredCards, setFilteredCards] = useState<CardData[]>([]);
@@ -93,6 +97,7 @@ export default function CardsSearchScreen() {
     obs: "",
   });
 
+  // -------------------- Efeito Inicial (Carrega coleções e user) --------------------
   useEffect(() => {
     (async () => {
       const uid = await AsyncStorage.getItem("@userId");
@@ -115,11 +120,13 @@ export default function CardsSearchScreen() {
     fetchCollections();
   }, []);
 
+  // -------------------- Função de busca de Cartas --------------------
   async function searchCard(query: string) {
     setLoading(true);
     try {
       const text = query.trim();
       if (/^\d+$/.test(text)) {
+        // se for só número, ignora
         setFilteredCards([]);
         setLoading(false);
         return;
@@ -159,10 +166,8 @@ export default function CardsSearchScreen() {
         return;
       }
 
-      // Assume nome
-      const nameUrl = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(
-        text
-      )}"`;
+      // Assume que o usuário digitou nome
+      const nameUrl = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
       const resp2 = await fetch(nameUrl);
       const data2 = await resp2.json();
       if (data2 && data2.data) setFilteredCards(data2.data);
@@ -180,7 +185,7 @@ export default function CardsSearchScreen() {
     searchCard(txt);
   }
 
-  // ------------------- DETALHES  -------------------
+  // -------------------- Modal de Detalhes --------------------
   function openCardModal(card: CardData) {
     setSelectedCard(card);
     setDetailModalVisible(true);
@@ -190,7 +195,7 @@ export default function CardsSearchScreen() {
     setDetailModalVisible(false);
   }
 
-  // --------------- CRIAR (Tenho/Quero) ---------------
+  // -------------------- Criar Post: Tenho/Quero --------------------
   function handleHaveOrWant(card: CardData, action: "have" | "want") {
     setCreateState({
       visible: true,
@@ -208,7 +213,7 @@ export default function CardsSearchScreen() {
     setCreateState((prev) => ({ ...prev, visible: false, card: null }));
   }
 
-  // --------------- Salvar post --------------
+  // -------------------- Salvar Post (Lógica original) --------------------
   async function handleSavePost() {
     if (!playerId) {
       Alert.alert(t("common.error"), t("cartas.alerts.not_logged_in"));
@@ -218,7 +223,7 @@ export default function CardsSearchScreen() {
       Alert.alert(t("common.error"), t("cartas.alerts.no_card_selected"));
       return;
     }
-    // Verifica limite
+    // Limite de 5 post
     const collRef = collection(db, "trade");
     const snapshot = await getDocs(collRef);
     const userPosts = snapshot.docs.filter(
@@ -232,7 +237,7 @@ export default function CardsSearchScreen() {
 
     let finalPrice = "";
     if (createState.type === "sale") {
-      // Se for venda, pega price
+      // Se for venda
       if (createState.priceMode === "manual") {
         if (!createState.priceValue.trim()) {
           Alert.alert(t("common.error"), t("cartas.alerts.no_price"));
@@ -246,7 +251,6 @@ export default function CardsSearchScreen() {
     } else if (createState.type === "trade") {
       finalPrice = "Troca";
     } else {
-      // want
       finalPrice = "Quero";
     }
 
@@ -271,38 +275,61 @@ export default function CardsSearchScreen() {
     }
   }
 
+  // -------------------- RENDER --------------------
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>{t("cartas.header")} (Pokémon TCG)</Text>
-      <TextInput
-        style={styles.searchInput}
-        placeholder={`${t("cartas.placeholders.search")} (Ex: "PGO 68")`}
-        placeholderTextColor="#999"
-        value={searchQuery}
-        onChangeText={handleSearchChange}
-      />
-      {loading && <ActivityIndicator size="large" color="#E3350D" />}
 
+      {/* Barra de busca */}
+      <Animatable.View animation="fadeInDown" style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder={`${t("cartas.placeholders.search")} (Ex: "PGO 68")`}
+          placeholderTextColor="#999"
+          value={searchQuery}
+          onChangeText={handleSearchChange}
+        />
+      </Animatable.View>
+
+      {loading && (
+        <View style={{ marginVertical: 10 }}>
+          <ActivityIndicator size="large" color="#E3350D" />
+        </View>
+      )}
+
+      {/* Lista de Resultados */}
       <ScrollView contentContainerStyle={styles.cardList}>
         {!loading && filteredCards.length === 0 && searchQuery.length > 0 && (
-          <Text style={styles.noResultsText}>
+          <Animatable.Text
+            style={styles.noResultsText}
+            animation="fadeIn"
+            duration={500}
+          >
             {t("cartas.alerts.no_results")}
-          </Text>
+          </Animatable.Text>
         )}
 
         {filteredCards.map((card) => (
-          <TouchableOpacity
+          <Animatable.View
             key={card.id}
-            style={styles.cardItem}
-            onPress={() => openCardModal(card)}
+            style={styles.cardItemWrapper}
+            animation="fadeInUp"
+            duration={600}
           >
-            <Image
-              source={{ uri: card.images.small }}
-              style={styles.cardImage}
-              resizeMode="contain"
-            />
-            <Text style={styles.cardName}>{card.name}</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.cardItem}
+              onPress={() => openCardModal(card)}
+              activeOpacity={0.9}
+            >
+              <Image
+                source={{ uri: card.images.small }}
+                style={styles.cardImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.cardName}>{card.name}</Text>
+            </TouchableOpacity>
+          </Animatable.View>
         ))}
       </ScrollView>
 
@@ -313,13 +340,16 @@ export default function CardsSearchScreen() {
         transparent={false}
         onRequestClose={closeCardModal}
       >
-        <View style={styles.modalContainer}>
+        <SafeAreaView style={styles.modalContainer}>
           <ScrollView contentContainerStyle={styles.modalScroll}>
             {selectedCard && (
               <>
                 <Text style={styles.modalTitle}>{selectedCard.name}</Text>
 
-                <Image
+                <Animatable.Image
+                  animation="pulse"
+                  iterationCount="infinite"
+                  duration={6000}
                   source={{ uri: selectedCard.images.small }}
                   style={styles.modalImage}
                   resizeMode="contain"
@@ -331,33 +361,30 @@ export default function CardsSearchScreen() {
                       {t("cartas.details.updated_at", "Preço atualizado em")}:{" "}
                       {selectedCard.tcgplayer.updatedAt}
                     </Text>
+
                     <View style={styles.rarityRow}>
-                      {Object.keys(selectedCard.tcgplayer.prices).map(
-                        (rarity) => {
-                          const priceData =
-                            selectedCard.tcgplayer!.prices[rarity];
-                          return (
-                            <View key={rarity} style={styles.rarityCard}>
-                              <Text style={styles.rarityCardTitle}>
-                                {rarity}
-                              </Text>
-                              <Text style={styles.rarityCardPrice}>
-                                Low: ${priceData.low?.toFixed(2) ?? "--"}
-                              </Text>
-                              <Text style={styles.rarityCardPrice}>
-                                Mid: ${priceData.mid?.toFixed(2) ?? "--"}
-                              </Text>
-                              <Text style={styles.rarityCardPrice}>
-                                Market: ${priceData.market?.toFixed(2) ?? "--"}
-                              </Text>
-                              <Text style={styles.rarityCardPrice}>
-                                High: ${priceData.high?.toFixed(2) ?? "--"}
-                              </Text>
-                            </View>
-                          );
-                        }
-                      )}
+                      {Object.keys(selectedCard.tcgplayer.prices).map((rarity) => {
+                        const priceData = selectedCard.tcgplayer!.prices[rarity];
+                        return (
+                          <View key={rarity} style={styles.rarityCard}>
+                            <Text style={styles.rarityCardTitle}>{rarity}</Text>
+                            <Text style={styles.rarityCardPrice}>
+                              Low: ${priceData.low?.toFixed(2) ?? "--"}
+                            </Text>
+                            <Text style={styles.rarityCardPrice}>
+                              Mid: ${priceData.mid?.toFixed(2) ?? "--"}
+                            </Text>
+                            <Text style={styles.rarityCardPrice}>
+                              Market: ${priceData.market?.toFixed(2) ?? "--"}
+                            </Text>
+                            <Text style={styles.rarityCardPrice}>
+                              High: ${priceData.high?.toFixed(2) ?? "--"}
+                            </Text>
+                          </View>
+                        );
+                      })}
                     </View>
+
                     <TouchableOpacity
                       style={styles.linkButton}
                       onPress={() =>
@@ -365,6 +392,7 @@ export default function CardsSearchScreen() {
                         Linking.openURL(selectedCard.tcgplayer.url)
                       }
                     >
+                      <Ionicons name="open-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
                       <Text style={styles.linkButtonText}>
                         {t("cartas.details.open_tcgplayer", "Abrir TCGPlayer")}
                       </Text>
@@ -376,31 +404,38 @@ export default function CardsSearchScreen() {
                   </Text>
                 )}
 
+                {/* Botões TENHO / QUERO */}
                 <View style={styles.actionButtonsContainer}>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handleHaveOrWant(selectedCard, "have")}
-                  >
-                    <Text style={styles.actionButtonText}>
-                      {t("cartas.buttons.have")} {t("cartas.header")} 
-                      {/* Ex.: "Tenho Cartas" ou só "Tenho" */}
-                    </Text>
-                  </TouchableOpacity>
+                  <Animatable.View animation="bounceIn" delay={200}>
+                    <TouchableOpacity
+                      style={styles.actionButton}
+                      onPress={() => handleHaveOrWant(selectedCard, "have")}
+                    >
+                      <Ionicons name="checkmark-done" size={18} color="#FFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.actionButtonText}>
+                        {t("cartas.buttons.have")} 
+                      </Text>
+                    </TouchableOpacity>
+                  </Animatable.View>
 
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handleHaveOrWant(selectedCard, "want")}
-                  >
-                    <Text style={styles.actionButtonText}>
-                      {t("cartas.buttons.want")} {t("cartas.header")}
-                    </Text>
-                  </TouchableOpacity>
+                  <Animatable.View animation="bounceIn" delay={400}>
+                    <TouchableOpacity
+                      style={styles.actionButton}
+                      onPress={() => handleHaveOrWant(selectedCard, "want")}
+                    >
+                      <Ionicons name="heart" size={18} color="#FFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.actionButtonText}>
+                        {t("cartas.buttons.want")}
+                      </Text>
+                    </TouchableOpacity>
+                  </Animatable.View>
                 </View>
 
                 <TouchableOpacity
                   style={styles.closeButton}
                   onPress={closeCardModal}
                 >
+                  <Ionicons name="close" size={20} color="#FFF" style={{ marginRight: 6 }} />
                   <Text style={styles.closeButtonText}>
                     {t("common.close", "Fechar")}
                   </Text>
@@ -408,7 +443,7 @@ export default function CardsSearchScreen() {
               </>
             )}
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* Modal de Criação/Edição de Card */}
@@ -416,6 +451,7 @@ export default function CardsSearchScreen() {
         visible={createState.visible}
         animationType="slide"
         onRequestClose={closeCreateModal}
+        transparent={false}
       >
         <SafeAreaView style={styles.modalCreateContainer}>
           <ScrollView style={{ padding: 16 }}>
@@ -434,6 +470,7 @@ export default function CardsSearchScreen() {
                 />
                 <Text style={styles.modalText}>{createState.card.name}</Text>
 
+                {/* Se for TENHO -> Define sale ou trade */}
                 {createState.action === "have" && (
                   <>
                     <Text style={styles.modalLabel}>Tipo</Text>
@@ -441,25 +478,26 @@ export default function CardsSearchScreen() {
                       <TouchableOpacity
                         style={[
                           styles.switchTypeButton,
-                          createState.type === "sale" &&
-                            styles.switchTypeButtonActive,
+                          createState.type === "sale" && styles.switchTypeButtonActive,
                         ]}
                         onPress={() =>
                           setCreateState((prev) => ({ ...prev, type: "sale" }))
                         }
                       >
+                        <Ionicons name="cash-outline" size={16} color="#FFF" style={{ marginRight: 4 }}/>
                         <Text style={styles.switchTypeText}>Venda</Text>
                       </TouchableOpacity>
+
                       <TouchableOpacity
                         style={[
                           styles.switchTypeButton,
-                          createState.type === "trade" &&
-                            styles.switchTypeButtonActive,
+                          createState.type === "trade" && styles.switchTypeButtonActive,
                         ]}
                         onPress={() =>
                           setCreateState((prev) => ({ ...prev, type: "trade" }))
                         }
                       >
+                        <Ionicons name="swap-horizontal" size={16} color="#FFF" style={{ marginRight: 4 }}/>
                         <Text style={styles.switchTypeText}>Troca</Text>
                       </TouchableOpacity>
                     </View>
@@ -467,37 +505,30 @@ export default function CardsSearchScreen() {
                     {createState.type === "sale" && (
                       <>
                         <Text style={styles.modalLabel}>Preço</Text>
-                        <View
-                          style={{ flexDirection: "row", marginBottom: 12 }}
-                        >
+                        <View style={{ flexDirection: "row", marginBottom: 12 }}>
                           <TouchableOpacity
                             style={[
                               styles.switchTypeButton,
-                              createState.priceMode === "manual" &&
-                                styles.switchTypeButtonActive,
+                              createState.priceMode === "manual" && styles.switchTypeButtonActive,
                             ]}
                             onPress={() =>
-                              setCreateState((prev) => ({
-                                ...prev,
-                                priceMode: "manual",
-                              }))
+                              setCreateState((prev) => ({ ...prev, priceMode: "manual" }))
                             }
                           >
+                            <Ionicons name="create-outline" size={16} color="#FFF" style={{ marginRight:4 }}/>
                             <Text style={styles.switchTypeText}>Manual</Text>
                           </TouchableOpacity>
+
                           <TouchableOpacity
                             style={[
                               styles.switchTypeButton,
-                              createState.priceMode === "liga" &&
-                                styles.switchTypeButtonActive,
+                              createState.priceMode === "liga" && styles.switchTypeButtonActive,
                             ]}
                             onPress={() =>
-                              setCreateState((prev) => ({
-                                ...prev,
-                                priceMode: "liga",
-                              }))
+                              setCreateState((prev) => ({ ...prev, priceMode: "liga" }))
                             }
                           >
+                            <Ionicons name="stats-chart" size={16} color="#FFF" style={{ marginRight:4 }}/>
                             <Text style={styles.switchTypeText}>Liga-%</Text>
                           </TouchableOpacity>
                         </View>
@@ -507,10 +538,7 @@ export default function CardsSearchScreen() {
                             style={styles.modalInput}
                             value={createState.priceValue}
                             onChangeText={(val) =>
-                              setCreateState((prev) => ({
-                                ...prev,
-                                priceValue: val,
-                              }))
+                              setCreateState((prev) => ({ ...prev, priceValue: val }))
                             }
                             placeholder='Ex: "R$ 15,00"'
                             placeholderTextColor="#888"
@@ -522,14 +550,10 @@ export default function CardsSearchScreen() {
                                 key={opt}
                                 style={[
                                   styles.switchTypeButton,
-                                  createState.ligaPercent === opt &&
-                                    styles.switchTypeButtonActive,
+                                  createState.ligaPercent === opt && styles.switchTypeButtonActive,
                                 ]}
                                 onPress={() =>
-                                  setCreateState((prev) => ({
-                                    ...prev,
-                                    ligaPercent: opt,
-                                  }))
+                                  setCreateState((prev) => ({ ...prev, ligaPercent: opt }))
                                 }
                               >
                                 <Text style={styles.switchTypeText}>{opt}</Text>
@@ -544,10 +568,7 @@ export default function CardsSearchScreen() {
 
                 {createState.action === "want" && (
                   <Text style={[styles.modalLabel, { marginBottom: 6 }]}>
-                    {t(
-                      "cartas.want_text",
-                      'Você deseja obter esta carta (tipo: "want").'
-                    )}
+                    {t("cartas.want_text", 'Você deseja obter esta carta (tipo: "want").')}
                   </Text>
                 )}
 
@@ -568,11 +589,14 @@ export default function CardsSearchScreen() {
                     style={[styles.button, { backgroundColor: "#999" }]}
                     onPress={closeCreateModal}
                   >
+                    <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight:4 }}/>
                     <Text style={styles.buttonText}>
                       {t("calendar.form.cancel_button", "Cancelar")}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.button} onPress={handleSavePost}>
+
+                  <TouchableOpacity style={[styles.button, { marginLeft: 8 }]} onPress={handleSavePost}>
+                    <Ionicons name="send" size={16} color="#FFF" style={{ marginRight:4 }}/>
                     <Text style={styles.buttonText}>
                       {t("calendar.registration.submit_button", "Enviar")}
                     </Text>
@@ -587,6 +611,7 @@ export default function CardsSearchScreen() {
   );
 }
 
+// -------------------- ESTILOS VISUAIS MELHORADOS --------------------
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
@@ -603,16 +628,22 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: SECONDARY,
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 10,
     fontWeight: "bold",
   },
-  searchInput: {
+  searchContainer: {
+    flexDirection: "row",
     backgroundColor: GRAY,
-    color: SECONDARY,
     borderRadius: 8,
-    padding: 10,
-    fontSize: 16,
+    alignItems: "center",
+    paddingHorizontal: 10,
     marginBottom: 10,
+  },
+  searchInput: {
+    flex: 1,
+    color: SECONDARY,
+    paddingVertical: 6,
+    fontSize: 16,
   },
   cardList: {
     alignItems: "center",
@@ -621,13 +652,17 @@ const styles = StyleSheet.create({
   noResultsText: {
     color: SECONDARY,
     marginTop: 10,
+    fontSize: 16,
+    fontStyle: "italic",
+  },
+  cardItemWrapper: {
+    width: "95%",
+    marginBottom: 10,
   },
   cardItem: {
     backgroundColor: "#292929",
     padding: 10,
-    marginVertical: 6,
     borderRadius: 8,
-    width: "95%",
     alignItems: "center",
   },
   cardImage: {
@@ -639,7 +674,10 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     fontSize: 16,
     textAlign: "center",
+    fontWeight: "600",
   },
+
+  // ------------------ Modais ------------------
   modalContainer: {
     flex: 1,
     backgroundColor: DARK,
@@ -690,12 +728,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   linkButton: {
+    flexDirection: "row",
     backgroundColor: PRIMARY,
     borderRadius: 6,
     paddingVertical: 8,
     paddingHorizontal: 16,
     marginTop: 10,
     alignSelf: "center",
+    alignItems: "center",
   },
   linkButtonText: {
     color: SECONDARY,
@@ -709,10 +749,13 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   actionButton: {
+    flexDirection: "row",
     backgroundColor: "#4A4A4A",
     borderRadius: 6,
     paddingVertical: 10,
     paddingHorizontal: 20,
+    alignItems: "center",
+    marginHorizontal: 4,
   },
   actionButtonText: {
     color: SECONDARY,
@@ -720,18 +763,21 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   closeButton: {
+    flexDirection: "row",
     backgroundColor: PRIMARY,
     padding: 12,
     borderRadius: 8,
     alignSelf: "center",
     marginTop: 30,
+    alignItems: "center",
   },
   closeButtonText: {
     color: SECONDARY,
     fontWeight: "bold",
     fontSize: 16,
   },
-  // Modal Create
+
+  // ------------------ Modal Create ------------------
   modalCreateContainer: {
     flex: 1,
     backgroundColor: DARK,
@@ -742,11 +788,13 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   switchTypeButton: {
+    flexDirection: "row",
     backgroundColor: "#444",
     borderRadius: 6,
     paddingVertical: 6,
     paddingHorizontal: 12,
     marginRight: 8,
+    alignItems: "center",
   },
   switchTypeButtonActive: {
     backgroundColor: "#666",
@@ -762,20 +810,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginBottom: 8,
+    marginTop: 4,
   },
   modalButtons: {
     flexDirection: "row",
-    justifyContent: "space-around",
     marginTop: 16,
+    justifyContent: "center",
   },
   button: {
+    flexDirection: "row",
     backgroundColor: PRIMARY,
     borderRadius: 6,
     paddingHorizontal: 16,
     paddingVertical: 8,
+    alignItems: "center",
   },
   buttonText: {
     color: SECONDARY,
     fontWeight: "bold",
+    marginLeft: 4,
   },
 });
