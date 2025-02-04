@@ -37,12 +37,7 @@ import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
 
-interface MatchData {
-  id: string;
-  outcomeNumber?: number; // 1 (P1 vence), 2 (P2 vence), 3 (empate), 10 (WO)
-  player1_id?: string;
-  player2_id?: string;
-}
+import { fetchAllMatches, MatchData } from "../../lib/matchService"; // Importa a função
 
 interface RivalData {
   rivalId: string;
@@ -130,6 +125,8 @@ export default function HomeScreen() {
   const [selectedCity, setSelectedCity] = useState<string>("");
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
 
+  
+
   // ------------------------------------------------
   // Efeito Inicial (carregar user e stats + filter)
   // ------------------------------------------------
@@ -156,12 +153,14 @@ export default function HomeScreen() {
           if (found) setAvatarUri(found.uri);
         }
 
-        // Carrega Partidas via nova função
+        // Usa a função centralizada para buscar as partidas, respeitando o filtro definido na Home
         const allMatches = await fetchAllMatches();
+        // Filtra somente as partidas do usuário
         const userMatches = allMatches.filter(
           (m) => m.player1_id === storedId || m.player2_id === storedId
         );
-
+        setMatches(userMatches);
+        
         // Stats
         const newStats = computeBasicStats(storedId, userMatches);
         setStats(newStats);
