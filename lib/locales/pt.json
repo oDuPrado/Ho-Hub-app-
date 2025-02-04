@@ -403,16 +403,19 @@
   },
   
     "common": {
-      "error": "Erro",
-      "success": "Sucesso",
-      "edit": "Editar",
-      "confirm": "Confirmar",
-      "decline": "Recusar",
-      "delete": "Excluir",
-      "close": "Fechar",
-      "confirmation_title": "Confirmação",
-      "coming_soon": "Em breve",
-      "attention": "Atenção"
+    "error": "Erro",
+    "success": "Sucesso",
+    "edit": "Editar",
+    "confirm": "Confirmar",
+    "decline": "Recusar",
+    "delete": "Excluir",
+    "close": "Fechar",
+    "confirmation_title": "Confirmação",
+    "coming_soon": "Em breve",
+    "attention": "Atenção",
+    "config": "Configuração",
+    "select_city": "Selecionar cidade",
+    "select_league": "Selecionar liga"
     }
   }
   

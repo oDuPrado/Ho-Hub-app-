@@ -1,5 +1,3 @@
-// app/(tabs)/home.tsx
-
 import React, { useEffect, useState, useRef } from "react";
 import {
   View,
@@ -15,6 +13,10 @@ import {
   Linking,
   Easing,
   Modal,
+  FlatList,
+  LayoutAnimation,
+  UIManager,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
@@ -24,11 +26,13 @@ import {
   doc,
   getDoc,
   collection,
+  query,
+  where,
 } from "firebase/firestore";
 
 import { auth, db } from "../../lib/firebaseConfig";
 import titles, { TitleItem, PlayerStats } from "../titlesConfig";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
 
 // ---------- Interfaces ----------
@@ -49,6 +53,11 @@ interface RivalData {
   wrPercentage: number;
 }
 
+interface TitleWithProgress extends TitleItem {
+  progress: number;
+  locked: boolean;
+}
+
 // Avatares
 const avatarList = [
   { id: 1, uri: require("../../assets/images/avatar/avatar1.jpg") },
@@ -61,14 +70,17 @@ const avatarList = [
   { id: 8, uri: require("../../assets/images/avatar/avatar8.jpg") },
 ];
 
-// Títulos + Progress
-interface TitleWithProgress extends TitleItem {
-  progress: number;
-  locked: boolean;
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
 export default function HomeScreen() {
   const router = useRouter();
+
+  const [matches, setMatches] = useState<MatchData[]>([]);
 
   // Loading e Cálculos
   const [loading, setLoading] = useState(true);
@@ -103,8 +115,19 @@ export default function HomeScreen() {
   const [validCollections, setValidCollections] = useState<any[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
 
+  // ------------ NOVO: Modal de Filtro (Liga) ------------
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+
+  const [cities, setCities] = useState<string[]>([]);
+  const [selectedCity, setSelectedCity] = useState<string>("");
+  const [leagues, setLeagues] = useState<any[]>([]);
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
+
+  const [showCities, setShowCities] = useState(false);
+  const [showLeagues, setShowLeagues] = useState(false);
+
   // ----------------------------------------
-  // Efeito Inicial
+  // Efeito Inicial (carregar user e stats)
   // ----------------------------------------
   useEffect(() => {
     (async () => {
@@ -157,18 +180,96 @@ export default function HomeScreen() {
   // ----------------------------------------
   // FUNÇÕES PRINCIPAIS
   // ----------------------------------------
-
-  // Buscar TODAS as partidas
+  
   async function fetchAllMatches(): Promise<MatchData[]> {
-    const snap = await getDocs(collectionGroup(db, "matches"));
-    const arr: MatchData[] = [];
-    snap.forEach((docSnap) => {
-      arr.push({ id: docSnap.id, ...docSnap.data() } as MatchData);
-    });
-    return arr;
+    try {
+      // 1) Carrega do AsyncStorage
+      const leagueId = await AsyncStorage.getItem("@leagueId");
+      const storedUserId = await AsyncStorage.getItem("@userId");
+      const leaguesRef = collection(db, "leagues");
+      const leaguesSnap = await getDocs(leaguesRef);
+      console.log("📂 Ligaa no banco:", leaguesSnap.docs.map((doc) => doc.id));
+      console.log("🔥 Liga ID final:", JSON.stringify(leagueId));
+  
+      console.log("🟡 leagueId do AsyncStorage:", leagueId);
+      console.log("🟡 storedUserId do AsyncStorage:", storedUserId);
+  
+      if (!leagueId || !storedUserId) {
+        console.warn("⚠️ Nenhuma liga ou usuário selecionado.");
+        return [];
+      }
+  
+      // 2) Cria array para guardar todas as partidas do usuário
+      let matches: MatchData[] = [];
+  
+      // 3) Acessa subcoleção tournaments dentro da liga
+      console.log(`🔍 Buscando torneios em /leagues/${leagueId}/tournaments ...`);
+      const tournamentsRef = collection(db, `leagues/${leagueId}/tournaments`);
+      const tournamentsSnap = await getDocs(tournamentsRef);
+      console.log("📂 Torneios no banco:", tournamentsSnap.docs.map((doc) => doc.id));
+            
+      if (tournamentsSnap.empty) {
+        console.log(`🚨 Nenhum torneio encontrado para a liga ${leagueId}`);
+        return [];
+      }
+  
+      console.log(`✅ Torneios encontrados: ${tournamentsSnap.docs.length}`);
+  
+      // 4) Para cada torneio (ex.: "Liga_Semanal_#35_24-11-008418")
+      for (const tournamentDoc of tournamentsSnap.docs) {
+        const tournamentId = tournamentDoc.id;
+        console.log(`📌 Torneio encontrado: ${tournamentId}`);
+  
+        // 5) Pega subcoleção "rounds"
+        const roundsRef = collection(db, `leagues/${leagueId}/tournaments/${tournamentId}/rounds`);
+        const roundsSnap = await getDocs(roundsRef);
+  
+        if (roundsSnap.empty) {
+          console.log(`⚠️ Nenhuma rodada encontrada no torneio "${tournamentId}"`);
+          continue;
+        }
+  
+        console.log(`🔄 Rodadas encontradas no torneio "${tournamentId}": ${roundsSnap.docs.length}`);
+  
+        // 6) Para cada rodada
+        for (const roundDoc of roundsSnap.docs) {
+          const roundId = roundDoc.id;
+          console.log(`   🎯 Verificando rodada: ${roundId}`);
+  
+          // 7) Subcoleção "matches"
+          const matchesRef = collection(db, `leagues/${leagueId}/tournaments/${tournamentId}/rounds/${roundId}/matches`);
+          const matchesSnap = await getDocs(matchesRef);
+  
+          if (matchesSnap.empty) {
+            console.log(`   ⚠️ Nenhuma partida encontrada na rodada "${roundId}"`);
+            continue;
+          }
+  
+          console.log(`   🎮 Partidas encontradas na rodada "${roundId}": ${matchesSnap.docs.length}`);
+  
+          // 8) Para cada partida, filtra as do usuário
+          matchesSnap.forEach((docSnap) => {
+            const matchData = docSnap.data() as MatchData;
+            console.log(`     🆚 Partida ${docSnap.id} - Player1: ${matchData.player1_id}, Player2: ${matchData.player2_id}`);
+  
+            if (matchData.player1_id === storedUserId || matchData.player2_id === storedUserId) {
+              matches.push({ ...matchData, id: docSnap.id });
+
+            }
+          });
+        }
+      }
+  
+      console.log(`✅ Total de partidas do usuário encontradas: ${matches.length}`);
+      return matches;
+  
+    } catch (error) {
+      console.error("🔥 Erro ao buscar partidas:", error);
+      return [];
+    }
   }
 
-  // Computar stats simples (wins, losses, draws)
+    
   function computeBasicStats(uId: string, userMatches: MatchData[]): PlayerStats {
     let wins = 0,
       losses = 0,
@@ -207,7 +308,6 @@ export default function HomeScreen() {
     };
   }
 
-  // Calcular Títulos
   async function computeTitlesProgress(st: PlayerStats) {
     setIsCalculating(true);
 
@@ -217,28 +317,24 @@ export default function HomeScreen() {
       return { ...t, locked, progress };
     });
 
-    // Filtra locked e ordena
     const lockedOnly = all.filter((tw) => tw.locked);
     lockedOnly.sort((a, b) => b.progress - a.progress);
 
-    // Pega top 3
     const top3 = lockedOnly.slice(0, 3);
     setClosestTitles(top3);
 
     setIsCalculating(false);
   }
 
-  // Cálculo de progresso (manual)
   function calcProgress(title: TitleItem, stats: PlayerStats): number {
-    if (title.condition(stats)) return 1; // Já desbloqueado
+    if (title.condition(stats)) return 1;
     let progress = 0;
 
-    // Comparações manuais
     switch (title.id) {
-      case 101: // Mestre Kanto
+      case 101:
         progress = stats.wins / 20;
         break;
-      case 999: // A Jornada Começa
+      case 999:
         progress = stats.wins / 1;
         break;
       case 102:
@@ -283,15 +379,12 @@ export default function HomeScreen() {
       default:
         progress = 0;
     }
-
     return Math.min(progress, 1);
   }
 
   // ----------------------------------------
   // RIVAL
   // ----------------------------------------
-
-  // Buscar "fullname" do rival no Firestore
   async function getPlayerName(rid: string): Promise<string> {
     try {
       const docRef = doc(db, "players", rid);
@@ -307,7 +400,6 @@ export default function HomeScreen() {
   }
 
   async function computeBiggestRival(uId: string, userMatches: MatchData[]): Promise<RivalData | null> {
-    // Monta um map { rivalId: { matches, userWins, rivalWins, lastWinner } }
     const rivalsMap: Record<string, { matches: number; userWins: number; rivalWins: number; lastWinner: "user"|"rival"|"empate" }> = {};
 
     userMatches.forEach((mm) => {
@@ -318,7 +410,6 @@ export default function HomeScreen() {
       if (!rivalsMap[rId]) {
         rivalsMap[rId] = { matches: 0, userWins: 0, rivalWins: 0, lastWinner: "empate" };
       }
-
       rivalsMap[rId].matches += 1;
 
       const outcome = mm.outcomeNumber || 0;
@@ -351,7 +442,6 @@ export default function HomeScreen() {
       }
     });
 
-    // Achar rival com maior 'matches'
     let topRivalId = "";
     let topMatches = 0;
 
@@ -361,7 +451,7 @@ export default function HomeScreen() {
         topRivalId = rid;
       }
     }
-    if (!topRivalId) return null; // sem rival
+    if (!topRivalId) return null;
 
     const data = rivalsMap[topRivalId];
     const userWins = data.userWins;
@@ -369,7 +459,6 @@ export default function HomeScreen() {
     const wr = totalMatches > 0 ? (userWins / totalMatches) * 100 : 0;
 
     const name = await getPlayerName(topRivalId);
-
     return {
       rivalId: topRivalId,
       rivalName: name,
@@ -386,48 +475,42 @@ export default function HomeScreen() {
       setRivalInfo(null);
       return;
     }
-    // Carrega do AsyncStorage
     const oldRivalId = await AsyncStorage.getItem("@lastRivalId");
-
     setRivalInfo(newRival);
 
-    // Se rival mudou
     if (oldRivalId !== newRival.rivalId) {
       setRivalModalVisible(true);
       await AsyncStorage.setItem("@lastRivalId", newRival.rivalId);
     }
   }
 
-  // Função para pegar frases aleatórias conforme o resultado
-const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
-  const phrases = {
-    user: [
-      "Tá voando, hein?! Venceu com estilo! 🚀🔥",
-      "Foi um massacre! O rival nem viu de onde veio. 🎯😎",
-      "Deu aula! O rival ainda tá tentando entender o que aconteceu. 📚😂",
-      "Vitória confirmada! Dá até pra soltar aquele 'EZ'. 😏",
-      "Boa! O rival já tá procurando tutorial no YouTube. 🎥😂"
-    ],
-    rival: [
-      "Eita... levou aquela coça! Tenta de novo! 😂",
-      "O rival mandou um 'GG EZ'... não vai deixar barato, né? 😡🔥",
-      "Bom... pelo menos agora você sabe como perder com estilo. 😆",
-      "Essa foi feia, hein... Mas é errando que se aprende! Ou não. 🤷‍♂️",
-      "A derrota veio, mas o drama é opcional. Levanta e luta de novo! 🥋🔥"
-    ],
-    empate: [
-      "Dois titãs colidiram... e ninguém venceu! ⚡🤜🤛",
-      "Empate... Que tal um desempate pra ver quem é o verdadeiro campeão? 🏆",
-      "Nada definido ainda! Próxima batalha decide tudo. 🔥",
-      "Empate?! Dá pra aceitar isso? Bora revanche AGORA! 🤨",
-      "Equilíbrio total! Um verdadeiro duelo de gigantes. 💥"
-    ]
-  };
-
-  // Escolhe aleatoriamente uma frase da categoria correspondente
-  const chosenPhrases = phrases[result] || [];
-  return chosenPhrases[Math.floor(Math.random() * chosenPhrases.length)];
-};
+  function getRandomRivalPhrase(result: "user" | "rival" | "empate") {
+    const phrases = {
+      user: [
+        "Tá voando, hein?! Venceu com estilo! 🚀🔥",
+        "Foi um massacre! O rival nem viu de onde veio. 🎯😎",
+        "Deu aula! O rival ainda tá tentando entender o que aconteceu. 📚😂",
+        "Vitória confirmada! Dá até pra soltar aquele 'EZ'. 😏",
+        "Boa! O rival já tá procurando tutorial no YouTube. 🎥😂",
+      ],
+      rival: [
+        "Eita... levou aquela coça! Tenta de novo! 😂",
+        "O rival mandou um 'GG EZ'... não vai deixar barato, né? 😡🔥",
+        "Bom... pelo menos agora você sabe como perder com estilo. 😆",
+        "Essa foi feia, hein... Mas é errando que se aprende! Ou não. 🤷‍♂️",
+        "A derrota veio, mas o drama é opcional. Levanta e luta de novo! 🥋🔥",
+      ],
+      empate: [
+        "Dois titãs colidiram... e ninguém venceu! ⚡🤜🤛",
+        "Empate... Que tal um desempate pra ver quem é o verdadeiro campeão? 🏆",
+        "Nada definido ainda! Próxima batalha decide tudo. 🔥",
+        "Empate?! Dá pra aceitar isso? Bora revanche AGORA! 🤨",
+        "Equilíbrio total! Um verdadeiro duelo de gigantes. 💥",
+      ],
+    };
+    const chosenPhrases = phrases[result] || [];
+    return chosenPhrases[Math.floor(Math.random() * chosenPhrases.length)];
+  }
 
   // ============= BOTÕES =============
   async function handleLogout() {
@@ -476,6 +559,68 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
     setCollectionsModalVisible(false);
   }
 
+  // ============= MODAL FILTRO =============
+  const openFilterModal = () => {
+    setFilterModalVisible(true);
+    fetchCities();
+  };
+  const closeFilterModal = () => {
+    setFilterModalVisible(false);
+    setShowCities(false);
+    setShowLeagues(false);
+  };
+
+  async function fetchCities() {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, "leagues"));
+      const citySet = new Set<string>();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.city) {
+          citySet.add(data.city);
+        }
+      });
+      setCities(Array.from(citySet));
+    } catch (error) {
+      console.error("Erro ao buscar cidades:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchLeaguesByCity(cityName: string) {
+    try {
+      setLoading(true);
+      setSelectedCity(cityName);
+      setShowLeagues(false);
+
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+      const qCity = query(collection(db, "leagues"), where("city", "==", cityName));
+      const citySnapshot = await getDocs(qCity);
+
+      const leaguesList: any[] = [];
+      citySnapshot.forEach((doc) => {
+        leaguesList.push({
+          id: doc.id,
+          ...doc.data(),
+        });
+      });
+      setLeagues(leaguesList);
+    } catch (error) {
+      console.error("Erro ao buscar ligas por cidade:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSelectLeague(leagueId: string) {
+    setSelectedLeagueId(leagueId);
+    // Salvar no AsyncStorage para filtrar dados no fetchAllMatches, se quiser
+    await AsyncStorage.setItem("@leagueId", leagueId);
+  }
+
   // ============= RENDER =============
   if (loading) {
     return (
@@ -492,7 +637,6 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
     );
   }
 
-  // Stats
   const total = stats.matchesTotal;
   const wr = total > 0 ? ((stats.wins / total) * 100).toFixed(1) : "0";
 
@@ -507,6 +651,11 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
           <Image source={avatarSource} style={styles.avatar} />
           <Text style={styles.userName}>{userName}</Text>
         </View>
+
+        {/* Ícone de engrenagem no canto direito */}
+        <TouchableOpacity style={styles.gearButton} onPress={openFilterModal}>
+          <Ionicons name="settings" size={28} color="#E3350D" />
+        </TouchableOpacity>
       </View>
 
       <ImageBackground
@@ -514,7 +663,7 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
         style={styles.backgroundImage}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Stats */}
+          {/* STATS */}
           <View style={styles.statsContainer}>
             {renderStatCard("Vitórias", stats.wins, "trophy", "#E3350D", 100)}
             {renderStatCard("Derrotas", stats.losses, "skull", "#fff", 150)}
@@ -524,14 +673,13 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
             {renderStatCard("Oponentes", stats.uniqueOpponents, "account-group", "#9980FA", 350)}
           </View>
 
-          {/* Rival Card */}
+          {/* RIVAL CARD */}
           {rivalInfo && (
             <Animatable.View
               style={styles.rivalCard}
               animation="fadeInDown"
               delay={350}
             >
-              {/* Ícone Rival */}
               <MaterialCommunityIcons name="sword-cross" size={30} color="#E3350D" />
               <Animatable.Text
                 animation="pulse"
@@ -541,7 +689,6 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
                 Rival Atual
               </Animatable.Text>
 
-              {/* Corpo do Rival */}
               <View style={styles.rivalBody}>
                 <Text style={styles.rivalName}>{rivalInfo.rivalName}</Text>
                 <Text style={styles.rivalStats}>
@@ -554,7 +701,7 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
             </Animatable.View>
           )}
 
-          {/* Títulos + progress */}
+          {/* TÍTULOS + PROGRESS */}
           <Animatable.View
             animation="fadeInUp"
             style={styles.titlesContainer}
@@ -575,31 +722,28 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
           </Animatable.View>
         </ScrollView>
 
-        {/* BOTÕES NO FUNDO (3) */}
+        {/* BOTÕES NO FUNDO */}
         <View style={styles.bottomButtons}>
-          {/* Coleções Válidas */}
           <TouchableOpacity style={styles.validCollectionsButton} onPress={handleOpenCollections}>
-            <MaterialCommunityIcons name={"book" as any} size={20} color="#FFF" />
+            <MaterialCommunityIcons name={"book"} size={20} color="#FFF" />
             <Text style={[styles.bottomButtonText, { color: "#FFF", marginLeft: 6 }]}>
               Coleções Válidas
             </Text>
           </TouchableOpacity>
 
-          {/* Doar */}
           <TouchableOpacity style={styles.donateButton} onPress={handleDonate}>
-            <MaterialCommunityIcons name={"hand-coin" as any} size={20} color="#E3350D" />
+            <MaterialCommunityIcons name={"hand-coin"} size={20} color="#E3350D" />
             <Text style={[styles.bottomButtonText, { color: "#E3350D" }]}>Doar</Text>
           </TouchableOpacity>
 
-          {/* Sair */}
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <MaterialCommunityIcons name={"logout" as any} size={20} color="#FFF" />
+            <MaterialCommunityIcons name={"logout"} size={20} color="#FFF" />
             <Text style={[styles.bottomButtonText, { color: "#FFF" }]}>Sair</Text>
           </TouchableOpacity>
         </View>
       </ImageBackground>
 
-      {/* MODAL: Coleções Válidas */}
+      {/* MODAL DE COLEÇÕES VÁLIDAS */}
       <Modal
         visible={collectionsModalVisible}
         animationType="slide"
@@ -610,7 +754,7 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={closeCollectionsModal} style={{ marginRight: 10 }}>
-                <MaterialCommunityIcons name={"arrow-left" as any} size={24} color="#FFF" />
+                <MaterialCommunityIcons name={"arrow-left"} size={24} color="#FFF" />
               </TouchableOpacity>
               <Text style={styles.modalTitle}>Coleções Válidas</Text>
             </View>
@@ -622,7 +766,7 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
                   {validCollections.map((set: any) => (
                     <View key={set.id} style={styles.collectionCard}>
                       <MaterialCommunityIcons
-                        name={"star-four-points-outline" as any}
+                        name={"star-four-points-outline"}
                         size={30}
                         color="#E3350D"
                         style={{ marginRight: 10 }}
@@ -640,7 +784,7 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
         </View>
       </Modal>
 
-      {/* MODAL de Rival (quando muda) */}
+      {/* MODAL DE RIVAL (quando muda) */}
       <Modal
         visible={rivalModalVisible}
         animationType="fade"
@@ -658,7 +802,6 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
                 </Text>
               </>
             )}
-
             <TouchableOpacity
               style={styles.closeRivalModalBtn}
               onPress={() => setRivalModalVisible(false)}
@@ -668,10 +811,148 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
           </Animatable.View>
         </View>
       </Modal>
+
+      {/* MODAL DE FILTRO (Cidade/Liga) */}
+      <Modal
+        visible={filterModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeFilterModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalFilterContainer}>
+            <Text style={styles.filterModalTitle}>Selecionar Filtro</Text>
+
+            {/* Botão expandir cidades */}
+            <TouchableOpacity
+              style={styles.expandButton}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
+                setShowCities(!showCities);
+              }}
+            >
+              <Text style={styles.expandButtonText}>Selecionar Cidade</Text>
+              <Ionicons
+                name={showCities ? "chevron-up" : "chevron-down"}
+                size={24}
+                color="#FF6F61"
+              />
+            </TouchableOpacity>
+
+            {showCities && (
+              <FlatList
+                style={styles.flatList}
+                data={cities}
+                keyExtractor={(item) => item}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.cityItem}
+                    onPress={() => {
+                      fetchLeaguesByCity(item);
+                      setShowLeagues(true);
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name="map-marker"
+                      size={20}
+                      color="#FF6F61"
+                      style={{ marginRight: 8 }}
+                    />
+                    <Text style={styles.cityItemText}>{item}</Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+
+            {/* Botão expandir ligas */}
+            {selectedCity !== "" && (
+              <TouchableOpacity
+                style={styles.expandButton}
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
+                  setShowLeagues(!showLeagues);
+                }}
+              >
+                <Text style={styles.expandButtonText}>
+                  {selectedCity ? `Selecionar Liga (${selectedCity})` : "Selecionar Liga"}
+                </Text>
+                <Ionicons
+                  name={showLeagues ? "chevron-up" : "chevron-down"}
+                  size={24}
+                  color="#FF6F61"
+                />
+              </TouchableOpacity>
+            )}
+
+            {showLeagues && (
+              <FlatList
+                style={styles.flatList}
+                data={leagues}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.leagueItem,
+                      {
+                        backgroundColor:
+                          selectedLeagueId === item.id
+                            ? "#FF6F61"
+                            : darkerColor("#292929"),
+                      },
+                    ]}
+                    onPress={() => handleSelectLeague(item.id)}
+                  >
+                    <Ionicons
+                      name="ribbon"
+                      size={20}
+                      color="#FFF"
+                      style={{ marginRight: 8 }}
+                    />
+                    <Text style={styles.cityItemText}>
+                      {item.leagueName || "Sem Nome"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={async () => {
+                if (!selectedLeagueId) {
+                  Alert.alert("Seleção Inválida", "Por favor, selecione uma liga antes de salvar.");
+                  return;
+                }
+
+                await AsyncStorage.setItem("@leagueId", selectedLeagueId);
+                setFilterModalVisible(false); // Fecha o modal
+
+                try {
+                  const filteredMatches = await fetchAllMatches(); // Busca partidas da nova liga
+                  setMatches(filteredMatches); // Atualiza o estado das partidas
+                } catch (error) {
+                  console.error("Erro ao buscar partidas:", error);
+                  Alert.alert("Erro", "Falha ao carregar os dados.");
+                }
+              }}
+            >
+              <Text style={styles.saveButtonText}>Salvar</Text>
+            </TouchableOpacity>
+
+            {/* Botão Fechar */}
+            <TouchableOpacity
+              style={styles.closeModalButton}
+              onPress={closeFilterModal}
+            >
+              <Text style={styles.closeModalButtonText}>Fechar</Text>
+            </TouchableOpacity>
+      </View>
+        </View>
+      </Modal>
     </View>
   );
 
-  // RENDER FUNÇÕES
+  // Render do card de estat
   function renderStatCard(
     label: string,
     value: string | number,
@@ -694,9 +975,7 @@ const getRandomRivalPhrase = (result: "user" | "rival" | "empate") => {
   }
 }
 
-// ----------------------------------------------
-// Componente Título com Progresso
-// ----------------------------------------------
+// Componente Título + Progresso
 function TitleProgressCard({ item, delay }: { item: any; delay: number }) {
   const progressAnim = useRef(new Animated.Value(0)).current;
 
@@ -722,7 +1001,7 @@ function TitleProgressCard({ item, delay }: { item: any; delay: number }) {
       style={styles.titleCard}
     >
       <MaterialCommunityIcons
-        name={"star-four-points" as any}
+        name={"star-four-points"}
         size={32}
         color={item.locked ? "#999" : "#00D840"}
         style={{ marginRight: 10 }}
@@ -767,10 +1046,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between", // para empurrar a engrenagem p/ direita
   },
   userInfo: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  gearButton: {
+    padding: 6,
   },
   avatar: {
     width: 46,
@@ -786,7 +1069,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
 
-  // STATS
   statsContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1032,4 +1314,109 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
   },
+
+  // Modal de Filtro
+  modalFilterContainer: {
+    width: "85%",
+    backgroundColor: "#292929",
+    padding: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    alignSelf: "center",
+    marginTop: 60,
+  },
+  filterModalTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 12,
+  },
+  expandButton: {
+    flexDirection: "row",
+    backgroundColor: "#444444",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    marginTop: 10,
+    width: "100%",
+  },
+  expandButtonText: {
+    color: "#FF6F61",
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  flatList: {
+    width: "100%",
+    maxHeight: 150,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  cityItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: darkerColor("#292929"),
+    padding: 10,
+    marginVertical: 4,
+    borderRadius: 6,
+  },
+  cityItemText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+  },
+  leagueItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    marginVertical: 4,
+    borderRadius: 6,
+  },
+  closeModalButton: {
+    backgroundColor: "#E3350D",
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  closeModalButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  saveButton: {
+    backgroundColor: "#E3350D",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  saveButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "bold",
+  }
+
 });
+
+// Helper para escurecer cor (como no login)
+function darkerColor(hexColor: string) {
+  const amt = -20;
+  let num = parseInt(hexColor.replace("#", ""), 16);
+  let r = (num >> 16) + amt;
+  let b = ((num >> 8) & 0x00ff) + amt;
+  let g = (num & 0x0000ff) + amt;
+
+  return (
+    "#" +
+    (
+      0x1000000 +
+      (r < 255 ? (r < 0 ? 0 : r) : 255) * 0x10000 +
+      (b < 255 ? (b < 0 ? 0 : b) : 255) * 0x100 +
+      (g < 255 ? (g < 0 ? 0 : g) : 255)
+    )
+      .toString(16)
+      .slice(1)
+  );
+}

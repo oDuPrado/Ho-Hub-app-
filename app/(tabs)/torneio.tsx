@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   Linking,
   ScrollView,
@@ -14,12 +13,13 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import * as Notifications from "expo-notifications";
-import { useTranslation } from "react-i18next"; 
-import { 
-  Appbar, 
-  Card, 
-  Button, 
-  ActivityIndicator as PaperActivityIndicator 
+import { useTranslation } from "react-i18next";
+
+import {
+  Appbar,
+  Card,
+  Button,
+  ActivityIndicator as PaperActivityIndicator,
 } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
@@ -39,8 +39,8 @@ export default function TorneioScreen() {
   const [userName, setUserName] = useState<string>(t("torneio.info.none"));
   const [mesaNumber, setMesaNumber] = useState<string | null>(null);
   const [currentRound, setCurrentRound] = useState<number | null>(null);
-  const [linkReport, setLinkReport] = useState<string | null>(null);
   const [opponentName, setOpponentName] = useState<string | null>(null);
+  const [linkReport, setLinkReport] = useState<string | null>(null);
 
   const intervalRef = useRef<any>(null);
   const [fetchCount, setFetchCount] = useState(0);
@@ -49,15 +49,17 @@ export default function TorneioScreen() {
     requestNotificationPermission();
     fetchTournamentData();
 
+    // Atualiza a cada 10 segundos
     intervalRef.current = setInterval(() => {
       setFetchCount((prev) => prev + 1);
-    }, 60000);
+    }, 10000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
 
+  // Sempre que fetchCount mudar, refaz a busca
   useEffect(() => {
     fetchTournamentData();
   }, [fetchCount]);
@@ -71,7 +73,10 @@ export default function TorneioScreen() {
         finalStatus = status;
       }
       if (finalStatus !== "granted") {
-        Alert.alert(t("torneio.alerts.attention"), "Permissão de notificações não concedida.");
+        Alert.alert(
+          t("torneio.alerts.attention"),
+          "Permissão de notificações não concedida."
+        );
       }
     } catch (error) {
       console.log("Erro ao solicitar permissões de notificação:", error);
@@ -83,22 +88,36 @@ export default function TorneioScreen() {
       setLoading(true);
       const storedId = await AsyncStorage.getItem("@userId");
       const storedName = await AsyncStorage.getItem("@userName");
+      const leagueId = await AsyncStorage.getItem("@leagueId");
+
       if (!storedId) {
         Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.not_logged_in"));
         router.replace("/(auth)/login");
         return;
       }
+      if (!leagueId) {
+        Alert.alert(
+          t("torneio.alerts.attention"),
+          "Nenhuma liga selecionada. Vá em configurações."
+        );
+        router.replace("/(auth)/login");
+        return;
+      }
       setUserName(storedName ?? t("torneio.info.none"));
 
-      const res = await fetch("https://DuPrado.pythonanywhere.com/get-data");
+      // ==== Consulta ao backend com o ID da liga ====
+      const url = `https://Doprado.pythonanywhere.com/get-data/${leagueId}`;
+      const res = await fetch(url);
       if (!res.ok) {
         throw new Error(`Falha ao obter dados do torneio: ${res.status}`);
       }
       const jsonTorneio = await res.json();
 
+      // Estrutura dos rounds
       const roundObj = jsonTorneio.round ?? {};
       const roundKeys = Object.keys(roundObj).map((rk) => parseInt(rk, 10));
       if (roundKeys.length === 0) {
+        // Sem rodadas ainda
         setMesaNumber(null);
         setOpponentName(null);
         setCurrentRound(null);
@@ -107,42 +126,47 @@ export default function TorneioScreen() {
         return;
       }
 
+      // Identifica a rodada máxima
       const maxRound = Math.max(...roundKeys);
       setCurrentRound(maxRound);
 
+      // Obtém divisões e mesas
       const divisions = roundObj[maxRound];
       const divKeys = Object.keys(divisions);
       const currentDiv = divKeys[0] ?? "None";
       const tables = divisions[currentDiv].table;
 
       let foundMesa: string | null = null;
-      let link: string | null = null;
       let foundOpponent: string | null = null;
 
-      for (let tableId in tables) {
+      // Percorre as mesas para encontrar o usuário
+      for (const tableId in tables) {
         const matchInfo = tables[tableId];
         const p1_id = matchInfo.player1_id;
         const p2_id = matchInfo.player2_id;
 
         if (p1_id === storedId) {
           foundMesa = tableId;
-          link = `https://DuPrado.pythonanywhere.com/mesa/${tableId}`;
           foundOpponent = matchInfo.player2;
           break;
         } else if (p2_id === storedId) {
           foundMesa = tableId;
-          link = `https://DuPrado.pythonanywhere.com/mesa/${tableId}`;
           foundOpponent = matchInfo.player1;
           break;
         }
       }
 
       setMesaNumber(foundMesa);
-      setLinkReport(link);
-      setOpponentName(foundOpponent);
+      setOpponentName(foundOpponent || null);
 
+      // ==== Link correto para o report, incluindo a liga ====
       if (foundMesa) {
+        const link = `https://Doprado.pythonanywhere.com/${leagueId}/mesa/${foundMesa}`;
+        setLinkReport(link);
+
         await checkRoundAndNotify(maxRound, foundMesa, foundOpponent || "");
+      } else {
+        setLinkReport(null);
       }
 
       setLoading(false);
@@ -156,7 +180,7 @@ export default function TorneioScreen() {
     try {
       const storedRound = await AsyncStorage.getItem("@lastNotifiedRound");
       const lastNotifiedRound = storedRound ? parseInt(storedRound, 10) : 0;
-  
+
       if (rnd > lastNotifiedRound) {
         await Notifications.scheduleNotificationAsync({
           content: {
@@ -165,27 +189,26 @@ export default function TorneioScreen() {
               ? `🎭 Oponente: ${oppName}\n📍 Mesa: ${mesa}\n🏆 Boa sorte!`
               : `📍 Você está na mesa ${mesa}.\n🏆 Boa sorte!`,
             data: { screen: "TorneioScreen" },
-            color: "#E3350D", // Cor do projeto
-            sound: "default", // Som de notificação
-            vibrate: [200, 100, 200], // Vibração customizada
+            color: "#E3350D",
+            sound: "default",
+            vibrate: [200, 100, 200],
             priority: "high",
           },
           trigger: null,
         });
-  
+
         await AsyncStorage.setItem("@lastNotifiedRound", String(rnd));
       }
     } catch (e) {
       console.log("Falha ao notificar round:", e);
     }
-  }  
+  }
 
   function handleOpenReport() {
     if (!linkReport) {
       Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.no_table"));
       return;
     }
-
     try {
       if (Platform.OS === "web") {
         window.open(linkReport, "_blank");
@@ -201,7 +224,6 @@ export default function TorneioScreen() {
   if (loading) {
     return (
       <View style={styles.loader}>
-        {/* Usando o ActivityIndicator do Paper */}
         <PaperActivityIndicator animating={true} size="large" color={RED} />
       </View>
     );
@@ -317,7 +339,6 @@ export default function TorneioScreen() {
   );
 }
 
-/* PALETA DE CORES E ESTILOS */
 const RED = "#E3350D";
 const BLACK = "#1E1E1E";
 const DARK_GRAY = "#292929";

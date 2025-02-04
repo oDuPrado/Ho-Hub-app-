@@ -8,7 +8,6 @@ import {
   Alert,
   Switch,
   KeyboardAvoidingView,
-  SafeAreaView,
   Platform,
   Animated,
   Easing,
@@ -19,6 +18,9 @@ import {
   Modal,
   Image,
   ImageBackground,
+  FlatList,
+  LayoutAnimation,
+  UIManager,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -27,14 +29,19 @@ import {
   signInWithEmailAndPassword,
   onAuthStateChanged,
   sendPasswordResetEmail,
-  initializeAuth,
   signOut,
   User,
-  setPersistence,
-  browserLocalPersistence, // Se estivesse em Web, mas aqui é Mobile
 } from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore";
-import { Ionicons } from "@expo/vector-icons";
+import {
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { auth, db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next"; // i18n
@@ -42,6 +49,25 @@ import LSselector from "../../LSselector";
 
 // Importamos a lista de banimento
 import { BAN_PLAYER_IDS } from "../hosts";
+
+// --------------- Cores & Constantes ---------------
+const { width, height } = Dimensions.get("window");
+const BACKGROUND = "#1E1E1";
+const PRIMARY = "#E3350D";
+const SECONDARY = "#FFFFFF";
+const INPUT_BG = "#292929";
+const INPUT_BORDER = "#4D4D4D";
+const SWITCH_TRACK = "#555555";
+const SWITCH_THUMB = PRIMARY;
+const ACCENT = "#FF6F61";
+
+// Para animar layout no Android
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // --------------- Funções Auxiliares ---------------
 function checkPasswordStrength(password: string) {
@@ -71,6 +97,7 @@ function validateEmail(mail: string): boolean {
   const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return regex.test(mail);
 }
+
 function validatePassword(pw: string): boolean {
   // Ao menos 1 maiúscula, 1 minúscula, 1 dígito, 1 especial, >=8 chars
   const upper = /[A-Z]/.test(pw);
@@ -108,7 +135,20 @@ export default function LoginScreen() {
   // Animação de logotipo
   const logoScale = useRef(new Animated.Value(1)).current;
 
-  // --------------- Efeito de animação ---------------
+  // Modal de Configurações (Engrenagem)
+  const [adminModalVisible, setAdminModalVisible] = useState(false);
+
+  // Listas e seleções de cidades/ligas
+  const [cities, setCities] = useState<string[]>([]);
+  const [selectedCity, setSelectedCity] = useState<string>("");
+  const [leagues, setLeagues] = useState<any[]>([]);
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
+
+  // Flags para expandir/ocultar listas
+  const [showCities, setShowCities] = useState(false);
+  const [showLeagues, setShowLeagues] = useState(false);
+
+  // --------------- Efeito de animação no logotipo ---------------
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -129,92 +169,95 @@ export default function LoginScreen() {
   }, [logoScale]);
 
   // --------------- Checa AsyncStorage p/ ver se user quer permanecer logado ---------------
-useEffect(() => {
-  (async () => {
-    try {
-      const stay = await AsyncStorage.getItem("@stayLogged");
-      if (stay === "true") {
-        setStayLogged(true); // Atualiza o estado
-      }
-    } catch (error) {
-      console.error("Erro ao carregar @stayLogged:", error);
-    }
-  })();
-}, []);
-
-// --------------- Observa estado do Auth ---------------
-useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
-    if (user) {
-      setLoading(true);
+  useEffect(() => {
+    (async () => {
       try {
-        // Buscar doc "login/{uid}"
-        const docRef = doc(db, "login", user.uid);
-        const snap = await getDoc(docRef);
-
-        if (!snap.exists()) {
-          Alert.alert(
-            t("login.alerts.incomplete_account"),
-            t("login.alerts.incomplete_account")
-          );
-          await signOut(auth);
-          setLoading(false);
-          return;
+        const stay = await AsyncStorage.getItem("@stayLogged");
+        if (stay === "true") {
+          setStayLogged(true); // Atualiza o estado
         }
-
-        const data = snap.data();
-        if (!data.playerId || !data.pin) {
-          Alert.alert(
-            t("login.alerts.missing_data"),
-            t("login.alerts.missing_data")
-          );
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        // === Verifica banimento ===
-        if (BAN_PLAYER_IDS.includes(data.playerId)) {
-          // Exibe modal de ban
-          setBanModalVisible(true);
-
-          // Força signOut pra não entrar
-          await signOut(auth);
-          setLoading(false);
-          return;
-        }
-
-        // Se não banido, prossegue
-        const docName = data.name || "Jogador";
-
-        // Salva no AsyncStorage
-        await AsyncStorage.setItem("@userId", data.playerId);
-        await AsyncStorage.setItem("@userPin", data.pin);
-        await AsyncStorage.setItem("@userName", docName);
-
-        // Armazena preferencia de stayLogged
-        if (stayLogged) {
-          await AsyncStorage.setItem("@stayLogged", "true");
-        } else {
-          await AsyncStorage.removeItem("@stayLogged");
-        }
-
-        Alert.alert(t("login.alerts.welcome"), t("login.alerts.welcome") + `, ${docName}!`);
-        router.push("/(tabs)/home");
       } catch (error) {
-        console.error("Erro ao verificar autenticação:", error);
-        Alert.alert(t("login.alerts.error"), t("login.alerts.error"));
-      } finally {
-        setLoading(false);
+        console.error("Erro ao carregar @stayLogged:", error);
       }
-    } else {
-      console.log("Sem user logado no momento...");
-    }
-  });
+    })();
+  }, []);
 
-  return () => unsubscribe();
-}, [router, t, stayLogged]);
+  // --------------- Observa estado do Auth ---------------
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+      if (user) {
+        setLoading(true);
+        try {
+          // Buscar doc "login/{uid}"
+          const docRef = doc(db, "login", user.uid);
+          const snap = await getDoc(docRef);
 
+          if (!snap.exists()) {
+            Alert.alert(
+              t("login.alerts.incomplete_account"),
+              t("login.alerts.incomplete_account")
+            );
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
+
+          const data = snap.data();
+          if (!data.playerId || !data.pin) {
+            Alert.alert(
+              t("login.alerts.missing_data"),
+              t("login.alerts.missing_data")
+            );
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
+
+          // === Verifica banimento ===
+          if (BAN_PLAYER_IDS.includes(data.playerId)) {
+            // Exibe modal de ban
+            setBanModalVisible(true);
+
+            // Força signOut pra não entrar
+            await signOut(auth);
+            setLoading(false);
+            return;
+          }
+
+          // Se não banido, prossegue
+          const docName = data.name || "Jogador";
+
+          // Salva no AsyncStorage
+          await AsyncStorage.setItem("@userId", data.playerId);
+          await AsyncStorage.setItem("@userPin", data.pin);
+          await AsyncStorage.setItem("@userName", docName);
+
+          // Armazena preferencia de stayLogged
+          if (stayLogged) {
+            await AsyncStorage.setItem("@stayLogged", "true");
+          } else {
+            await AsyncStorage.removeItem("@stayLogged");
+          }
+
+          // Alerta de boas vindas
+          Alert.alert(
+            t("login.alerts.welcome"),
+            t("login.alerts.welcome") + `, ${docName}!`
+          );
+          router.push("/(tabs)/home");
+        } catch (error) {
+          console.error("Erro ao verificar autenticação:", error);
+          Alert.alert(t("login.alerts.error"), t("login.alerts.error"));
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        console.log("Sem user logado no momento...");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router, t, stayLogged]);
 
   // --------------- Observa password p/ medir força (em signup) ---------------
   useEffect(() => {
@@ -240,11 +283,6 @@ useEffect(() => {
     }
     try {
       setLoading(true);
-
-      // Se o usuário quer ficar logado, no Firebase nativo do RN,
-      // a persistência já é local, mas podemos reforçar via
-      // setPersistence(auth, getReactNativePersistence(AsyncStorage)) (caso configuremos).
-      // Para simplificar, confiamos no onAuthStateChanged + AsyncStorage.
 
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       console.log("Conta criada, UID=", cred.user.uid);
@@ -316,6 +354,73 @@ useEffect(() => {
     }
   }
 
+  // --------------- Funções do Modal de Liga ---------------
+  const openAdminModal = async () => {
+    setAdminModalVisible(true);
+    await fetchCities(); // Carrega cidades quando abrir modal
+  };
+
+  const closeAdminModal = () => {
+    setAdminModalVisible(false);
+    setShowCities(false);
+    setShowLeagues(false);
+  };
+
+  // Busca todas as cidades disponíveis na coleção "leagues"
+  const fetchCities = async () => {
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(collection(db, "leagues"));
+      const citySet = new Set<string>();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.city) {
+          citySet.add(data.city);
+        }
+      });
+      setCities(Array.from(citySet));
+    } catch (error) {
+      console.log("Erro ao buscar cidades:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Busca as ligas na cidade
+  const fetchLeaguesByCity = async (cityName: string) => {
+    try {
+      setLoading(true);
+      setSelectedCity(cityName);
+      setShowLeagues(false);
+
+      // Animação de layout (Android)
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+      const qCity = query(collection(db, "leagues"), where("city", "==", cityName));
+      const citySnapshot = await getDocs(qCity);
+
+      const leaguesList: any[] = [];
+      citySnapshot.forEach((doc) => {
+        leaguesList.push({
+          id: doc.id,
+          ...doc.data(),
+        });
+      });
+      setLeagues(leaguesList);
+    } catch (error) {
+      console.error("Erro ao buscar ligas por cidade:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Define a liga selecionada
+  const handleSelectLeague = async (leagueId: string) => {
+    setSelectedLeagueId(leagueId);
+    await AsyncStorage.setItem("@leagueId", leagueId);
+    Alert.alert("Liga Selecionada", `League ID: ${leagueId}`);
+  };
+
   // --------------- Render ---------------
   if (loading) {
     return (
@@ -330,8 +435,9 @@ useEffect(() => {
 
   return (
     <ImageBackground
-      source={require("../../assets/images/background_login.jpg")} // Caminho da imagem de fundo
-      style={styles.background}>
+      source={require("../../assets/images/background_login.jpg")} 
+      style={styles.background}
+    >
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -364,8 +470,135 @@ useEffect(() => {
             </View>
           </Modal>
 
-          {/* Seletor de idioma */}
-          <LSselector />
+          {/* Modal de Seleção de Liga e Idioma */}
+          <Modal
+            visible={adminModalVisible}
+            transparent
+            animationType="slide"
+            onRequestClose={closeAdminModal}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContainer}>
+                <Text style={styles.modalTitle}>{t("common.config")}</Text>
+
+                {/* Seletor de Idioma */}
+                <LSselector />
+
+                {/* Botão para expandir/ocultar cidades */}
+                <TouchableOpacity
+                  style={styles.expandButton}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
+                    setShowCities(!showCities);
+                  }}
+                >
+                  <Text style={styles.expandButtonText}>
+                    {t("common.select_city")}
+                  </Text>
+                  <Ionicons
+                    name={showCities ? "chevron-up" : "chevron-down"}
+                    size={24}
+                    color={ACCENT}
+                  />
+                </TouchableOpacity>
+
+                {/* Lista de Cidades (com ícones) */}
+                {showCities && (
+                  <FlatList
+                    style={styles.flatList}
+                    data={cities}
+                    keyExtractor={(item) => item}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={styles.cityItem}
+                        onPress={() => {
+                          fetchLeaguesByCity(item);
+                          setShowLeagues(true);
+                        }}
+                      >
+                        <MaterialCommunityIcons
+                          name="map-marker"
+                          size={20}
+                          color={ACCENT}
+                          style={{ marginRight: 8 }}
+                        />
+                        <Text style={styles.cityItemText}>{item}</Text>
+                      </TouchableOpacity>
+                    )}
+                  />
+                )}
+
+                {/* Botão para expandir ligas */}
+                {selectedCity !== "" && (
+                  <TouchableOpacity
+                    style={styles.expandButton}
+                    onPress={() => {
+                      LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
+                      // Se não tiver ligas ainda, já buscou no click da cidade.
+                      setShowLeagues(!showLeagues);
+                    }}
+                  >
+                    <Text style={styles.expandButtonText}>
+                      {selectedCity
+                        ? `${t("common.select_league")} (${selectedCity})`
+                        : t("common.select_league")}
+                    </Text>
+                    <Ionicons
+                      name={showLeagues ? "chevron-up" : "chevron-down"}
+                      size={24}
+                      color={ACCENT}
+                    />
+                  </TouchableOpacity>
+                )}
+
+                {/* Lista de Ligas */}
+                {showLeagues && (
+                  <FlatList
+                    style={styles.flatList}
+                    data={leagues}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity
+                        style={[
+                          styles.leagueItem,
+                          {
+                            backgroundColor:
+                              selectedLeagueId === item.id ? ACCENT : DARKER(INPUT_BG),
+                          },
+                        ]}
+                        onPress={() => handleSelectLeague(item.id)}
+                      >
+                        <Ionicons
+                          name="ribbon"
+                          size={20}
+                          color={SECONDARY}
+                          style={{ marginRight: 8 }}
+                        />
+                        <Text style={styles.cityItemText}>
+                          {item.leagueName || "Sem Nome"}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  />
+                )}
+
+                {/* Botão fechar */}
+                <TouchableOpacity
+                  style={styles.closeModalButton}
+                  onPress={closeAdminModal}
+                >
+                  <Text style={styles.closeModalButtonText}>
+                    {t("common.close")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Ícone de Engrenagem no topo direito */}
+          <TouchableOpacity style={styles.gearButton} onPress={openAdminModal}>
+            <Ionicons name="settings" size={32} color={SECONDARY} />
+          </TouchableOpacity>
 
           {/* Logo animada */}
           <Animated.Image
@@ -529,27 +762,17 @@ useEffect(() => {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-      </ImageBackground>
+    </ImageBackground>
   );
 }
 
 // --------------- ESTILOS ---------------
-const { width, height } = Dimensions.get("window");
-const BACKGROUND = "#1E1E1";
-const PRIMARY = "#E3350D";
-const SECONDARY = "#FFFFFF";
-const INPUT_BG = "#292929";
-const INPUT_BORDER = "#4D4D4D";
-const SWITCH_TRACK = "#555555";
-const SWITCH_THUMB = PRIMARY;
-const ACCENT = "#FF6F61";
-
 const styles = StyleSheet.create({
   background: {
     flex: 1,
     width: width,
     height: height,
-    resizeMode: "cover", // Garante que a imagem cubra toda a tela
+    resizeMode: "cover",
   },
   loadingContainer: {
     flex: 1,
@@ -619,11 +842,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     borderRadius: 8,
     marginTop: 5,
-    shadowColor: SECONDARY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 3,
   },
   signupButton: {
     backgroundColor: ACCENT,
@@ -631,11 +849,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     borderRadius: 8,
     marginTop: 5,
-    shadowColor: SECONDARY,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 3,
   },
   buttonText: {
     color: SECONDARY,
@@ -697,4 +910,109 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
   },
+
+  // Modal Admin
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContainer: {
+    width: "85%",
+    backgroundColor: INPUT_BG,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  modalTitle: {
+    color: SECONDARY,
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 12,
+  },
+
+  // Botão de expansão (cidades/ligas)
+  expandButton: {
+    flexDirection: "row",
+    backgroundColor: "#444444",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    marginTop: 10,
+    width: "100%",
+  },
+  expandButtonText: {
+    color: ACCENT,
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  flatList: {
+    width: "100%",
+    maxHeight: 150,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+
+  cityItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: DARKER(INPUT_BG),
+    padding: 10,
+    marginVertical: 4,
+    borderRadius: 6,
+  },
+  cityItemText: {
+    color: SECONDARY,
+    fontSize: 15,
+  },
+  leagueItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    marginVertical: 4,
+    borderRadius: 6,
+  },
+
+  closeModalButton: {
+    backgroundColor: PRIMARY,
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  closeModalButtonText: {
+    color: SECONDARY,
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  gearButton: {
+    position: "absolute",
+    top: 40,
+    right: 20,
+    zIndex: 10,
+  },
 });
+
+// Helper para escurecer cor
+function DARKER(hexColor: string) {
+  const amt = -20;
+  let num = parseInt(hexColor.replace("#", ""), 16);
+  let r = (num >> 16) + amt;
+  let b = ((num >> 8) & 0x00ff) + amt;
+  let g = (num & 0x0000ff) + amt;
+
+  const newColor =
+    "#" +
+    (
+      0x1000000 +
+      (r < 255 ? (r < 0 ? 0 : r) : 255) * 0x10000 +
+      (b < 255 ? (b < 0 ? 0 : b) : 255) * 0x100 +
+      (g < 255 ? (g < 0 ? 0 : g) : 255)
+    )
+      .toString(16)
+      .slice(1);
+  return newColor;
+}
