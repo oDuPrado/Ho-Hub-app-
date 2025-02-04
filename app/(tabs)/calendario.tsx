@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Picker } from "@react-native-picker/picker";
+import moment from "moment";
+import "moment/locale/pt-br";
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
-  Alert,
   SafeAreaView,
   ScrollView,
   Modal,
@@ -13,7 +12,14 @@ import {
   Image,
   ActivityIndicator,
   Switch,
+  Alert,
+  TouchableOpacity,
+  Platform,
+  Keyboard,
+  KeyboardAvoidingView,
 } from "react-native";
+
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   collection,
   doc,
@@ -26,24 +32,21 @@ import {
   getDoc,
   where,
   serverTimestamp,
-  getDocs, // <--- Importamos getDocs aqui
+  getDocs,
 } from "firebase/firestore";
-
-import moment from "moment";
-import "moment/locale/pt-br";
-
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db } from "../../lib/firebaseConfig";
 
 import {
-  HOST_PLAYER_IDS,
-  JUDGE_PLAYER_IDS,
-  HEAD_JUDGE_PLAYER_IDS,
-  fetchHostsInfo,
   vipPlayers,
+  HOST_PLAYER_IDS,
+  HEAD_JUDGE_PLAYER_IDS,
+  JUDGE_PLAYER_IDS,
+  fetchRoleMembers,
 } from "../hosts";
 
-import { useTranslation } from "react-i18next";
+import * as Animatable from "react-native-animatable";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { TouchableWithoutFeedback } from "react-native-gesture-handler";
 
 interface Torneio {
   id: string;
@@ -83,35 +86,43 @@ interface DeckData {
 }
 
 export default function CalendarScreen() {
-  const { t } = useTranslation();
-
   const [playerId, setPlayerId] = useState("");
   const [isHost, setIsHost] = useState(false);
+
+  const [leagueId, setLeagueId] = useState("1186767"); // fallback
 
   const [torneios, setTorneios] = useState<Torneio[]>([]);
   const [currentMonth, setCurrentMonth] = useState(moment());
 
-  // Lookup de nomes (juiz e head judge)
+  // Mapeamentos de nomes
   const [judgeMap, setJudgeMap] = useState<Record<string, string>>({});
   const [headJudgeMap, setHeadJudgeMap] = useState<Record<string, string>>({});
+  const [playerNameMap, setPlayerNameMap] = useState<Record<string, string>>({});
+
+  // Opções de Judge e HeadJudge (modal)
+  const [judgeOptions, setJudgeOptions] = useState<{ userId: string; fullname: string }[]>([]);
+  const [headJudgeOptions, setHeadJudgeOptions] = useState<{ userId: string; fullname: string }[]>([]);
 
   // Modal CRIAR/EDITAR
   const [modalVisible, setModalVisible] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [editDate, setEditDate] = useState("");
-  const [editTime, setEditTime] = useState("");
+  const [editDate, setEditDate] = useState("");  // dd/mm/aaaa
+  const [editTime, setEditTime] = useState("");  // hh:mm
   const [editJudge, setEditJudge] = useState("");
   const [editHeadJudge, setEditHeadJudge] = useState("");
   const [editEventType, setEditEventType] = useState("Cup");
 
-  // Novos estados para suportar grande ou pequena escala
+  // Modal de seleção de Juiz
+  const [judgeSelectModal, setJudgeSelectModal] = useState(false);
+  const [headJudgeSelectModal, setHeadJudgeSelectModal] = useState(false);
+  // Modal de seleção de Tipo de Evento
+  const [eventTypeSelectModal, setEventTypeSelectModal] = useState(false);
+
   const [editMaxVagas, setEditMaxVagas] = useState<number | null>(null);
   const [editInscricoesAbertura, setEditInscricoesAbertura] = useState<string>("");
   const [editInscricoesFechamento, setEditInscricoesFechamento] = useState<string>("");
   const [editPrioridadeVip, setEditPrioridadeVip] = useState<boolean>(false);
-
-  // Novos campos para horários de VIP
   const [editInscricoesVipAbertura, setEditInscricoesVipAbertura] = useState<string>("");
   const [editInscricoesVipFechamento, setEditInscricoesVipFechamento] = useState<string>("");
 
@@ -123,9 +134,8 @@ export default function CalendarScreen() {
   const [inscricoesModalVisible, setInscricoesModalVisible] = useState(false);
   const [inscricoes, setInscricoes] = useState<Inscricao[]>([]);
   const [deckNameMap, setDeckNameMap] = useState<Record<string, string>>({});
-  const [playerNameMap, setPlayerNameMap] = useState<Record<string, string>>({});
 
-  // Sub-modal de PDF do Deck
+  // Sub-modal PDF do Deck
   const [deckPdfModalVisible, setDeckPdfModalVisible] = useState(false);
   const [selectedDeckIdForPdf, setSelectedDeckIdForPdf] = useState("");
 
@@ -153,14 +163,16 @@ export default function CalendarScreen() {
   const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState<boolean>(false);
 
-  // Select de Juiz
-  const [judgeOptions, setJudgeOptions] = useState<
-    { userId: string; fullname: string }[]
-  >([]);
-  const [headJudgeOptions, setHeadJudgeOptions] = useState<
-    { userId: string; fullname: string }[]
-  >([]);
+  // Tipo de Evento (lista)
+  const eventTypesList = [
+    "Challenge",
+    "Cup",
+    "Liga Local",
+    "Pré-Release",
+    "Evento Especial",
+  ];
 
+  // =========================== useEffect Inicial ===========================
   useEffect(() => {
     moment.locale("pt-br");
 
@@ -171,36 +183,40 @@ export default function CalendarScreen() {
           setPlayerId(pid);
           setIsHost(HOST_PLAYER_IDS.includes(pid));
         }
+        const storedLeagueId = await AsyncStorage.getItem("@leagueId");
+        if (storedLeagueId) setLeagueId(storedLeagueId);
+
+        // Carregar Judge e HeadJudge da league
+        const jArray = await fetchRoleMembers(leagueId, "judge");
+        const jMapObj: Record<string, string> = {};
+        jArray.forEach((j) => {
+          jMapObj[j.userId] = j.fullname;
+        });
+        setJudgeOptions(jArray);
+        setJudgeMap(jMapObj);
+
+        const hjArray = await fetchRoleMembers(leagueId, "head");
+        const hjMapObj: Record<string, string> = {};
+        hjArray.forEach((hj) => {
+          hjMapObj[hj.userId] = hj.fullname;
+        });
+        setHeadJudgeOptions(hjArray);
+        setHeadJudgeMap(hjMapObj);
+
+        loadSetIdMap();
       } catch (error) {
-        console.log("Erro ao obter playerId:", error);
+        console.log("Erro no fetch inicial:", error);
       }
-
-      // Carrega Juiz
-      const jArray = await fetchHostsInfo(JUDGE_PLAYER_IDS);
-      const jMapObj: Record<string, string> = {};
-      jArray.forEach((j) => {
-        jMapObj[j.userId] = j.fullname;
-      });
-      setJudgeOptions(jArray);
-      setJudgeMap(jMapObj);
-
-      // Carrega HeadJudge
-      const hjArray = await fetchHostsInfo(HEAD_JUDGE_PLAYER_IDS);
-      const hjMapObj: Record<string, string> = {};
-      hjArray.forEach((hj) => {
-        hjMapObj[hj.userId] = hj.fullname;
-      });
-      setHeadJudgeOptions(hjArray);
-      setHeadJudgeMap(hjMapObj);
-
-      // Carrega mapping p/ imagens de cartas
-      loadSetIdMap();
     })();
-  }, []);
+  }, [leagueId]);
 
-  // Carrega torneios do Firestore para o mês atual
+  // =========================== Carrega torneios do Firestore ===========================
   useEffect(() => {
-    const colRef = collection(db, "calendar", "torneios", "list");
+    // Precisamos de um caminho impar: leagues/{leagueId}/calendar
+    // {leagueId} e "calendar" => 3 segmentos => colecao
+    if (!leagueId) return;
+
+    const colRef = collection(db, "leagues", leagueId, "calendar");
     const unsub = onSnapshot(colRef, (snap) => {
       const arr: Torneio[] = [];
       snap.forEach((docSnap) => {
@@ -223,6 +239,7 @@ export default function CalendarScreen() {
           inscricoesVipFechamento: d.inscricoesVipFechamento || "",
         });
       });
+      // Filtrar só do mês atual
       const start = currentMonth.clone().startOf("month");
       const end = currentMonth.clone().endOf("month");
       const filtered = arr.filter((t) => {
@@ -230,10 +247,23 @@ export default function CalendarScreen() {
         return dt.isBetween(start, end, undefined, "[]");
       });
       setTorneios(filtered);
+
+      // Carrega o nome do "createdBy" no playerMap
+      arr.forEach(async (tor) => {
+        if (tor.createdBy && !playerNameMap[tor.createdBy]) {
+          const pRef = doc(db, "players", tor.createdBy);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+            const nm = pSnap.data().fullname || `Jogador ${tor.createdBy}`;
+            setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
+          }
+        }
+      });
     });
     return () => unsub();
-  }, [currentMonth]);
+  }, [currentMonth, leagueId]);
 
+  // =========================== Carrega sets p/ imagens ===========================
   async function loadSetIdMap() {
     try {
       const response = await fetch("https://api.pokemontcg.io/v2/sets");
@@ -261,6 +291,7 @@ export default function CalendarScreen() {
     }
   }
 
+  // =========================== Navegação de Mês ===========================
   function handlePrevMonth() {
     setCurrentMonth((prev) => prev.clone().subtract(1, "month"));
   }
@@ -268,7 +299,7 @@ export default function CalendarScreen() {
     setCurrentMonth((prev) => prev.clone().add(1, "month"));
   }
 
-  // --------------- Criar/Editar Torneio ---------------
+  // =========================== CRIAR/EDITAR TORN. ===========================
   function openCreateModal() {
     setEditId(null);
     setEditName("");
@@ -294,7 +325,6 @@ export default function CalendarScreen() {
     setEditJudge(t.judge);
     setEditHeadJudge(t.headJudge);
     setEditEventType(t.eventType);
-
     setEditMaxVagas(t.maxVagas ?? null);
     setEditInscricoesAbertura(t.inscricoesAbertura ?? "");
     setEditInscricoesFechamento(t.inscricoesFechamento ?? "");
@@ -305,19 +335,50 @@ export default function CalendarScreen() {
     setModalVisible(true);
   }
 
+  function handleMaskDate(text: string, setFunc: (val: string) => void) {
+    // dd/mm/aaaa => 10 caracteres
+    let cleaned = text.replace(/\D/g, "");
+    if (cleaned.length > 8) cleaned = cleaned.slice(0, 8);
+
+    let formatted = "";
+    if (cleaned.length <= 2) {
+      formatted = cleaned;
+    } else if (cleaned.length <= 4) {
+      formatted = cleaned.slice(0, 2) + "/" + cleaned.slice(2);
+    } else {
+      formatted =
+        cleaned.slice(0, 2) + "/" + cleaned.slice(2, 4) + "/" + cleaned.slice(4);
+    }
+    setFunc(formatted);
+  }
+
+  function handleMaskTime(text: string, setFunc: (val: string) => void) {
+    // hh:mm => 5 caracteres
+    let cleaned = text.replace(/\D/g, "");
+    if (cleaned.length > 4) cleaned = cleaned.slice(0, 4);
+
+    let formatted = "";
+    if (cleaned.length <= 2) {
+      formatted = cleaned;
+    } else {
+      formatted = cleaned.slice(0, 2) + ":" + cleaned.slice(2);
+    }
+    setFunc(formatted);
+  }
+
   async function handleSaveTorneio() {
     if (!editName.trim()) {
-      Alert.alert(t("common.error"), t("calendar.alerts.name_required"));
+      Alert.alert("Erro", "Nome do torneio é obrigatório.");
       return;
     }
     if (!moment(editDate, "DD/MM/YYYY", true).isValid()) {
-      Alert.alert(t("common.error"), t("calendar.alerts.invalid_date"));
+      Alert.alert("Erro", "Data inválida.");
       return;
     }
+    // Caminho => leagues/{leagueId}/calendar => docId
     try {
-      const colRef = collection(db, "calendar", "torneios", "list");
+      const colRef = collection(db, "leagues", leagueId, "calendar");
       if (editId) {
-        // Editar torneio existente
         const docRef = doc(colRef, editId);
         await updateDoc(docRef, {
           name: editName.trim(),
@@ -335,8 +396,8 @@ export default function CalendarScreen() {
           inscricoesVipFechamento: editInscricoesVipFechamento,
         });
       } else {
-        // Criar novo torneio
-        const docRef = await addDoc(colRef, {
+        // Novo
+        const newDoc = await addDoc(colRef, {
           name: editName.trim(),
           date: editDate,
           time: editTime,
@@ -353,30 +414,24 @@ export default function CalendarScreen() {
           inscricoesVipFechamento: editInscricoesVipFechamento,
         });
         if (editJudge) {
-          sendNotificationToJudge(editJudge, docRef.id, editName.trim());
+          sendNotificationToJudge(editJudge, newDoc.id, editName.trim());
         }
       }
       setModalVisible(false);
     } catch (err) {
       console.log("Erro handleSaveTorneio:", err);
-      Alert.alert(t("common.error"), t("calendar.alerts.save_error"));
+      Alert.alert("Erro", "Falha ao salvar torneio.");
     }
   }
 
-  async function sendNotificationToJudge(
-    judgeId: string,
-    torneioId: string,
-    torneioName: string
-  ) {
+  async function sendNotificationToJudge(judgeId: string, torneioId: string, torneioName: string) {
     try {
       const notifRef = doc(collection(db, "players", judgeId, "notifications"));
       await setDoc(notifRef, {
         type: "judge_invite",
         torneioId,
         torneioName,
-        message: t("calendar.alerts.judge_invite_message", {
-          torneioName: torneioName,
-        }),
+        message: `Você foi convidado para ser juiz do torneio: ${torneioName}`,
         timestamp: serverTimestamp(),
       });
     } catch (err) {
@@ -384,24 +439,24 @@ export default function CalendarScreen() {
     }
   }
 
-  // --------------- Excluir Torneio ---------------
+  // =========================== EXCLUIR TORNEIO ===========================
   async function handleDeleteTorneio(torneio: Torneio) {
     Alert.alert(
-      t("common.confirm"),
-      t("calendar.alerts.delete_confirm", { name: torneio.name }),
+      "Confirmação",
+      `Deseja excluir o torneio "${torneio.name}"?`,
       [
-        { text: t("calendar.form.cancel_button"), style: "cancel" },
+        { text: "Cancelar", style: "cancel" },
         {
-          text: t("common.delete"),
+          text: "Excluir",
           style: "destructive",
           onPress: async () => {
             try {
-              const colRef = collection(db, "calendar", "torneios", "list");
+              const colRef = collection(db, "leagues", leagueId, "calendar");
               const docRef = doc(colRef, torneio.id);
               await deleteDoc(docRef);
             } catch (err) {
               console.log("Erro handleDeleteTorneio:", err);
-              Alert.alert(t("common.error"), t("calendar.alerts.delete_error"));
+              Alert.alert("Erro", "Falha ao excluir torneio.");
             }
           },
         },
@@ -409,30 +464,22 @@ export default function CalendarScreen() {
     );
   }
 
+  // =========================== INSCRIÇÕES ===========================
   function isVip(pid: string): boolean {
     return vipPlayers.includes(pid);
   }
 
-  // --------------- Inscrever ---------------
   async function handleInscrever(t: Torneio) {
     const agora = moment();
-
-    // Se prioridadeVip estiver ativa e o jogador for VIP, checa se há horário de VIP
     if (t.prioridadeVip && isVip(playerId)) {
-      if (
-        t.inscricoesVipAbertura &&
-        agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))
-      ) {
+      if (t.inscricoesVipAbertura && agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))) {
         Alert.alert(
           "Inscrições VIP Não Abertas",
           `As inscrições VIP para este torneio abrem às ${t.inscricoesVipAbertura}.`
         );
         return;
       }
-      if (
-        t.inscricoesVipFechamento &&
-        agora.isAfter(moment(t.inscricoesVipFechamento, "HH:mm"))
-      ) {
+      if (t.inscricoesVipFechamento && agora.isAfter(moment(t.inscricoesVipFechamento, "HH:mm"))) {
         Alert.alert(
           "Inscrições VIP Encerradas",
           "As inscrições VIP para este torneio já foram encerradas."
@@ -440,21 +487,14 @@ export default function CalendarScreen() {
         return;
       }
     } else {
-      // Se não é VIP ou não tem prioridade de VIP
-      if (
-        t.inscricoesAbertura &&
-        agora.isBefore(moment(t.inscricoesAbertura, "HH:mm"))
-      ) {
+      if (t.inscricoesAbertura && agora.isBefore(moment(t.inscricoesAbertura, "HH:mm"))) {
         Alert.alert(
           "Inscrições Não Abertas",
           `As inscrições para este torneio abrem às ${t.inscricoesAbertura}.`
         );
         return;
       }
-      if (
-        t.inscricoesFechamento &&
-        agora.isAfter(moment(t.inscricoesFechamento, "HH:mm"))
-      ) {
+      if (t.inscricoesFechamento && agora.isAfter(moment(t.inscricoesFechamento, "HH:mm"))) {
         Alert.alert(
           "Inscrições Encerradas",
           "As inscrições para este torneio já foram encerradas."
@@ -463,23 +503,17 @@ export default function CalendarScreen() {
       }
     }
 
-    // Verifica se o jogador já está inscrito
-    const colRef = collection(db, "calendar", "torneios", "list", t.id, "inscricoes");
+    // Verifica se já está inscrito
+    const colRef = collection(db, "leagues", leagueId, "calendar", t.id, "inscricoes");
     const snap = await getDoc(doc(colRef, playerId));
     if (snap.exists()) {
       Alert.alert("Aviso", "Você já está inscrito neste torneio.");
       return;
     }
 
-    // Verifica se há limite de vagas. Precisamos contar quantas inscrições já existem
-    let totalInscricoes: Inscricao[] = [];
-    await onSnapshot(colRef, () => {
-      // O onSnapshot retorna uma função de unsubscribe; não precisamos dela aqui
-    });
-
-    // Agora usamos getDocs para obter todos os players inscritos
+    // Verifica limite de vagas
     const allDocs = await getDocs(colRef);
-    totalInscricoes = [];
+    const totalInscricoes: Inscricao[] = [];
     allDocs.forEach((docSnap) => {
       totalInscricoes.push({
         userId: docSnap.id,
@@ -489,12 +523,12 @@ export default function CalendarScreen() {
     });
 
     if (t.maxVagas && totalInscricoes.length >= t.maxVagas) {
-      // Se estiver cheio, envia pra lista de espera
+      // Tenta lista de espera
       handleWaitlist(t, isVip(playerId));
       return;
     }
 
-    // Continua fluxo normal de inscrição
+    // Se chegou aqui => abre modal p/ escolher deck
     setDetalhesTorneio(t);
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
@@ -519,8 +553,7 @@ export default function CalendarScreen() {
       "Lista de Espera",
       "O torneio está lotado. Você foi adicionado à lista de espera."
     );
-
-    const waitColRef = collection(db, "calendar", "torneios", "list", t.id, "espera");
+    const waitColRef = collection(db, "leagues", leagueId, "calendar", t.id, "espera");
     await setDoc(doc(waitColRef, playerId), {
       userId: playerId,
       createdAt: new Date().toISOString(),
@@ -531,51 +564,29 @@ export default function CalendarScreen() {
   async function handleSalvarInscricao() {
     if (!inscricaoTorneioId) return;
 
-    if (detalhesTorneio?.eventType !== "Liguinha" && !selectedDeckId) {
-      Alert.alert(
-        t("common.error"),
-        t(
-          "calendar.alerts.registration_error",
-          "Você precisa escolher um deck para se inscrever neste torneio."
-        )
-      );
+    if (detalhesTorneio?.eventType !== "Liga Local" && !selectedDeckId) {
+      Alert.alert("Erro", "Selecione um deck para se inscrever.");
       return;
     }
 
     try {
-      const colRef = collection(
-        db,
-        "calendar",
-        "torneios",
-        "list",
-        inscricaoTorneioId,
-        "inscricoes"
-      );
+      const colRef = collection(db, "leagues", leagueId, "calendar", inscricaoTorneioId, "inscricoes");
       const docRef = doc(colRef, playerId);
       await setDoc(docRef, {
         userId: playerId,
-        deckId: detalhesTorneio?.eventType === "Liguinha" ? null : selectedDeckId,
+        deckId: detalhesTorneio?.eventType === "Liga Local" ? null : selectedDeckId,
         createdAt: new Date().toISOString(),
       });
-      Alert.alert(
-        t("common.success"),
-        t("calendar.alerts.success_registration", "Inscrição realizada com sucesso!")
-      );
+      Alert.alert("Sucesso", "Inscrição realizada com sucesso!");
       setInscricaoModalVisible(false);
     } catch (err) {
       console.log("Erro handleSalvarInscricao:", err);
-      Alert.alert(
-        t("common.error"),
-        t(
-          "calendar.alerts.registration_error",
-          "Ocorreu um erro ao salvar sua inscrição."
-        )
-      );
+      Alert.alert("Erro", "Falha ao salvar inscrição.");
     }
   }
 
-  // --------------- Detalhes do Torneio ---------------
-  async function handleOpenDetalhes(t: Torneio) {
+  // =========================== DETALHES DO TORNEIO ===========================
+  function handleOpenDetalhes(t: Torneio) {
     setDetalhesTorneio(t);
     setDetalhesModalVisible(true);
   }
@@ -584,12 +595,11 @@ export default function CalendarScreen() {
     setDetalhesTorneio(null);
   }
 
-  // --------------- Ver Inscrições ---------------
-  async function openInscricoesModal(t: Torneio) {
+  // =========================== INSCRIÇÕES (LISTA) ===========================
+  async function openInscricoesModa(t: Torneio) {
     setDetalhesTorneio(t);
 
-    // Carrega inscrições
-    const colRef = collection(db, "calendar", "torneios", "list", t.id, "inscricoes");
+    const colRef = collection(db, "leagues", leagueId, "calendar", t.id, "inscricoes");
     onSnapshot(colRef, (snap) => {
       const arr: Inscricao[] = [];
       snap.forEach((ds) => {
@@ -602,6 +612,7 @@ export default function CalendarScreen() {
       arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
       setInscricoes(arr);
 
+      // Carrega info de deck e jogador
       const deckIdsSet = new Set<string>();
       const userIdsSet = new Set<string>();
       arr.forEach((i) => {
@@ -617,22 +628,25 @@ export default function CalendarScreen() {
           setDeckNameMap((prev) => ({ ...prev, [dkId]: nm }));
         }
       });
+
       userIdsSet.forEach(async (uId) => {
-        const pRef = doc(db, "players", uId);
-        const pSnap = await getDoc(pRef);
-        if (pSnap.exists()) {
-          const nm = pSnap.data().fullname || `Jogador ${uId}`;
-          setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+        if (!playerNameMap[uId]) {
+          const pRef = doc(db, "players", uId);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+            const nm = pSnap.data().fullname || `Jogador ${uId}`;
+            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+          }
         }
       });
     });
 
     // Carrega lista de espera
-    const waitColRef = collection(db, "calendar", "torneios", "list", t.id, "espera");
+    const waitColRef = collection(db, "leagues", leagueId, "calendar", t.id, "espera");
     onSnapshot(waitColRef, async (wanp) => {
       const arr: Espera[] = [];
       const userIdsToLoad = new Set<string>();
-    
+
       wanp.forEach((ds) => {
         arr.push({
           userId: ds.id,
@@ -640,26 +654,27 @@ export default function CalendarScreen() {
           createdAt: ds.data().createdAt || "",
           vip: ds.data().vip || false,
         });
-        userIdsToLoad.add(ds.id); // Guarda o ID para buscar o nome depois
+        userIdsToLoad.add(ds.id);
       });
-    
-      // Ordena: VIP primeiro
+
+      // Ordena VIP e data
       arr.sort((a, b) => {
         if (a.vip && !b.vip) return -1;
         if (!a.vip && b.vip) return 1;
         return a.createdAt.localeCompare(b.createdAt);
       });
-    
-      // Atualiza estado da lista de espera
+
       setEspera(arr);
-    
-      // Para cada userId, buscar o fullname no Firestore e atualizar o playerNameMap
+
+      // Buscar nome do jogador
       userIdsToLoad.forEach(async (uId) => {
-        const pRef = doc(db, "players", uId);
-        const pSnap = await getDoc(pRef);
-        if (pSnap.exists()) {
-          const nm = pSnap.data().fullname || `Jogador ${uId}`;
-          setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+        if (!playerNameMap[uId]) {
+          const pRef = doc(db, "players", uId);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+            const nm = pSnap.data().fullname || `Jogador ${uId}`;
+            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+          }
         }
       });
     });
@@ -675,30 +690,19 @@ export default function CalendarScreen() {
 
   async function handleExcluirInscricao(tournamentId: string, pId: string) {
     try {
-      const inscricaoRef = doc(
-        db,
-        "calendar",
-        "torneios",
-        "list",
-        tournamentId,
-        "inscricoes",
-        pId
-      );
+      const inscricaoRef = doc(db, "leagues", leagueId, "calendar", tournamentId, "inscricoes", pId);
       await deleteDoc(inscricaoRef);
-      alert("Inscrição excluída com sucesso!");
-
-      // Verifica a lista de espera para chamar o primeiro
+      Alert.alert("Sucesso", "Inscrição excluída!");
       await handleSubirListaEspera(tournamentId);
     } catch (error) {
       console.error("Erro ao excluir inscrição:", error);
-      alert("Não foi possível excluir a inscrição.");
+      Alert.alert("Erro", "Não foi possível excluir a inscrição.");
     }
   }
 
   async function handleSubirListaEspera(tournamentId: string) {
     try {
-      const waitColRef = collection(db, "calendar", "torneios", "list", tournamentId, "espera");
-      // Carrega a lista toda
+      const waitColRef = collection(db, "leagues", leagueId, "calendar", tournamentId, "espera");
       const docsSnap = await getDocs(waitColRef);
       if (docsSnap.empty) return;
 
@@ -711,7 +715,7 @@ export default function CalendarScreen() {
           vip: ds.data().vip || false,
         });
       });
-      // Ordena VIP e data
+      // Ordena
       arr.sort((a, b) => {
         if (a.vip && !b.vip) return -1;
         if (!a.vip && b.vip) return 1;
@@ -721,35 +725,18 @@ export default function CalendarScreen() {
       const primeiro = arr[0];
       if (!primeiro) return;
 
-      // Move este jogador para inscrições
-      const inscricaoRef = doc(
-        db,
-        "calendar",
-        "torneios",
-        "list",
-        tournamentId,
-        "inscricoes",
-        primeiro.userId
-      );
+      // Move esse jogador para inscrições
+      const inscricaoRef = doc(db, "leagues", leagueId, "calendar", tournamentId, "inscricoes", primeiro.userId);
       await setDoc(inscricaoRef, {
         userId: primeiro.userId,
         deckId: primeiro.deckId || null,
         createdAt: new Date().toISOString(),
       });
 
-      // Remove da coleção de espera
-      const waitDocRef = doc(
-        db,
-        "calendar",
-        "torneios",
-        "list",
-        tournamentId,
-        "espera",
-        primeiro.userId
-      );
+      // Remove da espera
+      const waitDocRef = doc(db, "leagues", leagueId, "calendar", tournamentId, "espera", primeiro.userId);
       await deleteDoc(waitDocRef);
 
-      // Notifica jogador
       sendNotificationToPlayer(primeiro.userId, tournamentId);
     } catch (err) {
       console.error("Erro ao subir lista de espera:", err);
@@ -762,7 +749,7 @@ export default function CalendarScreen() {
       await setDoc(notifRef, {
         type: "waitlist_update",
         torneioId: tournamentId,
-        message: "Você foi promovido da lista de espera para uma inscrição!",
+        message: "Você foi promovido da lista de espera para a inscrição!",
         timestamp: serverTimestamp(),
       });
     } catch (err) {
@@ -770,59 +757,44 @@ export default function CalendarScreen() {
     }
   }
 
-  // --------------- Juiz: Confirmar ou Recusar ---------------
+  // =========================== CONFIRMAR/RECUSAR JUIZ ===========================
   async function confirmJudge(tournament: Torneio) {
     try {
-      const colRef = collection(db, "calendar", "torneios", "list");
-      const docRef = doc(colRef, tournament.id);
+      const docRef = doc(db, "leagues", leagueId, "calendar", tournament.id);
       await updateDoc(docRef, { judgeAccepted: true });
 
-      Alert.alert(
-        t("common.success"),
-        t("calendar.alerts.judge_confirmed", { tournamentName: tournament.name })
-      );
-
+      Alert.alert("Sucesso", `Você confirmou como juiz no torneio: ${tournament.name}`);
       sendNotifToHost(
         tournament.createdBy,
         tournament.id,
         tournament.name,
-        t("calendar.alerts.judge_notif_host_confirmed")
+        "O juiz confirmou presença no torneio."
       );
     } catch (err) {
       console.log("Erro confirmJudge:", err);
-      Alert.alert(t("common.error"), t("calendar.alerts.judge_notif_host_confirmed"));
+      Alert.alert("Erro", "Falha ao confirmar juiz.");
     }
   }
 
   async function declineJudge(tournament: Torneio) {
     try {
-      const colRef = collection(db, "calendar", "torneios", "list");
-      const docRef = doc(colRef, tournament.id);
+      const docRef = doc(db, "leagues", leagueId, "calendar", tournament.id);
       await updateDoc(docRef, { judge: "", judgeAccepted: false });
 
-      Alert.alert(
-        t("common.success"),
-        t("calendar.alerts.judge_declined", { tournamentName: tournament.name })
-      );
-
+      Alert.alert("Sucesso", `Você recusou ser juiz no torneio: ${tournament.name}`);
       sendNotifToHost(
         tournament.createdBy,
         tournament.id,
         tournament.name,
-        t("calendar.alerts.judge_notif_host_declined")
+        "O juiz recusou participar do torneio."
       );
     } catch (err) {
       console.log("Erro declineJudge:", err);
-      Alert.alert(t("common.error"), t("calendar.alerts.judge_decline_error"));
+      Alert.alert("Erro", "Falha ao recusar juiz.");
     }
   }
 
-  async function sendNotifToHost(
-    hostId: string,
-    torneioId: string,
-    torneioName: string,
-    message: string
-  ) {
+  async function sendNotifToHost(hostId: string, torneioId: string, torneioName: string, message: string) {
     if (!hostId) return;
     try {
       const notifRef = doc(collection(db, "players", hostId, "notifications"));
@@ -838,7 +810,7 @@ export default function CalendarScreen() {
     }
   }
 
-  // --------------- Carregar Deck p/ sub-modal PDF ---------------
+  // =========================== DECKS (PDF) ===========================
   async function loadDeckCards(deckId: string) {
     try {
       const deckRef = doc(db, "decks", deckId);
@@ -856,25 +828,15 @@ export default function CalendarScreen() {
         cardNumber?: string;
       }[] = [];
 
-      deckData.pokemons?.forEach((c: any) =>
-        cards.push({ category: "Pokémon", ...c })
-      );
-      deckData.trainers?.forEach((c: any) =>
-        cards.push({ category: "Treinador", ...c })
-      );
-      deckData.energies?.forEach((c: any) =>
-        cards.push({ category: "Energia", ...c })
-      );
+      deckData.pokemons?.forEach((c: any) => cards.push({ category: "Pokémon", ...c }));
+      deckData.trainers?.forEach((c: any) => cards.push({ category: "Treinador", ...c }));
+      deckData.energies?.forEach((c: any) => cards.push({ category: "Energia", ...c }));
 
       setDeckCards(cards);
       setLoadingImages(true);
 
       const imagePromises = cards.map(async (card) => {
-        const imageUrl = await fetchCardImage(
-          card.name,
-          card.expansion,
-          card.cardNumber
-        );
+        const imageUrl = await fetchCardImage(card.name, card.expansion, card.cardNumber);
         return {
           key: `${card.name}__${card.expansion}__${card.cardNumber}`,
           url: imageUrl,
@@ -898,11 +860,7 @@ export default function CalendarScreen() {
     }
   }
 
-  async function fetchCardImage(
-    cardName: string,
-    expansion?: string,
-    cardNumber?: string
-  ): Promise<string | null> {
+  async function fetchCardImage(cardName: string, expansion?: string, cardNumber?: string) {
     try {
       const sanitized = cardName.replace(/\bPH\b/g, "").trim();
       const setId = expansion ? setIdMap[expansion.toUpperCase()] : undefined;
@@ -910,6 +868,7 @@ export default function CalendarScreen() {
       if (setId) queryParts.push(`set.id:"${setId}"`);
       if (cardNumber) queryParts.push(`number:"${cardNumber}"`);
       const query = queryParts.join("%20");
+
       const url = `https://api.pokemontcg.io/v2/cards?q=${query}`;
       const resp = await fetch(url, {
         headers: {
@@ -927,6 +886,489 @@ export default function CalendarScreen() {
     }
   }
 
+  // =========================== RENDER ===========================
+  function renderCard(tor: Torneio) {
+    const dt = moment(tor.date, "DD/MM/YYYY");
+    const isFuture = dt.isSameOrAfter(moment(), "day");
+    const eventLabel = tor.eventType || "Cup";
+    const judgeName = judgeMap[tor.judge] || "Sem Juiz";
+    const headJudgeName = headJudgeMap[tor.headJudge] || "Sem Head Judge";
+    const isThisJudgePending = tor.judge === playerId && tor.judgeAccepted === false;
+    const canAccessDetails = isHost || (tor.judge === playerId && tor.judgeAccepted);
+
+    const creatorName = playerNameMap[tor.createdBy] || `Jogador ${tor.createdBy}`;
+
+    return (
+      <Animatable.View
+        style={styles.card}
+        key={`t-${tor.id}`}
+        animation="fadeInUp"
+        duration={700}
+      >
+        <Text style={styles.cardTitle}>{tor.name}</Text>
+        <Text style={styles.cardSub}>
+          <MaterialCommunityIcons name="calendar" size={14} color="#ccc" />
+          {"  "}
+          {tor.date} às {tor.time} | [{eventLabel}]
+        </Text>
+        <Text style={styles.cardSub}>
+          Criado por: {creatorName}
+          {"\n"}
+          Juiz: {judgeName}
+          {tor.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
+          {"\n"}
+          Head Judge: {headJudgeName}
+        </Text>
+
+        {isThisJudgePending && (
+          <View style={{ flexDirection: "row", marginTop: 8 }}>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { marginRight: 8 }]}
+              onPress={() => confirmJudge(tor)}
+            >
+              <Text style={styles.buttonSmallText}>Confirmar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
+              onPress={() => declineJudge(tor)}
+            >
+              <Text style={styles.buttonSmallText}>Recusar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isHost && (
+          <View style={{ flexDirection: "row", marginTop: 6 }}>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { marginRight: 8 }]}
+              onPress={() => openEditModal(tor)}
+            >
+              <Text style={styles.buttonSmallText}>Editar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
+              onPress={() => handleDeleteTorneio(tor)}
+            >
+              <Text style={styles.buttonSmallText}>Excluir</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isFuture ? (
+          <View style={{ flexDirection: "row", marginTop: 8 }}>
+            {canAccessDetails && (
+              <TouchableOpacity
+                style={[styles.inscreverButton, { marginRight: 8 }]}
+                onPress={() => handleOpenDetalhe(tor)}
+              >
+                <Ionicons name="information-circle" size={16} color="#fff" />
+                <Text style={styles.inscreverButtonText}>  Detalhes</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.inscreverButton}
+              onPress={() => handleInscrever(tor)}
+            >
+              <Ionicons name="checkmark-circle" size={16} color="#fff" />
+              <Text style={styles.inscreverButtonText}>  Inscrever</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.inscreverButton, { backgroundColor: "#777", marginTop: 8 }]}
+            onPress={() => (canAccessDetails ? handleOpenDetalhes(tor) : null)}
+          >
+            <Ionicons name="checkmark-done-circle" size={16} color="#fff" />
+            <Text style={styles.inscreverButtonText}>
+              {canAccessDetails ? "Detalhes (Já ocorreu)" : "Já ocorreu"}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </Animatable.View>
+    );
+  }
+
+  // =========================== MODAL DETALHES ===========================
+  function handleOpenDetalhe(t: Torneio) {
+    setDetalhesTorneio(t);
+    setDetalhesModalVisible(true);
+  }
+  function closeDetalhe() {
+    setDetalhesModalVisible(false);
+    setDetalhesTorneio(null);
+  }
+
+  // Fullscreen
+  function renderDetalhesModal() {
+    if (!detalhesTorneio) return null;
+    const maxStr = detalhesTorneio.maxVagas
+      ? detalhesTorneio.maxVagas.toString()
+      : "Ilimitado";
+
+    return (
+      <Modal
+        visible={detalhesModalVisible}
+        animationType="slide"
+        onRequestClose={closeDetalhes}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: DARK }}>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>Detalhes do Torneio</Text>
+
+            <Text style={styles.modalLabel}>Nome:</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.name}</Text>
+
+            <Text style={styles.modalLabel}>Data:</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.date}</Text>
+
+            <Text style={styles.modalLabel}>Horário:</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.time}</Text>
+
+            <Text style={styles.modalLabel}>Tipo de Evento:</Text>
+            <Text style={styles.modalInput}>{detalhesTorneio.eventType}</Text>
+
+            <Text style={styles.modalLabel}>Juiz:</Text>
+            <Text style={styles.modalInput}>
+              {judgeMap[detalhesTorneio.judge] || "Sem juiz"}
+              {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
+            </Text>
+
+            <Text style={styles.modalLabel}>Head Judge:</Text>
+            <Text style={styles.modalInput}>
+              {headJudgeMap[detalhesTorneio.headJudge] || "Sem head judge"}
+            </Text>
+
+            <Text style={styles.modalLabel}>Máximo de Vagas:</Text>
+            <Text style={styles.modalInput}>{maxStr}</Text>
+
+            <Text style={styles.modalLabel}>Abertura Inscrições:</Text>
+            <Text style={styles.modalInput}>
+              {detalhesTorneio.inscricoesAbertura || "Não definido"}
+            </Text>
+
+            <Text style={styles.modalLabel}>Fechamento Inscrições:</Text>
+            <Text style={styles.modalInput}>
+              {detalhesTorneio.inscricoesFechamento || "Não definido"}
+            </Text>
+
+            {detalhesTorneio.prioridadeVip && (
+              <>
+                <Text style={styles.modalLabel}>Abertura (VIP):</Text>
+                <Text style={styles.modalInput}>
+                  {detalhesTorneio.inscricoesVipAbertura || "Não definido"}
+                </Text>
+                <Text style={styles.modalLabel}>Fechamento (VIP):</Text>
+                <Text style={styles.modalInput}>
+                  {detalhesTorneio.inscricoesVipFechamento || "Não definido"}
+                </Text>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 20 }]}
+              onPress={() => openInscricoesModal(detalhesTorneio)}
+            >
+              <Text style={styles.buttonText}>Ver Inscrições</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
+              onPress={closeDetalhes}
+            >
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  // =========================== MODAL INSCRIÇÕES ===========================
+  async function openInscricoesModal(t: Torneio) {
+    setDetalhesTorneio(t);
+
+    const colRef = collection(db, "leagues", leagueId, "calendar", t.id, "inscricoes");
+    onSnapshot(colRef, (snap) => {
+      const arr: Inscricao[] = [];
+      snap.forEach((ds) => {
+        arr.push({
+          userId: ds.id,
+          deckId: ds.data().deckId,
+          createdAt: ds.data().createdAt || "",
+        });
+      });
+      arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
+      setInscricoes(arr);
+
+      // Carrega info de deck e jogador
+      const deckIdsSet = new Set<string>();
+      const userIdsSet = new Set<string>();
+      arr.forEach((i) => {
+        if (i.deckId) deckIdsSet.add(i.deckId);
+        userIdsSet.add(i.userId);
+      });
+
+      deckIdsSet.forEach(async (dkId) => {
+        const dRef = doc(db, "decks", dkId);
+        const dSnap = await getDoc(dRef);
+        if (dSnap.exists()) {
+          const nm = dSnap.data().name || `Deck ${dkId}`;
+          setDeckNameMap((prev) => ({ ...prev, [dkId]: nm }));
+        }
+      });
+
+      userIdsSet.forEach(async (uId) => {
+        if (!playerNameMap[uId]) {
+          const pRef = doc(db, "players", uId);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+            const nm = pSnap.data().fullname || `Jogador ${uId}`;
+            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+          }
+        }
+      });
+    });
+
+    // Carrega lista de espera
+    const waitColRef = collection(db, "leagues", leagueId, "calendar", t.id, "espera");
+    onSnapshot(waitColRef, async (wanp) => {
+      const arr: Espera[] = [];
+      const userIdsToLoad = new Set<string>();
+
+      wanp.forEach((ds) => {
+        arr.push({
+          userId: ds.id,
+          deckId: ds.data().deckId,
+          createdAt: ds.data().createdAt || "",
+          vip: ds.data().vip || false,
+        });
+        userIdsToLoad.add(ds.id);
+      });
+
+      // Ordena VIP e data
+      arr.sort((a, b) => {
+        if (a.vip && !b.vip) return -1;
+        if (!a.vip && b.vip) return 1;
+        return a.createdAt.localeCompare(b.createdAt);
+      });
+
+      setEspera(arr);
+
+      // Buscar nome do jogador
+      userIdsToLoad.forEach(async (uId) => {
+        if (!playerNameMap[uId]) {
+          const pRef = doc(db, "players", uId);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+            const nm = pSnap.data().fullname || `Jogador ${uId}`;
+            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+          }
+        }
+      });
+    });
+
+    setInscricoesModalVisible(true);
+  }
+
+  function closeInscricoesModa() {
+    setInscricoesModalVisible(false);
+    setInscricoes([]);
+    setEspera([]);
+  }
+
+  function renderInscricoesModal() {
+    if (!detalhesTorneio) return null;
+    return (
+      <Modal
+        visible={inscricoesModalVisible}
+        animationType="slide"
+        onRequestClose={closeInscricoesModa}
+      >
+        <SafeAreaView style={[styles.modalContainer, { paddingBottom: 40 }]}>
+          <ScrollView style={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>Inscrições e Decks</Text>
+            {inscricoes.length === 0 ? (
+              <Text style={{ color: "#ccc", marginVertical: 10 }}>
+                Nenhuma inscrição encontrada.
+              </Text>
+            ) : (
+              inscricoes.map((ins, idx) => (
+                <Animatable.View
+                  key={`ins-${idx}`}
+                  style={[
+                    styles.inscricaoItem,
+                    { flexDirection: "row", justifyContent: "space-between" },
+                  ]}
+                  animation="fadeInUp"
+                  duration={600}
+                >
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={() => {
+                      if (ins.deckId) {
+                        setSelectedDeckIdForPdf(ins.deckId);
+                        loadDeckCards(ins.deckId);
+                        setDeckPdfModalVisible(true);
+                      }
+                    }}
+                  >
+                    <Text style={styles.inscricaoItemText}>
+                      Jogador: {playerNameMap[ins.userId] || ins.userId}
+                    </Text>
+                    <Text style={styles.inscricaoItemText}>
+                      Deck:{" "}
+                      {ins.deckId
+                        ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})`
+                        : "Sem deck"}
+                    </Text>
+                    <Text style={styles.inscricaoItemText}>
+                      Data/Hora: {formatIsoDate(ins.createdAt)}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {isHost && (
+                    <TouchableOpacity
+                      onPress={() => handleExcluirInscricao(detalhesTorneio.id, ins.userId)}
+                      style={{
+                        backgroundColor: "#fe5f55",
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 4,
+                        alignSelf: "center",
+                        marginLeft: 10,
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                        Excluir
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </Animatable.View>
+              ))
+            )}
+
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 20 }]}
+              onPress={closeInscricoesModal}
+            >
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 10, backgroundColor: "#777" }]}
+              onPress={() => setEsperaModalVisible(true)}
+            >
+              <Text style={styles.buttonText}>Ver Lista de Espera</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  // =========================== LISTA DE ESPERA MODAL ===========================
+  function renderEsperaModal() {
+    return (
+      <Modal
+        visible={esperaModalVisible}
+        animationType="fade"
+        onRequestClose={() => setEsperaModalVisible(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>Lista de Espera</Text>
+            {espera.length === 0 ? (
+              <Text style={{ color: "#ccc", marginVertical: 10 }}>
+                Nenhum jogador na lista de espera.
+              </Text>
+            ) : (
+              espera.map((e, idx) => (
+                <Animatable.View
+                  key={`espera-${idx}`}
+                  style={[styles.inscricaoItem, { flexDirection: "column" }]}
+                  animation="fadeInUp"
+                  duration={600}
+                >
+                  <Text style={styles.inscricaoItemText}>
+                    Jogador: {playerNameMap[e.userId] || e.userId}
+                  </Text>
+                  <Text style={styles.inscricaoItemText}>VIP: {e.vip ? "Sim" : "Não"}</Text>
+                  <Text style={styles.inscricaoItemText}>
+                    Data/Hora: {formatIsoDate(e.createdAt)}
+                  </Text>
+                </Animatable.View>
+              ))
+            )}
+
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 20 }]}
+              onPress={() => setEsperaModalVisible(false)}
+            >
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  // =========================== MODAL INSCRIÇÃO USUÁRIO ===========================
+  function renderInscricaoModal() {
+    return (
+      <Modal
+        visible={inscricaoModalVisible}
+        animationType="slide"
+        onRequestClose={() => setInscricaoModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.modalContainer, { paddingBottom: 40 }]}>
+          <ScrollView style={{ padding: 16 }}>
+            <Text style={styles.modalTitle}>Escolha seu Deck</Text>
+
+            {detalhesTorneio?.eventType !== "Liga Local" ? (
+              userDecks.length === 0 ? (
+                <Text style={{ color: "#fff", marginBottom: 10 }}>
+                  Você não possui decks cadastrados.
+                </Text>
+              ) : (
+                userDecks.map((dk) => (
+                  <TouchableOpacity
+                    key={`dk-${dk.id}`}
+                    style={[
+                      styles.deckOption,
+                      selectedDeckId === dk.id && { backgroundColor: "#666" },
+                    ]}
+                    onPress={() => setSelectedDeckId(dk.id)}
+                  >
+                    <Text style={styles.deckOptionText}>
+                      {dk.playerId} | {dk.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              )
+            ) : (
+              <Text style={{ color: "#ccc", marginBottom: 10 }}>
+                Este tipo de torneio não exige deck.
+              </Text>
+            )}
+
+            <View style={{ flexDirection: "row", justifyContent: "space-around", marginTop: 20 }}>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: "#999" }]}
+                onPress={() => setInscricaoModalVisible(false)}
+              >
+                <Text style={styles.buttonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
+                <Text style={styles.buttonText}>Salvar</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  // =========================== MODAL DECK (PDF) ===========================
   function renderDeckPdfModal() {
     return (
       <Modal
@@ -937,8 +1379,7 @@ export default function CalendarScreen() {
         <SafeAreaView style={styles.modalContainer}>
           <Text style={styles.modalTitle}>Detalhes do Deck</Text>
           <Text style={{ color: "#ccc", textAlign: "center", marginBottom: 20 }}>
-            {t("calendar.registration.title")}:
-            {deckNameMap[selectedDeckIdForPdf] || `ID ${selectedDeckIdForPdf}`}
+            Deck: {deckNameMap[selectedDeckIdForPdf] || `ID ${selectedDeckIdForPdf}`}
           </Text>
 
           <ScrollView style={{ marginHorizontal: 16 }}>
@@ -955,14 +1396,10 @@ export default function CalendarScreen() {
                         </Text>
                         <Text style={styles.cardSub}>Qtd: {card.quantity}</Text>
                         {card.expansion && (
-                          <Text style={styles.cardSub}>
-                            Expansão: {card.expansion}
-                          </Text>
+                          <Text style={styles.cardSub}>Expansão: {card.expansion}</Text>
                         )}
                         {card.cardNumber && (
-                          <Text style={styles.cardSub}>
-                            Nº: {card.cardNumber}
-                          </Text>
+                          <Text style={styles.cardSub}>Nº: {card.cardNumber}</Text>
                         )}
                       </View>
                       <View style={styles.cardImageContainer}>
@@ -984,7 +1421,7 @@ export default function CalendarScreen() {
               })
             ) : (
               <Text style={{ color: "#fff", marginBottom: 20 }}>
-                {t("calendar.registration.no_decks")}
+                Nenhuma carta encontrada ou deck vazio.
               </Text>
             )}
           </ScrollView>
@@ -993,466 +1430,153 @@ export default function CalendarScreen() {
             style={[styles.button, { margin: 16 }]}
             onPress={() => setDeckPdfModalVisible(false)}
           >
-            <Text style={styles.buttonText}>
-              {t("calendar.details.close_button")}
-            </Text>
+            <Text style={styles.buttonText}>Fechar</Text>
           </TouchableOpacity>
         </SafeAreaView>
       </Modal>
     );
   }
 
-  function renderCard(tor: Torneio) {
-    const dt = moment(tor.date, "DD/MM/YYYY");
-    const isFuture = dt.isSameOrAfter(moment(), "day");
-    const eventLabel = tor.eventType || "Cup";
-    const judgeName = judgeMap[tor.judge] || t("calendar.card.judge_label");
-    const headJudgeName =
-      headJudgeMap[tor.headJudge] || t("calendar.card.head_judge_label");
-    const isThisJudgePending =
-      tor.judge === playerId && tor.judgeAccepted === false;
-    const canAccessDetails = isHost || (tor.judge === playerId && tor.judgeAccepted);
-
+  // =========================== SELEÇÃO DE JUÍZ E HEADJUDGE ===========================
+  function renderJudgeSelectModal() {
     return (
-      <View style={styles.card} key={`t-${tor.id}`}>
-        <Text style={styles.cardTitle}>{tor.name}</Text>
-        <Text style={styles.cardSub}>
-          {tor.date} {t("calendar.form.time_label")?.split(" ")[0] || "às"}{" "}
-          {tor.time} | [{eventLabel}]
-        </Text>
-        <Text style={styles.cardSub}>
-          {t("calendar.card.creator_label")}: {tor.createdBy}
-          {"\n"}
-          {t("calendar.card.judge_label")}: {judgeName}
-          {tor.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
-          {"\n"}
-          {t("calendar.card.head_judge_label")}: {headJudgeName}
-        </Text>
-
-        {isThisJudgePending && (
-          <View style={{ flexDirection: "row", marginTop: 8 }}>
-            <TouchableOpacity
-              style={[styles.buttonSmall, { marginRight: 8 }]}
-              onPress={() => confirmJudge(tor)}
-            >
-              <Text style={styles.buttonSmallText}>{t("common.confirm")}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
-              onPress={() => declineJudge(tor)}
-            >
-              <Text style={styles.buttonSmallText}>{t("common.decline")}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {isHost && (
-          <View style={{ flexDirection: "row", marginTop: 6 }}>
-            <TouchableOpacity
-              style={[styles.buttonSmall, { marginRight: 8 }]}
-              onPress={() => openEditModal(tor)}
-            >
-              <Text style={styles.buttonSmallText}>{t("common.edit")}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
-              onPress={() => handleDeleteTorneio(tor)}
-            >
-              <Text style={styles.buttonSmallText}>{t("common.delete")}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {isFuture ? (
-          <View style={{ flexDirection: "row", marginTop: 8 }}>
-            {canAccessDetails && (
+      <Modal
+        visible={judgeSelectModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setJudgeSelectModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPressOut={() => setJudgeSelectModal(false)}
+        >
+          <View style={[styles.selectModalInner]}>
+            <ScrollView>
               <TouchableOpacity
-                style={[styles.inscreverButton, { marginRight: 8 }]}
-                onPress={() => handleOpenDetalhes(tor)}
+                style={styles.selectScrollItem}
+                onPress={() => {
+                  setEditJudge("");
+                  setJudgeSelectModal(false);
+                }}
               >
-                <Text style={styles.inscreverButtonText}>
-                  {t("calendar.card.details_button")}
-                </Text>
+                <Text style={{ color: "#fff" }}>Nenhum (Padrão)</Text>
               </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={styles.inscreverButton}
-              onPress={() => handleInscrever(tor)}
-            >
-              <Text style={styles.inscreverButtonText}>
-                {t("calendar.card.register_button")}
-              </Text>
-            </TouchableOpacity>
+              {judgeOptions.map((j) => (
+                <TouchableOpacity
+                  key={`judge-${j.userId}`}
+                  style={styles.selectScrollItem}
+                  onPress={() => {
+                    setEditJudge(j.userId);
+                    setJudgeSelectModal(false);
+                  }}
+                >
+                  <Text style={{ color: "#fff" }}>{j.fullname}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
-        ) : (
-          <TouchableOpacity
-            style={[styles.inscreverButton, { backgroundColor: "#777", marginTop: 8 }]}
-            onPress={() => (canAccessDetails ? handleOpenDetalhes(tor) : null)}
-          >
-            <Text style={styles.inscreverButtonText}>
-              {canAccessDetails
-                ? t("calendar.card.details_button")
-                : t("calendar.card.already_occurred")}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  }
-
-  function renderDetalhesModal() {
-    if (!detalhesTorneio) return null;
-
-    const inscritosCount = inscricoes.length;
-    const maxStr = detalhesTorneio.maxVagas
-      ? detalhesTorneio.maxVagas.toString()
-      : t("common.unlimited");
-
-    return (
-      <Modal
-        visible={detalhesModalVisible}
-        animationType="slide"
-        onRequestClose={closeDetalhes}
-      >
-        <SafeAreaView style={[styles.modalContainer, { paddingBottom: 40 }]}>
-          <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>{t("calendar.details.title")}</Text>
-
-            <Text style={styles.modalLabel}>{t("calendar.details.name_label")}</Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.name}</Text>
-
-            <Text style={styles.modalLabel}>{t("calendar.details.date_label")}</Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.date}</Text>
-
-            <Text style={styles.modalLabel}>{t("calendar.details.time_label")}</Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.time}</Text>
-
-            <Text style={styles.modalLabel}>
-              {t("calendar.details.event_type_label")}
-            </Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.eventType}</Text>
-
-            <Text style={styles.modalLabel}>{t("calendar.details.judge_label")}</Text>
-            <Text style={styles.modalInput}>
-              {judgeMap[detalhesTorneio.judge] || "Sem juiz"}
-              {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
-            </Text>
-
-            <Text style={styles.modalLabel}>
-              {t("calendar.details.head_judge_label")}
-            </Text>
-            <Text style={styles.modalInput}>
-              {headJudgeMap[detalhesTorneio.headJudge] || "Sem head judge"}
-            </Text>
-
-            <Text style={styles.modalLabel}>Número de Vagas</Text>
-            <Text style={styles.modalInput}>{maxStr}</Text>
-
-            <Text style={styles.modalLabel}>Inscrições Feitas</Text>
-            <Text style={styles.modalInput}>{inscricoes.length}</Text>
-
-            <Text style={styles.modalLabel}>Horário de Abertura</Text>
-            <Text style={styles.modalInput}>
-              {detalhesTorneio.inscricoesAbertura || "Não definido"}
-            </Text>
-
-            <Text style={styles.modalLabel}>Horário de Fechamento</Text>
-            <Text style={styles.modalInput}>
-              {detalhesTorneio.inscricoesFechamento || "Não definido"}
-            </Text>
-
-            {detalhesTorneio.prioridadeVip && (
-              <>
-                <Text style={styles.modalLabel}>Abertura para VIPs (separado)</Text>
-                <Text style={styles.modalInput}>
-                  {detalhesTorneio.inscricoesVipAbertura || "Não definido"}
-                </Text>
-
-                <Text style={styles.modalLabel}>
-                  Fechamento para VIPs (separado)
-                </Text>
-                <Text style={styles.modalInput}>
-                  {detalhesTorneio.inscricoesVipFechamento || "Não definido"}
-                </Text>
-              </>
-            )}
-
-            <TouchableOpacity
-              style={[styles.button, { marginTop: 20 }]}
-              onPress={() => openInscricoesModal(detalhesTorneio)}
-            >
-              <Text style={styles.buttonText}>
-                {t("calendar.details.view_inscriptions_button")}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
-              onPress={closeDetalhes}
-            >
-              <Text style={styles.buttonText}>
-                {t("calendar.details.close_button")}
-              </Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </SafeAreaView>
+        </TouchableOpacity>
       </Modal>
     );
   }
 
-  function renderEsperaModal() {
-    if (!detalhesTorneio) return null;
-
+  function renderHeadJudgeSelectModal() {
     return (
       <Modal
-        visible={esperaModalVisible}
+        visible={headJudgeSelectModal}
         animationType="slide"
-        onRequestClose={() => setEsperaModalVisible(false)}
+        transparent
+        onRequestClose={() => setHeadJudgeSelectModal(false)}
       >
-        <SafeAreaView style={styles.modalContainer}>
-          <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>Lista de Espera</Text>
-            {espera.length === 0 ? (
-              <Text style={{ color: "#ccc", marginVertical: 10 }}>
-                Nenhum jogador na lista de espera.
-              </Text>
-            ) : (
-              espera.map((e, idx) => (
-                <View
-                  key={`espera-${idx}`}
-                  style={[
-                    styles.inscricaoItem,
-                    { flexDirection: "column", justifyContent: "flex-start" },
-                  ]}
-                >
-                  <Text style={styles.inscricaoItemText}>
-                    Jogador: {playerNameMap[e.userId] || e.userId}
-                  </Text>
-                  <Text style={styles.inscricaoItemText}>
-                    VIP: {e.vip ? "Sim" : "Não"}
-                  </Text>
-                  <Text style={styles.inscricaoItemText}>
-                    Data/Hora: {formatIsoDate(e.createdAt)}
-                  </Text>
-                </View>
-              ))
-            )}
-            <TouchableOpacity
-              style={[styles.button, { marginTop: 20 }]}
-              onPress={() => setEsperaModalVisible(false)}
-            >
-              <Text style={styles.buttonText}>Fechar</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-    );
-  }
-
-  function renderInscricoesModal() {
-    if (!detalhesTorneio) return null;
-
-    let etapaInscricoes = "Normal";
-    const agora = moment();
-    if (detalhesTorneio.prioridadeVip) {
-      if (
-        detalhesTorneio.inscricoesVipAbertura &&
-        agora.isBefore(moment(detalhesTorneio.inscricoesVipAbertura, "HH:mm"))
-      ) {
-        etapaInscricoes = "Aguardando VIP";
-      } else if (
-        detalhesTorneio.inscricoesVipFechamento &&
-        agora.isBefore(moment(detalhesTorneio.inscricoesVipFechamento, "HH:mm"))
-      ) {
-        etapaInscricoes = "Inscrições VIP";
-      } else {
-        etapaInscricoes = "Inscrições Gerais";
-      }
-    }
-
-    return (
-      <Modal
-        visible={inscricoesModalVisible}
-        animationType="slide"
-        onRequestClose={closeInscricoesModal}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>
-              {t("calendar.inscriptions.title", "Inscrições / Decks")}
-            </Text>
-
-            <Text style={{ color: "#fff", marginBottom: 10 }}>
-              Etapa Atual: {etapaInscricoes}
-            </Text>
-
-            {inscricoes.length === 0 ? (
-              <Text style={{ color: "#ccc", marginVertical: 10 }}>
-                {t("calendar.inscriptions.none", "Nenhuma inscrição encontrada.")}
-              </Text>
-            ) : (
-              inscricoes.map((ins, idx) => (
-                <View
-                  key={`ins-${idx}`}
-                  style={[
-                    styles.inscricaoItem,
-                    { flexDirection: "row", justifyContent: "space-between" },
-                  ]}
-                >
-                  <TouchableOpacity
-                    style={{ flex: 1 }}
-                    onPress={() =>
-                      ins.deckId
-                        ? (setSelectedDeckIdForPdf(ins.deckId),
-                          loadDeckCards(ins.deckId),
-                          setDeckPdfModalVisible(true))
-                        : null
-                    }
-                  >
-                    <Text style={styles.inscricaoItemText}>
-                      {t("jogador.header", "Jogador")}:{" "}
-                      {playerNameMap[ins.userId] || ins.userId}
-                    </Text>
-                    <Text style={styles.inscricaoItemText}>
-                      Deck:{" "}
-                      {ins.deckId
-                        ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})`
-                        : "Sem deck"}
-                    </Text>
-                    <Text style={styles.inscricaoItemText}>
-                      Data/Hora: {formatIsoDate(ins.createdAt)}
-                    </Text>
-                  </TouchableOpacity>
-
-                  {isHost && (
-                    <TouchableOpacity
-                      onPress={() =>
-                        handleExcluirInscricao(detalhesTorneio.id, ins.userId)
-                      }
-                      style={{
-                        backgroundColor: "#fe5f55",
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: 4,
-                        alignSelf: "center",
-                        marginLeft: 10,
-                      }}
-                    >
-                      <Text style={{ color: "#fff", fontWeight: "bold" }}>
-                        Excluir
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ))
-            )}
-
-            <TouchableOpacity
-              style={[styles.button, { marginTop: 20 }]}
-              onPress={closeInscricoesModal}
-            >
-              <Text style={styles.buttonText}>
-                {t("calendar.details.close_button", "Fechar")}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.button, { marginTop: 10, backgroundColor: "#777" }]}
-              onPress={() => setEsperaModalVisible(true)}
-            >
-              <Text style={styles.buttonText}>Lista de Espera</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-    );
-  }
-
-  function renderInscricaoModal() {
-    return (
-      <Modal
-        visible={inscricaoModalVisible}
-        animationType="slide"
-        onRequestClose={() => setInscricaoModalVisible(false)}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>
-              {t("calendar.registration.title")}
-            </Text>
-
-            {detalhesTorneio?.eventType !== "Liguinha" ? (
-              <>
-                {userDecks.length === 0 ? (
-                  <Text style={{ color: "#fff", marginBottom: 10 }}>
-                    {t("calendar.registration.no_decks")}
-                  </Text>
-                ) : (
-                  userDecks.map((dk) => (
-                    <TouchableOpacity
-                      key={`dk-${dk.id}`}
-                      style={[
-                        styles.deckOption,
-                        selectedDeckId === dk.id && { backgroundColor: "#666" },
-                      ]}
-                      onPress={() => setSelectedDeckId(dk.id)}
-                    >
-                      <Text style={styles.deckOptionText}>
-                        {dk.playerId} | {dk.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </>
-            ) : (
-              <Text style={{ color: "#ccc", marginBottom: 10 }}>
-                {t(
-                  "calendar.registration.no_deck_required",
-                  "Não é necessário enviar um deck para este torneio."
-                )}
-              </Text>
-            )}
-
-            <View style={styles.modalButtons}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPressOut={() => setHeadJudgeSelectModal(false)}
+        >
+          <View style={[styles.selectModalInner]}>
+            <ScrollView>
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: "#999" }]}
-                onPress={() => setInscricaoModalVisible(false)}
+                style={styles.selectScrollItem}
+                onPress={() => {
+                  setEditHeadJudge("");
+                  setHeadJudgeSelectModal(false);
+                }}
               >
-                <Text style={styles.buttonText}>
-                  {t("calendar.form.cancel_button")}
-                </Text>
+                <Text style={{ color: "#fff" }}>Nenhum</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
-                <Text style={styles.buttonText}>
-                  {t("calendar.registration.submit_button")}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
+              {headJudgeOptions.map((hj) => (
+                <TouchableOpacity
+                  key={`headjudge-${hj.userId}`}
+                  style={styles.selectScrollItem}
+                  onPress={() => {
+                    setEditHeadJudge(hj.userId);
+                    setHeadJudgeSelectModal(false);
+                  }}
+                >
+                  <Text style={{ color: "#fff" }}>{hj.fullname}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
       </Modal>
     );
   }
 
+  // =========================== SELEÇÃO DO TIPO DE EVENTO ===========================
+  function renderEventTypeSelectModal() {
+    return (
+      <Modal
+        visible={eventTypeSelectModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEventTypeSelectModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPressOut={() => setEventTypeSelectModal(false)}
+        >
+          <View style={styles.selectModalInner}>
+            <ScrollView>
+              {eventTypesList.map((et) => (
+                <TouchableOpacity
+                  key={`evtype-${et}`}
+                  style={styles.selectScrollItem}
+                  onPress={() => {
+                    setEditEventType(et);
+                    setEventTypeSelectModal(false);
+                  }}
+                >
+                  <Text style={{ color: "#fff" }}>{et}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    );
+  }
+
+  // =========================== RENDER FINAL ===========================
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handlePrevMonth}>
-          <Text style={styles.headerButton}>{t("calendar.header.prev_month")}</Text>
+      {/* Header do Mês */}
+      <View style={[styles.header, { justifyContent: "space-between" }]}>
+        <TouchableOpacity onPress={handlePrevMonth} style={{ paddingHorizontal: 20 }}>
+          <Ionicons name="chevron-back" size={26} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {currentMonth.format("MMMM [de] YYYY")}
-        </Text>
-        <TouchableOpacity onPress={handleNextMonth}>
-          <Text style={styles.headerButton}>{t("calendar.header.next_month")}</Text>
+        <Text style={styles.headerTitle}>{currentMonth.format("MMMM [de] YYYY")}</Text>
+        <TouchableOpacity onPress={handleNextMonth} style={{ paddingHorizontal: 20 }}>
+          <Ionicons name="chevron-forward" size={26} color="#fff" />
         </TouchableOpacity>
       </View>
 
       {isHost && (
         <TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
-          <Text style={styles.createButtonText}>
-            {t("calendar.create_tournament")}
-          </Text>
+          <MaterialCommunityIcons name="plus" size={20} color="#FFF" />
+          <Text style={styles.createButtonText}>  Criar Torneio</Text>
         </TouchableOpacity>
       )}
 
@@ -1460,180 +1584,171 @@ export default function CalendarScreen() {
         {torneios.map((t) => renderCard(t))}
       </ScrollView>
 
-      {/* Modal CRIAR/EDITAR */}
+      {/* MODAL CRIAR/EDITAR TORN. */}
       <Modal
         visible={modalVisible}
         animationType="slide"
         onRequestClose={() => setModalVisible(false)}
       >
-        <SafeAreaView style={[styles.modalContainer, { paddingBottom: 10 }]}>
-          <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>
-              {editId
-                ? t("calendar.edit_tournament", "Editar Torneio")
-                : t("calendar.create_tournament")}
-            </Text>
+        <SafeAreaView style={[styles.modalContainer]}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          >
+            <ScrollView style={{ padding: 16 }}>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View>
+                  <Text style={styles.modalTitle}>
+                    {editId ? "Editar Torneio" : "Criar Torneio"}
+                  </Text>
 
-            <Text style={styles.modalLabel}>
-              {t("calendar.form.name_label")}
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editName}
-              onChangeText={setEditName}
-            />
+                  <Text style={styles.modalLabel}>Nome do Torneio</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editName}
+                    onChangeText={setEditName}
+                  />
 
-            <Text style={styles.modalLabel}>
-              {t("calendar.form.date_label")}
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editDate}
-              onChangeText={setEditDate}
-            />
+                  <Text style={styles.modalLabel}>Data (DD/MM/AAAA)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editDate}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskDate(txt, setEditDate)}
+                    maxLength={10}
+                    placeholder="Ex: 15/03/2023"
+                    placeholderTextColor="#777"
+                  />
 
-            <Text style={styles.modalLabel}>
-              {t("calendar.form.time_label")}
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editTime}
-              onChangeText={setEditTime}
-            />
+                  <Text style={styles.modalLabel}>Horário (HH:MM)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editTime}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskTime(txt, setEditTime)}
+                    maxLength={5}
+                    placeholder="Ex: 09:30"
+                    placeholderTextColor="#777"
+                  />
 
-            <Text style={styles.modalLabel}>
-              {t("calendar.form.event_type_label")}
-            </Text>
-            <Picker
-              selectedValue={editEventType}
-              onValueChange={(v) => setEditEventType(v)}
-              style={[styles.modalInput, { color: "#fff" }]}
-            >
-              <Picker.Item label={t("calendar.event_types.cup")} value="Cup" />
-              <Picker.Item
-                label={t("calendar.event_types.challenger")}
-                value="Challenger"
-              />
-              <Picker.Item
-                label={t("calendar.event_types.pre_release")}
-                value="Pre-release"
-              />
-              <Picker.Item
-                label={t("calendar.event_types.liguinha")}
-                value="Liguinha"
-              />
-              <Picker.Item
-                label={t("calendar.event_types.special_event")}
-                value="Evento Especial"
-              />
-            </Picker>
+                  <Text style={styles.modalLabel}>Tipo de Evento</Text>
+                  <TouchableOpacity
+                    style={[styles.modalInput, styles.selectFakeInput]}
+                    onPress={() => setEventTypeSelectModal(true)}
+                  >
+                    <Text style={{ color: "#fff" }}>{editEventType}</Text>
+                  </TouchableOpacity>
 
-            <Text style={styles.modalLabel}>
-              {t("calendar.form.judge_label")}
-            </Text>
-            <Picker
-              selectedValue={editJudge}
-              onValueChange={(v) => setEditJudge(v)}
-              style={[styles.modalInput, { color: "#fff" }]}
-            >
-              <Picker.Item label="Nenhum (Player comum)" value="" />
-              {judgeOptions.map((j) => (
-                <Picker.Item
-                  key={`judge-${j.userId}`}
-                  label={j.fullname}
-                  value={j.userId}
-                />
-              ))}
-            </Picker>
+                  <Text style={styles.modalLabel}>Juiz</Text>
+                  <TouchableOpacity
+                    style={[styles.modalInput, styles.selectFakeInput]}
+                    onPress={() => setJudgeSelectModal(true)}
+                  >
+                    <Text style={{ color: "#fff" }}>
+                      {editJudge
+                        ? judgeOptions.find((j) => j.userId === editJudge)?.fullname ||
+                          "Juiz Desconhecido"
+                        : "Nenhum (Padrão)"}
+                    </Text>
+                  </TouchableOpacity>
 
-            <Text style={styles.modalLabel}>
-              {t("calendar.form.head_judge_label")}
-            </Text>
-            <Picker
-              selectedValue={editHeadJudge}
-              onValueChange={(v) => setEditHeadJudge(v)}
-              style={[styles.modalInput, { color: "#fff" }]}
-            >
-              <Picker.Item label="Nenhum" value="" />
-              {headJudgeOptions.map((hj) => (
-                <Picker.Item
-                  key={`headjudge-${hj.userId}`}
-                  label={hj.fullname}
-                  value={hj.userId}
-                />
-              ))}
-            </Picker>
+                  <Text style={styles.modalLabel}>Head Judge</Text>
+                  <TouchableOpacity
+                    style={[styles.modalInput, styles.selectFakeInput]}
+                    onPress={() => setHeadJudgeSelectModal(true)}
+                  >
+                    <Text style={{ color: "#fff" }}>
+                      {editHeadJudge
+                        ? headJudgeOptions.find((hj) => hj.userId === editHeadJudge)?.fullname ||
+                          "Head Desconhecido"
+                        : "Nenhum"}
+                    </Text>
+                  </TouchableOpacity>
 
-            <Text style={styles.modalLabel}>Máximo de Vagas</Text>
-            <TextInput
-              style={styles.modalInput}
-              keyboardType="numeric"
-              value={editMaxVagas?.toString() || ""}
-              onChangeText={(v) => setEditMaxVagas(Number(v) || null)}
-            />
+                  <Text style={styles.modalLabel}>Máximo de Vagas</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    keyboardType="numeric"
+                    value={editMaxVagas?.toString() || ""}
+                    onChangeText={(v) => setEditMaxVagas(Number(v) || null)}
+                  />
 
-            <Text style={styles.modalLabel}>Início das Inscrições (HH:mm)</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editInscricoesAbertura}
-              onChangeText={setEditInscricoesAbertura}
-            />
+                  <Text style={styles.modalLabel}>Abertura Inscrições (HH:MM)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editInscricoesAbertura}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesAbertura)}
+                    maxLength={5}
+                    placeholder="Ex: 08:00"
+                    placeholderTextColor="#777"
+                  />
 
-            <Text style={styles.modalLabel}>Fechamento das Inscrições (HH:mm)</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editInscricoesFechamento}
-              onChangeText={setEditInscricoesFechamento}
-            />
+                  <Text style={styles.modalLabel}>Fechamento Inscrições (HH:MM)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editInscricoesFechamento}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesFechamento)}
+                    maxLength={5}
+                    placeholder="Ex: 10:00"
+                    placeholderTextColor="#777"
+                  />
 
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
-              <Text style={{ color: "#fff", marginRight: 10 }}>
-                Prioridade para VIPs
-              </Text>
-              <Switch
-                value={editPrioridadeVip}
-                onValueChange={setEditPrioridadeVip}
-              />
-            </View>
+                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
+                    <Text style={{ color: "#fff", marginRight: 10 }}>Prioridade VIP</Text>
+                    <Switch value={editPrioridadeVip} onValueChange={setEditPrioridadeVip} />
+                  </View>
 
-            {editPrioridadeVip && (
-              <>
-                <Text style={styles.modalLabel}>
-                  Início das Inscrições (VIP) (HH:mm)
-                </Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={editInscricoesVipAbertura}
-                  onChangeText={setEditInscricoesVipAbertura}
-                />
+                  {editPrioridadeVip && (
+                    <>
+                      <Text style={styles.modalLabel}>
+                        Abertura (VIP) (HH:MM)
+                      </Text>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={editInscricoesVipAbertura}
+                        keyboardType="numeric"
+                        onChangeText={(txt) =>
+                          handleMaskTime(txt, setEditInscricoesVipAbertura)
+                        }
+                        maxLength={5}
+                        placeholder="Ex: 07:30"
+                        placeholderTextColor="#777"
+                      />
 
-                <Text style={styles.modalLabel}>
-                  Fechamento das Inscrições (VIP) (HH:mm)
-                </Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={editInscricoesVipFechamento}
-                  onChangeText={setEditInscricoesVipFechamento}
-                />
-              </>
-            )}
+                      <Text style={styles.modalLabel}>
+                        Fechamento (VIP) (HH:MM)
+                      </Text>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={editInscricoesVipFechamento}
+                        keyboardType="numeric"
+                        onChangeText={(txt) =>
+                          handleMaskTime(txt, setEditInscricoesVipFechamento)
+                        }
+                        maxLength={5}
+                        placeholder="Ex: 09:00"
+                        placeholderTextColor="#777"
+                      />
+                    </>
+                  )}
 
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.button, { backgroundColor: "#999" }]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.buttonText}>
-                  {t("calendar.form.cancel_button")}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.button} onPress={handleSaveTorneio}>
-                <Text style={styles.buttonText}>
-                  {t("calendar.form.save_button")}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
+                  <View style={[styles.modalButtons, { marginTop: 20 }]}>
+                    <TouchableOpacity
+                      style={[styles.button, { backgroundColor: "#999" }]}
+                      onPress={() => setModalVisible(false)}
+                    >
+                      <Text style={styles.buttonText}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.button} onPress={handleSaveTorneio}>
+                      <Text style={styles.buttonText}>Salvar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
 
@@ -1642,10 +1757,15 @@ export default function CalendarScreen() {
       {renderDeckPdfModal()}
       {renderEsperaModal()}
       {renderInscricaoModal()}
+
+      {renderJudgeSelectModal()}
+      {renderHeadJudgeSelectModal()}
+      {renderEventTypeSelectModal()}
     </SafeAreaView>
   );
 }
 
+// =========================== FUNÇÕES AUXILIARES ===========================
 function formatIsoDate(isoStr: string) {
   if (!isoStr) return "";
   const m = moment(isoStr);
@@ -1653,6 +1773,7 @@ function formatIsoDate(isoStr: string) {
   return m.format("DD/MM/YYYY HH:mm");
 }
 
+// =========================== ESTILOS ===========================
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
@@ -1666,30 +1787,29 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingTop: 10,
-  },
-  headerButton: {
-    color: SECONDARY,
-    fontSize: 24,
-    fontWeight: "bold",
+    backgroundColor: DARK,
+    paddingVertical: 10,
   },
   headerTitle: {
     color: SECONDARY,
     fontSize: 18,
     fontWeight: "bold",
+    textTransform: "capitalize",
   },
   createButton: {
     backgroundColor: PRIMARY,
-    margin: 16,
+    marginHorizontal: 16,
+    marginVertical: 8,
     paddingVertical: 10,
     borderRadius: 8,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
   },
   createButtonText: {
     color: SECONDARY,
     fontWeight: "bold",
+    fontSize: 16,
   },
   card: {
     backgroundColor: GRAY,
@@ -1699,13 +1819,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   cardTitle: {
-    color: SECONDARY,
+    color: PRIMARY,
     fontSize: 16,
     fontWeight: "bold",
+    marginBottom: 2,
   },
   cardSub: {
     color: "#ccc",
-    fontSize: 14,
+    fontSize: 13,
+    marginVertical: 2,
   },
   buttonSmall: {
     backgroundColor: "#555",
@@ -1718,6 +1840,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   inscreverButton: {
+    flexDirection: "row",
     backgroundColor: "#4CAF50",
     padding: 8,
     borderRadius: 6,
@@ -1726,6 +1849,12 @@ const styles = StyleSheet.create({
   inscreverButtonText: {
     color: SECONDARY,
     fontWeight: "bold",
+    marginLeft: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "center",
   },
   modalContainer: {
     flex: 1,
@@ -1742,6 +1871,7 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     fontSize: 14,
     marginTop: 12,
+    fontWeight: "600",
   },
   modalInput: {
     backgroundColor: "#4A4A4A",
@@ -1755,7 +1885,6 @@ const styles = StyleSheet.create({
   modalButtons: {
     flexDirection: "row",
     justifyContent: "space-around",
-    marginTop: 20,
   },
   button: {
     backgroundColor: PRIMARY,
@@ -1811,5 +1940,23 @@ const styles = StyleSheet.create({
     color: "#ccc",
     fontSize: 12,
     textAlign: "center",
+  },
+
+  // Para as listas de seleção (Juiz, HeadJudge, Tipo Evento)
+  selectFakeInput: {
+    justifyContent: "center",
+  },
+  selectModalInner: {
+    backgroundColor: "#2B2B2B",
+    marginHorizontal: 30,
+    marginVertical: 100,
+    borderRadius: 8,
+    padding: 10,
+    flex: 1,
+  },
+  selectScrollItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#555",
+    paddingVertical: 10,
   },
 });
