@@ -6,10 +6,10 @@ import {
   View,
   Text,
   Modal,
-  StyleSheet,
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { db } from "../lib/firebaseConfig";
@@ -17,13 +17,20 @@ import {
   doc,
   getDoc,
   getDocs,
-  collection,
-  collectionGroup,
+  query,
+  where,
 } from "firebase/firestore";
+
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Animatable from "react-native-animatable";
 
-/** Interface para o histórico de torneios que o jogador jogou */
+/////////////////////////////////////////////////
+//     TIPOS E INTERFACES
+/////////////////////////////////////////////////
+
+/** Estrutura de histórico de torneio que o jogador jogou */
 interface TournamentHistoryItem {
+  leagueId: string; // Liga a que o torneio pertence
   tournamentId: string;
   tournamentName: string;
   place: number;
@@ -31,48 +38,77 @@ interface TournamentHistoryItem {
   roundCount: number;
 }
 
-/** Interface para cada partida */
+/** Estrutura para cada partida */
 interface MatchDetail {
   id: string;
+  roundNumber?: string;      // Agora guardaremos o número da rodada
   player1_id: string;
   player2_id: string;
+  player1_name?: string;     // Nome do jogador 1
+  player2_name?: string;     // Nome do jogador 2
   outcomeNumber?: number;
 }
 
-/** Props para o modal */
+/** Estrutura para standings (pódio) */
+interface PlaceData {
+  userid: string;
+  fullname: string;
+  place: number;
+}
+
+/////////////////////////////////////////////////
+//     PROPS DO COMPONENTE
+/////////////////////////////////////////////////
 type HistoryModalProps = {
   visible: boolean;
   onClose: () => void;
   userId: string;
 };
 
+/////////////////////////////////////////////////
+//     COMPONENTE PRINCIPAL
+/////////////////////////////////////////////////
 export default function HistoryModal({ visible, onClose, userId }: HistoryModalProps) {
-  // Estado do histórico (torneios)
+  // Estado do histórico (torneios) e loading/erro
   const [loading, setLoading] = useState(false);
   const [historyData, setHistoryData] = useState<TournamentHistoryItem[]>([]);
   const [error, setError] = useState("");
 
-  // Submodal (detalhes do torneio)
+  // Submodal - Detalhes de Partidas
   const [tournamentModalVisible, setTournamentModalVisible] = useState(false);
   const [selectedTournamentName, setSelectedTournamentName] = useState("");
+  const [selectedLeagueId, setSelectedLeagueId] = useState("");
+  const [selectedTournamentId, setSelectedTournamentId] = useState("");
   const [tournamentMatches, setTournamentMatches] = useState<MatchDetail[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
 
-  // Ao abrir modal, carrega histórico
+  // Submodal - Standings (Pódio)
+  const [standingsModalVisible, setStandingsModalVisible] = useState(false);
+  const [standingsData, setStandingsData] = useState<PlaceData[]>([]);
+  const [standingsLoading, setStandingsLoading] = useState(false);
+
+  /////////////////////////////////////////////////////
+  //      EFEITO PRINCIPAL: Carregar Histórico
+  /////////////////////////////////////////////////////
   useEffect(() => {
     if (visible) {
       loadHistory();
     } else {
+      // Reseta
       setHistoryData([]);
       setError("");
       closeTournamentModal();
+      closeStandingsModal();
     }
   }, [visible]);
 
+  /////////////////////////////////////////////////////
+  //      FUNÇÃO: Carregar histórico
+  /////////////////////////////////////////////////////
   async function loadHistory() {
     setLoading(true);
     try {
-      const data = await fetchTournamentPlaces(userId);
+      const data = await fetchFilteredTournamentPlaces(userId);
       setHistoryData(data);
       if (data.length === 0) {
         setError("Nenhum torneio encontrado.");
@@ -87,13 +123,19 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
     }
   }
 
+  /////////////////////////////////////////////////////
+  //      FUNÇÃO: Ao clicar em um torneio
+  /////////////////////////////////////////////////////
   async function openTournamentDetail(item: TournamentHistoryItem) {
     setSelectedTournamentName(item.tournamentName);
+    setSelectedLeagueId(item.leagueId);
+    setSelectedTournamentId(item.tournamentId);
     setTournamentModalVisible(true);
     setMatchesLoading(true);
 
     try {
-      const matches = await fetchTournamentMatches(item.tournamentId, userId);
+      // Buscar partidas do usuário naquele torneio
+      const matches = await fetchTournamentMatches(item.leagueId, item.tournamentId, userId);
       setTournamentMatches(matches);
     } catch (err) {
       console.log("Erro ao buscar partidas:", err);
@@ -106,49 +148,40 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
   function closeTournamentModal() {
     setTournamentModalVisible(false);
     setTournamentMatches([]);
+    setSelectedTournamentId("");
+    setSelectedLeagueId("");
   }
 
-  /** Busca as partidas do torneio para o jogador */
-  async function fetchTournamentMatches(tId: string, uId: string): Promise<MatchDetail[]> {
-    const result: MatchDetail[] = [];
+  /////////////////////////////////////////////////////
+  //      STANDINGS (PÓDIO)
+  /////////////////////////////////////////////////////
+  async function openStandings() {
+    // Exibe modal do pódio
+    setStandingsModalVisible(true);
+    setStandingsLoading(true);
 
     try {
-      const roundsSnap = await getDocs(collection(db, "tournaments", tId, "rounds"));
-      if (roundsSnap.empty) {
-        console.log(`Nenhuma rodada encontrada p/ torneio: ${tId}`);
-        return result;
-      }
-
-      for (const roundDoc of roundsSnap.docs) {
-        const roundId = roundDoc.id;
-
-        const matchesSnap = await getDocs(
-          collection(db, "tournaments", tId, "rounds", roundId, "matches")
-        );
-        if (matchesSnap.empty) continue;
-
-        matchesSnap.forEach((mDoc) => {
-          const matchData = mDoc.data();
-          if (matchData.player1_id === uId || matchData.player2_id === uId) {
-            result.push({
-              id: mDoc.id,
-              ...matchData,
-            } as MatchDetail);
-          }
-        });
-      }
-    } catch (error) {
-      console.error("Erro ao buscar rodadas e mesas:", error);
-      throw error;
+      const data = await fetchTournamentStandings(selectedLeagueId, selectedTournamentId);
+      setStandingsData(data);
+    } catch (err) {
+      console.log("Erro ao carregar standings:", err);
+      Alert.alert("Erro", "Falha ao carregar pódio.");
+    } finally {
+      setStandingsLoading(false);
     }
-
-    return result;
   }
 
-  /** Retorna 'win', 'loss' ou 'draw' p/ a partida */
+  function closeStandingsModal() {
+    setStandingsModalVisible(false);
+    setStandingsData([]);
+  }
+
+  /////////////////////////////////////////////////////
+  //      FUNÇÃO: Retorna 'win', 'loss' ou 'draw'
+  /////////////////////////////////////////////////////
   function getMatchResult(m: MatchDetail): "win"|"loss"|"draw" {
     if (!m.outcomeNumber) return "draw";
-    const isP1 = m.player1_id === userId;
+    const isP1 = (m.player1_id === userId);
     switch (m.outcomeNumber) {
       case 1: return isP1 ? "win" : "loss";
       case 2: return isP1 ? "loss" : "win";
@@ -158,18 +191,23 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
     }
   }
 
+  /////////////////////////////////////////////////////
+  //      FUNÇÃO: Nome do vencedor
+  /////////////////////////////////////////////////////
   function getMatchWinner(m: MatchDetail) {
     if (!m.outcomeNumber) return "Sem resultado";
     switch (m.outcomeNumber) {
-      case 1: return m.player1_id;
-      case 2: return m.player2_id;
+      case 1: return m.player1_name || m.player1_id;
+      case 2: return m.player2_name || m.player2_id;
       case 3: return "Empate";
-      case 10: return m.player2_id;
+      case 10: return m.player2_name || m.player2_id; // WO
       default: return "??";
     }
   }
 
-  // ============= RENDER =============
+  /////////////////////////////////////////////////////
+  //      RENDER PRINCIPAL
+  /////////////////////////////////////////////////////
   return (
     <>
       {/* MODAL PRINCIPAL - HISTÓRICO */}
@@ -195,7 +233,7 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
               <ScrollView contentContainerStyle={styles.scrollContent}>
                 {historyData.map((item, idx) => (
                   <Animatable.View
-                    key={item.tournamentId}
+                    key={`${item.leagueId}-${item.tournamentId}`}
                     animation="fadeInUp"
                     delay={100 * idx}
                   >
@@ -234,11 +272,22 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
       >
         <View style={styles.modalOverlay}>
           <Animatable.View animation="fadeInUp" style={styles.submodal}>
+            {/* Botão Fechar */}
             <TouchableOpacity style={styles.closeButton} onPress={closeTournamentModal}>
               <Ionicons name="close-circle" size={32} color="#fff" />
             </TouchableOpacity>
 
+            {/* Nome do Torneio */}
             <Text style={styles.modalHeader}>{selectedTournamentName}</Text>
+
+            {/* Botão Standings (pódio) */}
+            <TouchableOpacity
+              style={styles.standingsButton}
+              onPress={openStandings}
+            >
+              <Ionicons name="ribbon" size={20} color="#fff" />
+              <Text style={styles.standingsButtonText}> Standings</Text>
+            </TouchableOpacity>
 
             {matchesLoading ? (
               <View style={styles.loadingContainer}>
@@ -265,9 +314,15 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
                       animation="fadeInRight"
                       delay={80 * idx}
                     >
-                      <Text style={styles.matchPlayers}>
-                        {mt.player1_id} vs {mt.player2_id}
+                      {/* Exemplo de exibição do número da rodada */}
+                      <Text style={styles.roundNumber}>
+                        Round #{mt.roundNumber || "?"}
                       </Text>
+
+                      <Text style={styles.matchPlayers}>
+                        {mt.player1_name} vs {mt.player2_name}
+                      </Text>
+
                       <Text style={styles.matchResult}>
                         Resultado:{" "}
                         {result === "win"
@@ -285,105 +340,264 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
           </Animatable.View>
         </View>
       </Modal>
+
+      {/* SUBMODAL - STANDINGS (PÓDIO) */}
+      <Modal
+        visible={standingsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeStandingsModal}
+      >
+        <View style={styles.modalOverlay}>
+          <Animatable.View animation="pulse" style={styles.standingsModal}>
+            {/* Botão Fechar */}
+            <TouchableOpacity style={styles.closeButton} onPress={closeStandingsModal}>
+              <Ionicons name="close-circle" size={32} color="#fff" />
+            </TouchableOpacity>
+
+            <Text style={styles.standingsHeader}>Pódio</Text>
+
+            {standingsLoading ? (
+              <ActivityIndicator size="large" color="#E3350D" />
+            ) : standingsData.length === 0 ? (
+              <Text style={styles.emptyText}>Nenhuma colocação encontrada.</Text>
+            ) : (
+              <View style={styles.standingsContent}>
+                {standingsData.slice(0,8).map((pl, index) => {
+                  // Destaque se for o user
+                  const isUser = (pl.userid === userId);
+                  return (
+                    <Animatable.View
+                      key={pl.userid}
+                      style={[
+                        styles.standingsItem,
+                        isUser && { borderColor: "#E3350D", borderWidth: 2 },
+                      ]}
+                      animation="fadeInDown"
+                      delay={index * 200}
+                    >
+                      <Ionicons
+                          name={
+                            index === 0
+                              ? "trophy"
+                              : index === 1
+                              ? "medal"
+                              : index === 2
+                              ? "ribbon"
+                              : "person-circle" // Ícone padrão para outros jogadores
+                          }
+                          size={24}
+                          color={
+                            index === 0
+                              ? "#FFD700"
+                              : index === 1
+                              ? "#C0C0C0"
+                              : index === 2
+                              ? "#CD7F32"
+                              : "#FFFFFF" // Cor branca para os demais jogadores
+                          }
+                          style={{ marginRight: 6 }}
+                        />
+
+                      <Text style={styles.standingsPlace}>
+                        {pl.place}º - {pl.fullname}
+                      </Text>
+                    </Animatable.View>
+                  );
+                })}
+              </View>
+            )}
+          </Animatable.View>
+        </View>
+      </Modal>
     </>
   );
 }
 
-// ================ FUNÇÕES AUXILIARES ================
-interface TournamentHistoryItem {
-  tournamentId: string;
-  tournamentName: string;
-  place: number;
-  totalPlayers: number;
-  roundCount: number;
+///////////////////////////////////////////////////////////////////////////////
+//                             FUNÇÕES AUXILIARES
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Busca o histórico de torneios (places) do usuário, respeitando o filtro:
+ *  - "all": todas as ligas
+ *  - "city": ligas de certa cidade
+ *  - "league": liga específica
+ */
+async function fetchFilteredTournamentPlaces(uId: string): Promise<TournamentHistoryItem[]> {
+  // 1) Carregar filtro
+  const filterType = await AsyncStorage.getItem("@filterType");
+  const cityStored = await AsyncStorage.getItem("@selectedCity");
+  const leagueStored = await AsyncStorage.getItem("@leagueId");
+
+  // 2) Obter ligas
+  let leaguesToFetch: string[] = [];
+
+  if (!filterType || filterType === "all") {
+    // TUDO
+    const leaguesSnap = await getDocs(collection(db, "leagues"));
+    leaguesSnap.forEach((docSnap) => {
+      leaguesToFetch.push(docSnap.id);
+    });
+  } else if (filterType === "city" && cityStored) {
+    // CITY
+    const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
+    const citySnapshot = await getDocs(qCity);
+    citySnapshot.forEach((docSnap) => {
+      leaguesToFetch.push(docSnap.id);
+    });
+  } else if (filterType === "league" && leagueStored) {
+    // LIGA específica
+    leaguesToFetch.push(leagueStored);
+  }
+
+  const finalResults: TournamentHistoryItem[] = [];
+
+  // 3) Para cada liga, pegar subcoleção "tournaments"
+  for (const leagueId of leaguesToFetch) {
+    const tournamentsColl = collection(db, "leagues", leagueId, "tournaments");
+    const tSnap = await getDocs(tournamentsColl);
+    if (tSnap.empty) continue;
+
+    // 4) Para cada torneio, buscar subcoleção "places"
+    for (const tDoc of tSnap.docs) {
+      const tId = tDoc.id;
+      const placesColl = collection(db, "leagues", leagueId, "tournaments", tId, "places");
+      const placesSnap = await getDocs(placesColl);
+
+      // 5) Filtrar lugar do jogador
+      const userPlaceDoc = placesSnap.docs.find((plDoc) => {
+        const dd = plDoc.data();
+        return dd.userid === uId;
+      });
+
+      if (!userPlaceDoc) continue; // user não jogou esse torneio
+
+      // 6) Montar item
+      const placeData = userPlaceDoc.data();
+      const placeNum = parseInt(userPlaceDoc.id, 10) || 0;
+
+      // Buscar info do torneio (nome, players_count, rounds_count)
+      const tournamentData = tDoc.data();
+      const name = tournamentData.tournament_name || tId;
+      const totalPlayers = tournamentData.players_count || 0;
+      const roundCount = tournamentData.rounds_count || 0;
+
+      finalResults.push({
+        leagueId,
+        tournamentId: tId,
+        tournamentName: name,
+        place: placeNum,
+        totalPlayers,
+        roundCount,
+      });
+    }
+  }
+
+  // Ordenar 1º lugar primeiro
+  finalResults.sort((a, b) => a.place - b.place);
+  return finalResults;
 }
 
-/** Busca 'places' do jogador e forma o histórico de torneios. */
-async function fetchTournamentPlaces(uId: string): Promise<TournamentHistoryItem[]> {
-  const placesDocs = await getDocs(collectionGroup(db, "places"));
-  const userPlaces = placesDocs.docs.filter((docSnap) => {
-    const d = docSnap.data();
-    return d.userid === uId;
-  });
+/**
+ * Busca todas as partidas do usuário em um torneio,
+ * salvando roundNumber e nomes de cada player.
+ */
+async function fetchTournamentMatches(
+  leagueId: string,
+  tId: string,
+  uId: string
+): Promise<MatchDetail[]> {
+  let result: MatchDetail[] = [];
 
-  const results: TournamentHistoryItem[] = [];
+  // 1) Pega rounds
+  const roundsRef = collection(db, "leagues", leagueId, "tournaments", tId, "rounds");
+  const rSnap = await getDocs(roundsRef);
+  if (rSnap.empty) return [];
 
-  for (const docSnap of userPlaces) {
-    const data = docSnap.data();
-    const placeNum = parseInt(docSnap.id, 10) || 0;
-    const pathParts = docSnap.ref.path.split("/");
-    const tId = pathParts[1];
+  // 2) Para cada round
+  for (const roundDoc of rSnap.docs) {
+    const roundId = roundDoc.id;
+    const matchesRef = collection(db, "leagues", leagueId, "tournaments", tId, "rounds", roundId, "matches");
+    const mSnap = await getDocs(matchesRef);
 
-    let rawTournamentName = tId;
-    try {
-      const tDoc = await getDoc(doc(db, "tournaments", tId));
-      if (tDoc.exists()) {
-        const tData = tDoc.data();
-        if (tData.name) rawTournamentName = tData.name;
+    if (mSnap.empty) continue;
+
+    mSnap.forEach((docSnap) => {
+      const data = docSnap.data() as MatchDetail;
+
+      // Filtra só partidas do user
+      if (data.player1_id === uId || data.player2_id === uId) {
+        result.push({
+          ...data,
+          id: docSnap.id,
+          roundNumber: roundId, // Salvar o ID da rodada como roundNumber
+        });
       }
-    } catch {
-      console.log(`Falha ao buscar nome do torneio: ${tId}`);
-    }
-
-    const tournamentName = parseTournamentName(rawTournamentName);
-
-    // Conta jogadores
-    let totalPlayers = 0;
-    try {
-      const allPlacesSnap = await getDocs(collection(db, "tournaments", tId, "places"));
-      const uniqueUserSet = new Set<string>();
-      allPlacesSnap.forEach((pDoc) => {
-        const pd = pDoc.data();
-        if (pd.userid) uniqueUserSet.add(pd.userid);
-      });
-      totalPlayers = uniqueUserSet.size;
-    } catch (err) {
-      console.log("Falha ao contar jogadores:", err);
-    }
-
-    // Conta rodadas
-    let roundCount = 0;
-    try {
-      const allRoundsSnap = await getDocs(collection(db, "tournaments", tId, "rounds"));
-      roundCount = allRoundsSnap.docs.length;
-    } catch (err) {
-      console.log("Falha ao contar rodadas do torneio:", err);
-    }
-
-    results.push({
-      tournamentId: tId,
-      tournamentName,
-      place: placeNum,
-      totalPlayers,
-      roundCount,
     });
   }
 
-  // Ordena (1º lugar primeiro)
-  results.sort((a, b) => a.place - b.place);
-  return results;
-}
-
-/** Parsing do nome do torneio (remove underscores, pega até #NN) */
-function parseTournamentName(original: string): string {
-  const match = original.match(/^(.*?#\d{2})/);
-  let baseName: string;
-  if (match) {
-    baseName = match[1];
-  } else {
-    baseName = original;
+  // 3) Buscar nomes
+  for (let i = 0; i < result.length; i++) {
+    result[i].player1_name = await getPlayerFullName(leagueId, result[i].player1_id);
+    result[i].player2_name = await getPlayerFullName(leagueId, result[i].player2_id);
   }
-  return baseName.replace(/_/g, "");
+
+  return result;
 }
 
-// Busca as partidas do torneio (já no openTournamentDetail)
+/**
+ * Retorna o pódio (standings) do torneio inteiro (top 3).
+ * Pega subcoleção "places" e ordena.
+ */
+async function fetchTournamentStandings(
+  leagueId: string,
+  tId: string
+): Promise<PlaceData[]> {
+  const finalArr: PlaceData[] = [];
 
-// ================ ESTILOS ================
+  const placesRef = collection(db, "leagues", leagueId, "tournaments", tId, "places");
+  const placesSnap = await getDocs(placesRef);
+
+  // Monta array completo
+  placesSnap.forEach((ds) => {
+    const d = ds.data();
+    finalArr.push({
+      userid: d.userid,
+      fullname: d.fullname || d.userid,
+      place: parseInt(ds.id, 10),
+    });
+  });
+
+  // Ordena
+  finalArr.sort((a, b) => a.place - b.place);
+  return finalArr;
+}
+
+/** Busca fullname de um player em /leagues/<leagueId>/players/<playerId> */
+async function getPlayerFullName(leagueId: string, playerId: string): Promise<string> {
+  if (!playerId) return "???";
+  try {
+    const playerRef = doc(db, `leagues/${leagueId}/players/${playerId}`);
+    const snap = await getDoc(playerRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return data.fullname || playerId;
+    }
+  } catch (err) {
+    console.log("Erro getPlayerFullName:", err);
+  }
+  return playerId;
+}
+
+/////////////////////////////////////////////////
+//               ESTILOS
+/////////////////////////////////////////////////
+import { StyleSheet } from "react-native";
+import { collection } from "firebase/firestore";
+
 const DARK_BG = "#1E1E1E";
 const CARD_BG = "#292929";
-const BORDER_COLOR = "#4D4D4D";
-const RED = "#E3350D";
-const WHITE = "#FFFFFF";
 
 const styles = StyleSheet.create({
   modalOverlay: {
@@ -405,12 +619,13 @@ const styles = StyleSheet.create({
     maxHeight: "80%",
     borderRadius: 12,
     padding: 20,
+    position: "relative",
   },
   closeButton: {
     position: "absolute",
     top: 10,
     right: 10,
-    zIndex: 1,
+    zIndex: 10,
   },
   modalHeader: {
     color: "#FFFFFF",
@@ -452,7 +667,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tournamentTitle: {
-    color: RED,
+    color: "#E3350D",
     fontSize: 16,
     fontWeight: "600",
   },
@@ -502,15 +717,68 @@ const styles = StyleSheet.create({
   matchPlayers: {
     color: "#FFFFFF",
     fontWeight: "500",
+    marginTop: 8,
   },
   matchResult: {
     color: "#FFFFFF",
-    marginTop: 5,
+    marginTop: 4,
     fontSize: 12,
   },
   matchWinner: {
     color: "#CCCCCC",
     fontSize: 12,
-    marginTop: 3,
+    marginTop: 2,
+  },
+  roundNumber: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontStyle: "italic",
+  },
+  standingsButton: {
+    backgroundColor: "#E3350D",
+    borderRadius: 8,
+    flexDirection: "row",
+    alignSelf: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 10,
+  },
+  standingsButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  standingsModal: {
+    backgroundColor: CARD_BG,
+    width: "85%",
+    borderRadius: 12,
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  standingsHeader: {
+    color: "#FFF",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 15,
+    textAlign: "center",
+  },
+  standingsContent: {
+    width: "100%",
+    marginTop: 10,
+  },
+  standingsItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#444",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  standingsPlace: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "500",
   },
 });

@@ -1,7 +1,7 @@
 //////////////////////////////////////
 // ARQUIVO: PlayerScreen.tsx
 //////////////////////////////////////
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -19,15 +19,8 @@ import {
   TouchableWithoutFeedback,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
-import {
-  doc,
-  getDoc,
-  setDoc,
-  getDocs,
-  collectionGroup,
-  collection,
-} from "firebase/firestore";
+import { useRouter, useFocusEffect } from "expo-router";
+import { doc, getDoc, setDoc, getDocs, collection, query, where } from "firebase/firestore";
 
 import { db } from "../../lib/firebaseConfig";
 import titles, { TitleItem, PlayerStats } from "../titlesConfig";
@@ -41,13 +34,11 @@ import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
 import { FontAwesome5 } from "@expo/vector-icons";
 
-/** Estrutura p/ dados de partidas. */
-interface MatchData {
-  id: string;
-  outcomeNumber?: number;
-  player1_id?: string;
-  player2_id?: string;
-}
+import {
+  fetchAllMatches,
+  fetchAllMatchesGlobal,
+  MatchData,
+} from "../../lib/matchService";
 
 /** Estrutura p/ dados do jogador no Firestore. */
 interface PlayerInfo {
@@ -113,7 +104,7 @@ export default function PlayerScreen() {
   const [userName, setUserName] = useState("Jogador");
   const [loading, setLoading] = useState(true);
 
-  // Stats
+  // Stats (filtradas)
   const [stats, setStats] = useState<PlayerStats>({
     wins: 0,
     losses: 0,
@@ -127,7 +118,7 @@ export default function PlayerScreen() {
   const [currentStreak, setCurrentStreak] = useState<string>("Sem Streak");
   const [streakType, setStreakType] = useState<"win"|"loss"|"empty">("empty");
 
-  // TÍTULOS
+  // TÍTULOS (globais, baseados em estatísticas gerais)
   const [unlockedTitles, setUnlockedTitles] = useState<TitleItem[]>([]);
   const [titlesModalVisible, setTitlesModalVisible] = useState(false);
   const [newTitleIndicator, setNewTitleIndicator] = useState(false);
@@ -156,11 +147,16 @@ export default function PlayerScreen() {
   const [showRecommendation, setShowRecommendation] = useState(true);
   const [recommendationText, setRecommendationText] = useState("");
 
-  // RIVAL MODAL (mostrando perfil do rival)
+  // RIVAL MODAL (perfil do rival)
   const [rivalModalVisible, setRivalModalVisible] = useState(false);
   const [rivalData, setRivalData] = useState<RivalryData | null>(null);
 
-  // =============== EFEITOS ===============
+  // Cache de dados para o filtro atual
+  const [cachedFilter, setCachedFilter] = useState<string>("");
+  const [cachedMatches, setCachedMatches] = useState<MatchData[]>([]);
+  const [cachedStats, setCachedStats] = useState<PlayerStats | null>(null);
+
+  // =============== EFEITOS (TEMPLATE ANIMAÇÃO) ===============
   useEffect(() => {
     const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
     if (activeTemplate?.hasEpicAnimation) {
@@ -178,126 +174,113 @@ export default function PlayerScreen() {
     }
   }, [selectedTemplateId]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
+  // Função que carrega os dados do jogador (estatísticas, títulos, etc.)
+  const loadPlayerData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const storedId = await AsyncStorage.getItem("@userId");
+      const storedName = await AsyncStorage.getItem("@userName");
+      if (!storedId) {
+        router.replace("/(auth)/login");
+        return;
+      }
+      setUserId(storedId);
+      setUserName(storedName ?? "Jogador");
 
-        // Carrega user do AsyncStorage
-        const storedId = await AsyncStorage.getItem("@userId");
-        const storedName = await AsyncStorage.getItem("@userName");
-        if (!storedId) {
-          router.replace("/(auth)/login");
-          return;
-        }
-        setUserId(storedId);
-        setUserName(storedName ?? "Jogador");
+      // Carrega avatar
+      const storedAvatar = await AsyncStorage.getItem("@userAvatar");
+      if (storedAvatar) {
+        const avId = parseInt(storedAvatar, 10);
+        const found = avatarList.find((av) => av.id === avId);
+        if (found) setSelectedAvatar(found.uri);
+      }
 
-        // Carrega avatar
-        const storedAvatar = await AsyncStorage.getItem("@userAvatar");
-        if (storedAvatar) {
-          const avId = parseInt(storedAvatar, 10);
-          const found = avatarList.find((av) => av.id === avId);
-          if (found) setSelectedAvatar(found.uri);
-        }
+      // Carrega template
+      const storedTemplateId = await AsyncStorage.getItem("@userTemplateId");
+      if (storedTemplateId) {
+        setSelectedTemplateId(parseInt(storedTemplateId, 10));
+      }
 
-        // Carrega template
-        const storedTemplateId = await AsyncStorage.getItem("@userTemplateId");
-        if (storedTemplateId) {
-          setSelectedTemplateId(parseInt(storedTemplateId, 10));
-        }
+      // Obtém o filtro atual do AsyncStorage
+      const filterType = (await AsyncStorage.getItem("@filterType")) || "all";
+      const cityStored = (await AsyncStorage.getItem("@selectedCity")) || "";
+      const leagueStored = (await AsyncStorage.getItem("@leagueId")) || "";
+      const currentFilter = `${filterType}:${cityStored}:${leagueStored}`;
 
-        // Carrega partidas
-        const allMatches = await fetchAllMatches();
-        const userMatches = allMatches.filter(
+      // Se o filtro não mudou e temos dados cacheados, usa-os
+      if (currentFilter === cachedFilter && cachedMatches.length > 0 && cachedStats) {
+        setStats(cachedStats);
+        // (Opcional) Atualiza streak e recomendação com os dados cacheados
+      } else {
+        // 1) Busca partidas FILTRADAS (respeitando o filtro)
+        const filteredMatches = await fetchAllMatches();
+        const userMatches = filteredMatches.filter(
           (m) => m.player1_id === storedId || m.player2_id === storedId
         );
-
-        // Stats básicas
         const computedStats = computeBasicStats(storedId, userMatches);
         setStats(computedStats);
 
-        // Streak
-        const { streakString, streakT } = computeCurrentStreak(storedId, userMatches);
-        setCurrentStreak(streakString);
-        setStreakType(streakT);
-
-        // Títulos
-        const unlocked = computeTitles(computedStats);
-        const enriched = titles.map((t) => ({
-          ...t,
-          unlocked: unlocked.some((tt) => tt.id === t.id),
-        }));
-        setUnlockedTitles(enriched);
-        if (unlocked.length > 0) {
-          setNewTitleIndicator(true);
-        }
-
-        // Recomendação
-        defineRecommendation(computedStats);
-
-      } catch (err) {
-        console.log("Erro init Player:", err);
-      } finally {
-        setLoading(false);
+        // Cacheia os resultados para o filtro atual
+        setCachedFilter(currentFilter);
+        setCachedMatches(userMatches);
+        setCachedStats(computedStats);
       }
-    })();
-  }, [router]);
 
-  // Atualiza o avatar do jogador no Firestore
-async function updatePlayerAvatar(userId: string, avatarId: number) {
-  try {
-    console.log(`📤 Salvando avatarId (${avatarId}) para o usuário ${userId}...`);
+      // Streak (calculado com os dados filtrados)
+      const { streakString, streakT } = computeCurrentStreak(storedId, cachedMatches.length > 0 ? cachedMatches : []);
+      setCurrentStreak(streakString);
+      setStreakType(streakT);
 
-    await setDoc(doc(db, "players", userId), { avatarId }, { merge: true });
+      // Títulos: calculados com estatísticas GLOBAIS (ignora filtro)
+      const globalMatches = await fetchAllMatchesGlobal();
+      const globalUserMatches = globalMatches.filter(
+        (m) => m.player1_id === storedId || m.player2_id === storedId
+      );
+      const globalStats = computeBasicStats(storedId, globalUserMatches);
+      const unlocked = computeTitles(globalStats);
+      const enriched = titles.map((t) => ({
+        ...t,
+        unlocked: unlocked.some((tt) => tt.id === t.id),
+      }));
+      setUnlockedTitles(enriched);
+      if (unlocked.length > 0) {
+        setNewTitleIndicator(true);
+      }
 
-    console.log(`✅ Avatar salvo com sucesso para ${userId}`);
-
-    // Verifica se foi salvo corretamente
-    const docSnap = await getDoc(doc(db, "players", userId));
-    if (docSnap.exists()) {
-      console.log(`🗂 Dados do Firestore após salvar avatar:`, docSnap.data());
-    } else {
-      console.warn(`⚠️ Documento do usuário ${userId} não encontrado após salvar avatar.`);
+      // Recomendação baseada nas estatísticas filtradas
+      defineRecommendation(stats);
+    } catch (err) {
+      console.log("Erro init Player:", err);
+    } finally {
+      setLoading(false);
     }
+  }, [cachedFilter, cachedMatches, cachedStats, router]);
 
-  } catch (error) {
-    console.error("❌ Erro ao salvar avatar:", error);
-  }
-}
+  // Recarrega os dados sempre que a tela ganhar foco
+  useFocusEffect(
+    useCallback(() => {
+      loadPlayerData();
+    }, [loadPlayerData])
+  );
 
-// Atualiza o template do jogador no Firestore
-async function updatePlayerTemplate(userId: string, templateId: number) {
-  try {
-    console.log(`📤 Salvando templateId (${templateId}) para o usuário ${userId}...`);
-
-    await setDoc(doc(db, "players", userId), { templateId }, { merge: true });
-
-    console.log(`✅ Template salvo com sucesso para ${userId}`);
-
-    // Verifica se foi salvo corretamente
-    const docSnap = await getDoc(doc(db, "players", userId));
-    if (docSnap.exists()) {
-      console.log(`🗂 Dados do Firestore após salvar template:`, docSnap.data());
-    } else {
-      console.warn(`⚠️ Documento do usuário ${userId} não encontrado após salvar template.`);
+  // =============== SALVAR NO FIRESTORE ===============
+  async function updatePlayerAvatar(userId: string, avatarId: number) {
+    try {
+      await setDoc(doc(db, "players", userId), { avatarId }, { merge: true });
+    } catch (error) {
+      console.error("Erro ao salvar avatar:", error);
     }
-
-  } catch (error) {
-    console.error("❌ Erro ao salvar template:", error);
   }
-}
+
+  async function updatePlayerTemplate(userId: string, templateId: number) {
+    try {
+      await setDoc(doc(db, "players", userId), { templateId }, { merge: true });
+    } catch (error) {
+      console.error("Erro ao salvar template:", error);
+    }
+  }
 
   // ============ FUNÇÕES DE STATS ============
-  async function fetchAllMatches(): Promise<MatchData[]> {
-    const snap = await getDocs(collectionGroup(db, "matches"));
-    const arr: MatchData[] = [];
-    snap.forEach((docSnap) => {
-      arr.push({ id: docSnap.id, ...docSnap.data() } as MatchData);
-    });
-    return arr;
-  }
-
   function computeBasicStats(uId: string, userMatches: MatchData[]): PlayerStats {
     let w = 0, l = 0, d = 0;
     const oppSet = new Set<string>();
@@ -334,21 +317,18 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
     };
   }
 
-  function computeCurrentStreak(uId: string, userMatches: MatchData[]) {
+  function computeCurrentStreak(uId: string, userMatches: MatchData[]): { streakString: string, streakT: "win"|"loss"|"empty" } {
     if (userMatches.length === 0) {
-      return { streakString: "Sem Streak", streakT: "empty" as const };
+      return { streakString: "Sem Streak", streakT: "empty" };
     }
     userMatches.sort((a, b) => (a.id < b.id ? -1 : 1));
-
     let streakCount = 0;
     let sType: "win" | "loss" | null = null;
-
     for (let i = userMatches.length - 1; i >= 0; i--) {
       const mm = userMatches[i];
       if (!mm.outcomeNumber) break;
       const isP1 = mm.player1_id === uId;
-      let matchResult: "win"|"loss"|"draw" = "draw";
-
+      let matchResult: "win" | "loss" | "draw" = "draw";
       if (mm.outcomeNumber === 1) {
         matchResult = isP1 ? "win" : "loss";
       } else if (mm.outcomeNumber === 2) {
@@ -356,7 +336,6 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
       } else if (mm.outcomeNumber === 10) {
         matchResult = "loss";
       }
-
       if (i === userMatches.length - 1) {
         if (matchResult === "win") {
           sType = "win";
@@ -365,7 +344,7 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
           sType = "loss";
           streakCount = 1;
         } else {
-          return { streakString: "Sem Streak", streakT: "empty" as const };
+          return { streakString: "Sem Streak", streakT: "empty" };
         }
       } else {
         if (matchResult === sType) {
@@ -375,16 +354,13 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
         }
       }
     }
-
-    if (!sType) {
-      return { streakString: "Sem Streak", streakT: "empty" as const };
-    }
+    if (!sType) return { streakString: "Sem Streak", streakT: "empty" };
     if (sType === "win" && streakCount >= 2) {
-      return { streakString: `${streakCount} Vitórias`, streakT: "win" as const };
+      return { streakString: `${streakCount} Vitórias`, streakT: "win" };
     } else if (sType === "loss" && streakCount >= 2) {
-      return { streakString: `${streakCount} Derrotas`, streakT: "loss" as const };
+      return { streakString: `${streakCount} Derrotas`, streakT: "loss" };
     } else {
-      return { streakString: "Sem Streak", streakT: "empty" as const };
+      return { streakString: "Sem Streak", streakT: "empty" };
     }
   }
 
@@ -415,27 +391,18 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
       setRecommendationText("Continue treinando e conquistando vitórias!");
     }
   }
-  
 
-  // ============ PESQUISA RIVAL + PERFIL ===============
+  // ============ PESQUISA RIVAL + PERFIL ============
   const handleSearchPlayers = async () => {
     if (!searchText.trim()) {
       Alert.alert("Busca", "Digite algo para buscar.");
       return;
     }
+    setPlayerSearchLoading(true);
     try {
-      setPlayerSearchLoading(true);
-      const all = await getDocs(collection(db, "players"));
-      const arr: PlayerInfo[] = [];
-      all.forEach((ds) => {
-        const d = ds.data();
-        const full = d.fullname || ds.id;
-        if (full.toLowerCase().includes(searchText.toLowerCase())) {
-          arr.push({ userid: ds.id, fullname: full });
-        }
-      });
-      setPlayersResult(arr);
-      if (arr.length === 0) {
+      const filteredPlayers = await fetchPlayersByFilter(searchText);
+      setPlayersResult(filteredPlayers);
+      if (filteredPlayers.length === 0) {
         Alert.alert("Busca", "Nenhum jogador encontrado.");
       }
     } catch (err) {
@@ -446,45 +413,58 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
     }
   };
 
-  const handleToggleSearch = () => {
-    if (!searchOpen) {
-      setSearchOpen(true);
-      setSearchIconVisible(false);
-      Animated.timing(searchBarWidth, {
-        toValue: 1,
-        duration: 400,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start();
-    } else {
-      closeSearchOverlay();
+  async function fetchPlayersByFilter(searchTerm: string): Promise<PlayerInfo[]> {
+    try {
+      const filterType = await AsyncStorage.getItem("@filterType");
+      const cityStored = await AsyncStorage.getItem("@selectedCity");
+      const leagueStored = await AsyncStorage.getItem("@leagueId");
+      const arr: PlayerInfo[] = [];
+      if (!filterType || filterType === "all") {
+        const allSnap = await getDocs(collection(db, "players"));
+        allSnap.forEach((docSnap) => {
+          const d = docSnap.data();
+          const full = (d.fullname || docSnap.id).toLowerCase();
+          if (full.includes(searchTerm.toLowerCase())) {
+            arr.push({ userid: docSnap.id, fullname: d.fullname || docSnap.id });
+          }
+        });
+      } else if (filterType === "city" && cityStored) {
+        const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
+        const snapCity = await getDocs(qCity);
+        for (const leagueDoc of snapCity.docs) {
+          const leagueId = leagueDoc.id;
+          const playersRef = collection(db, `leagues/${leagueId}/players`);
+          const playersSnap = await getDocs(playersRef);
+          playersSnap.forEach((ds) => {
+            const data = ds.data();
+            const full = (data.fullname || ds.id).toLowerCase();
+            if (full.includes(searchTerm.toLowerCase())) {
+              arr.push({ userid: ds.id, fullname: data.fullname || ds.id });
+            }
+          });
+        }
+      } else if (filterType === "league" && leagueStored) {
+        const playersRef = collection(db, `leagues/${leagueStored}/players`);
+        const playersSnap = await getDocs(playersRef);
+        playersSnap.forEach((ds) => {
+          const data = ds.data();
+          const full = (data.fullname || ds.id).toLowerCase();
+          if (full.includes(searchTerm.toLowerCase())) {
+            arr.push({ userid: ds.id, fullname: data.fullname || ds.id });
+          }
+        });
+      }
+      return arr;
+    } catch (error) {
+      console.error("Erro ao buscar jogadores pelo filtro:", error);
+      return [];
     }
-  };
+  }
 
-  const closeSearchOverlay = () => {
-    Animated.timing(searchBarWidth, {
-      toValue: 0,
-      duration: 400,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: false,
-    }).start(() => {
-      setSearchOpen(false);
-      setSearchIconVisible(true);
-      setSearchText("");
-      setPlayersResult([]);
-    });
-  };
-
-  /**
-   * handleCheckRival: abre modal do rival, mas agora mostra o card de "perfil do rival"
-   * com estatísticas de Rivalidade.
-   */
   const handleCheckRival = async (userid: string, fullname: string) => {
     try {
       setRivalModalVisible(true);
       setRivalData(null);
-
-      // Buscar avatarId, templateId do rival
       const docRef = doc(db, "players", userid);
       const docSnap = await getDoc(docRef);
       let rivalAvatarId = 1;
@@ -494,20 +474,17 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
         if (dd.avatarId) rivalAvatarId = dd.avatarId;
         if (dd.templateId) rivalTemplateId = dd.templateId;
       }
-
-      // Buscar matches p/ calcular Rivalidade
-      const allMatches = await fetchAllMatches();
-      const userMatches = allMatches.filter(
+      const filteredMatches = await fetchAllMatches();
+      const userMatches = filteredMatches.filter(
         (m) => m.player1_id === userId || m.player2_id === userId
       );
-      const direct = userMatches.filter(
+      const directMatches = userMatches.filter(
         (m) =>
           (m.player1_id === userId && m.player2_id === userid) ||
           (m.player2_id === userId && m.player1_id === userid)
       );
-
       let w = 0, l = 0, d = 0;
-      direct.forEach((mm) => {
+      directMatches.forEach((mm) => {
         if (!mm.outcomeNumber) return;
         const isP1 = mm.player1_id === userId;
         switch (mm.outcomeNumber) {
@@ -525,11 +502,9 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
             break;
         }
       });
-
-      const matchesEntreEles = direct.length;
+      const matchesEntreEles = directMatches.length;
       const totalMatchesUser = userMatches.length;
       const rivalryFactor = 100 * (matchesEntreEles / (totalMatchesUser + 1));
-
       setRivalData({
         matchesCount: matchesEntreEles,
         wins: w,
@@ -548,6 +523,20 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
     }
   };
 
+  const closeSearchOverlay = () => {
+    Animated.timing(searchBarWidth, {
+      toValue: 0,
+      duration: 400,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: false,
+    }).start(() => {
+      setSearchOpen(false);
+      setSearchIconVisible(true);
+      setSearchText("");
+      setPlayersResult([]);
+    });
+  };
+
   // ============ AVATAR + TEMPLATE ============
   const defaultAvatar = require("../../assets/images/avatar/image.jpg");
   const currentAvatar = selectedAvatar || defaultAvatar;
@@ -556,20 +545,15 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
     setSelectedAvatar(avatarUri);
     setAvatarModalVisible(false);
     await AsyncStorage.setItem("@userAvatar", avId.toString());
-  
-    // Salva no Firestore
     await updatePlayerAvatar(userId, avId);
   };
-  
 
   const handleSelectTemplate = async (templateId: number) => {
     setSelectedTemplateId(templateId);
     await AsyncStorage.setItem("@userTemplateId", templateId.toString());
-  
-    // Salva no Firestore
     await updatePlayerTemplate(userId, templateId);
   };
-  
+
   const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
   const fallbackTemplate = templates[0];
   const usedTemplate = activeTemplate || fallbackTemplate;
@@ -591,7 +575,21 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
     setHistoryModalVisible(true);
   };
 
-  // ============ RENDER ============
+  const handleToggleSearch = () => {
+    if (!searchOpen) {
+      setSearchOpen(true);
+      setSearchIconVisible(false);
+      Animated.timing(searchBarWidth, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    } else {
+      closeSearchOverlay();
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.loaderContainer}>
@@ -602,27 +600,20 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
 
   const totalMatches = stats.matchesTotal;
   const wrValue = totalMatches > 0 ? ((stats.wins / totalMatches) * 100).toFixed(1) : "0";
-
-  // Icône do streak
   const streakIconName = streakIcons[streakType];
 
   return (
     <View style={styles.mainContainer}>
-      {/* MODAL TÍTULOS */}
       <TitlesModal
         visible={titlesModalVisible}
         onClose={() => setTitlesModalVisible(false)}
         titles={unlockedTitles}
       />
-
-      {/* MODAL HISTÓRICO */}
       <HistoryModal
         visible={historyModalVisible}
         onClose={() => setHistoryModalVisible(false)}
         userId={userId}
       />
-
-      {/* MODAL RIVAL (exibe perfil do Rival com template e avatar) */}
       <Modal
         visible={rivalModalVisible}
         transparent
@@ -640,8 +631,6 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
           )}
         </View>
       </Modal>
-
-      {/* MODAL AVATAR */}
       <Modal
         visible={avatarModalVisible}
         transparent
@@ -664,17 +653,12 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <Pressable
-              style={styles.closeModalBtn}
-              onPress={() => setAvatarModalVisible(false)}
-            >
+            <Pressable style={styles.closeModalBtn} onPress={() => setAvatarModalVisible(false)}>
               <Text style={styles.closeModalText}>Cancelar</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
-
-      {/* TEMPLATE MODAL */}
       <TemplateModal
         visible={templateModalVisible}
         onClose={() => setTemplateModalVisible(false)}
@@ -682,8 +666,6 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
         onSelectTemplate={handleSelectTemplate}
         currentTemplateId={selectedTemplateId}
       />
-
-      {/* HEADER PESQUISA */}
       <View style={styles.header}>
         {searchIconVisible && (
           <TouchableOpacity style={{ marginRight: 12 }} onPress={handleToggleSearch}>
@@ -713,8 +695,6 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
           </Animated.View>
         )}
       </View>
-
-      {/* LISTA RESULTADOS SOBREPOSTA */}
       {searchOpen && playersResult.length > 0 && (
         <TouchableWithoutFeedback onPress={() => closeSearchOverlay()}>
           <View style={styles.searchOverlay}>
@@ -734,59 +714,30 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
           </View>
         </TouchableWithoutFeedback>
       )}
-
-      {/* CONTEÚDO PRINCIPAL */}
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        {/* CARD DO JOGADOR com template */}
         <View style={[styles.playerCard, templateStyle]}>
-          {/* ÍCONE do template (épico gira) */}
           <View style={styles.templateIconContainer}>
             {usedTemplate.hasEpicAnimation ? (
               <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <FontAwesome5
-                  name={usedTemplate.iconName}
-                  size={32}
-                  color={usedTemplate.iconColor}
-                />
+                <FontAwesome5 name={usedTemplate.iconName} size={32} color={usedTemplate.iconColor} />
               </Animated.View>
             ) : (
-              <FontAwesome5
-                name={usedTemplate.iconName}
-                size={32}
-                color={usedTemplate.iconColor}
-              />
+              <FontAwesome5 name={usedTemplate.iconName} size={32} color={usedTemplate.iconColor} />
             )}
           </View>
-
-          {/* ÍCONE DE ENGENHARIA (GEAR) */}
-          <TouchableOpacity
-            style={styles.gearIconContainer}
-            onPress={() => setTemplateModalVisible(true)}
-          >
+          <TouchableOpacity style={styles.gearIconContainer} onPress={() => setTemplateModalVisible(true)}>
             <Ionicons name="settings-sharp" size={24} color="#000000" />
           </TouchableOpacity>
-
           <Text style={[styles.playerName, textStyle]}>{userName}</Text>
-
-          {/* Emblema se houver */}
           {usedTemplate.emblemImage && (
             <Text style={{ color: textStyle.color, marginBottom: 4 }}>
               [Emblema: {usedTemplate.emblemImage}]
             </Text>
           )}
-
-          {/* Avatar */}
           <TouchableOpacity onPress={() => setAvatarModalVisible(true)}>
             <Image source={currentAvatar} style={[styles.avatar, { borderColor: RED }]} />
           </TouchableOpacity>
-
-          {/* STREAK ANIMAÇÃO */}
-          <Animatable.View
-            style={styles.streakContainer}
-            animation="pulse"
-            iterationCount="infinite"
-            duration={2000}
-          >
+          <Animatable.View style={styles.streakContainer} animation="pulse" iterationCount="infinite" duration={2000}>
             <Ionicons
               name={streakIconName as keyof typeof Ionicons.glyphMap}
               size={30}
@@ -794,8 +745,6 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
             />
             <Text style={[styles.streakText, textStyle]}>{currentStreak}</Text>
           </Animatable.View>
-
-          {/* STATS ROW */}
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <Text style={[styles.statLabel, textStyle]}>Vitórias</Text>
@@ -810,7 +759,6 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
               <Text style={[styles.statValue, textStyle]}>{stats.draws}</Text>
             </View>
           </View>
-
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <Text style={[styles.statLabel, textStyle]}>Partidas</Text>
@@ -825,26 +773,16 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
               <Text style={[styles.statValue, textStyle]}>{stats.uniqueOpponents}</Text>
             </View>
           </View>
-
-          {/* BALÃO DE RECOMENDAÇÃO */}
           {showRecommendation && (
             <Animatable.View animation="fadeInUp" style={styles.recommendationCard}>
               <Text style={styles.recommendationText}>{recommendationText}</Text>
-              <TouchableOpacity
-                style={styles.closeRecommendation}
-                onPress={() => setShowRecommendation(false)}
-              >
+              <TouchableOpacity style={styles.closeRecommendation} onPress={() => setShowRecommendation(false)}>
                 <Ionicons name="close-circle" size={24} color="#FFF" />
               </TouchableOpacity>
             </Animatable.View>
           )}
         </View>
-
-        {/* BOTÕES */}
-        <TouchableOpacity
-          style={[styles.titlesButton, { backgroundColor: "#000000" }]}
-          onPress={handleOpenTitles}
-        >
+        <TouchableOpacity style={[styles.titlesButton, { backgroundColor: "#000000" }]} onPress={handleOpenTitles}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <Text style={styles.titlesButtonText}>Ver Títulos</Text>
             {newTitleIndicator && (
@@ -854,11 +792,7 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
             )}
           </View>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.historyButton, { backgroundColor: "#000000" }]}
-          onPress={handleOpenHistory}
-        >
+        <TouchableOpacity style={[styles.historyButton, { backgroundColor: "#000000" }]} onPress={handleOpenHistory}>
           <Text style={styles.historyButtonText}>Ver Histórico de Torneios</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -866,7 +800,7 @@ async function updatePlayerTemplate(userId: string, templateId: number) {
   );
 }
 
-// ============ SUBCOMPONENTE: RivalProfileCard =============
+/** SUBCOMPONENTE: RivalProfileCard */
 function RivalProfileCard({
   rivalData,
   onClose,
@@ -874,29 +808,15 @@ function RivalProfileCard({
   rivalData: RivalryData;
   onClose: () => void;
 }) {
-  // Pega avatar e template do rival
   const rivalAvatar = avatarList.find((a) => a.id === rivalData.rivalAvatarId)?.uri;
-  const rivalTemplate: TemplateItem =
-    templates.find((t) => t.id === rivalData.rivalTemplateId) || templates[0];
-
-  // Container e text style do rival
+  const rivalTemplate: TemplateItem = templates.find((t) => t.id === rivalData.rivalTemplateId) || templates[0];
   const containerStyle = rivalTemplate.containerStyle;
   const textStyle = rivalTemplate.textStyle || { color: "#FFFFFF" };
-
   return (
     <View style={[stylesRival.profileContainer]}>
       <View style={[stylesRival.rivalCard, containerStyle]}>
-        <Text style={[stylesRival.rivalName, textStyle]}>
-          {rivalData.rivalName}
-        </Text>
-
-        {/* Avatar do Rival */}
-        <Image
-          source={rivalAvatar || require("../../assets/images/avatar/image.jpg")}
-          style={[stylesRival.rivalAvatar, { borderColor: "#E3350D" }]}
-        />
-
-        {/* Estatísticas de Rivalidade em cards com icones */}
+        <Text style={[stylesRival.rivalName, textStyle]}>{rivalData.rivalName}</Text>
+        <Image source={rivalAvatar || require("../../assets/images/avatar/image.jpg")} style={[stylesRival.rivalAvatar, { borderColor: "#E3350D" }]} />
         <View style={stylesRival.statsRow}>
           <View style={stylesRival.statCard}>
             <Ionicons name="trophy" size={20} color="#00D840" />
@@ -909,12 +829,11 @@ function RivalProfileCard({
             <Text style={[stylesRival.statValue, textStyle]}>{rivalData.losses}</Text>
           </View>
           <View style={stylesRival.statCard}>
-          <Ionicons name="thumbs-up" size={20} color="#f5a623" />
+            <Ionicons name="thumbs-up" size={20} color="#f5a623" />
             <Text style={[stylesRival.statLabel, textStyle]}>Empates</Text>
             <Text style={[stylesRival.statValue, textStyle]}>{rivalData.draws}</Text>
           </View>
         </View>
-
         <View style={stylesRival.statsRow}>
           <View style={stylesRival.statCard}>
             <Ionicons name="flash" size={20} color="#E3350D" />
@@ -924,19 +843,14 @@ function RivalProfileCard({
           <View style={stylesRival.statCard}>
             <Ionicons name="stats-chart" size={20} color="#FFC312" />
             <Text style={[stylesRival.statLabel, textStyle]}>WinRate</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>
-              {((rivalData.wins / rivalData.matchesCount) * 100).toFixed(1)}%
-            </Text>
+            <Text style={[stylesRival.statValue, textStyle]}>{((rivalData.wins / rivalData.matchesCount) * 100).toFixed(1)}%</Text>
           </View>
           <View style={stylesRival.statCard}>
             <Ionicons name="alert-circle" size={20} color="#7f12ee" />
             <Text style={[stylesRival.statLabel, textStyle]}>Fator Rival</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>
-              {rivalData.rivalryFactor.toFixed(1)}%
-            </Text>
+            <Text style={[stylesRival.statValue, textStyle]}>{rivalData.rivalryFactor.toFixed(1)}%</Text>
           </View>
         </View>
-
         <TouchableOpacity style={stylesRival.closeBtn} onPress={onClose}>
           <Text style={stylesRival.closeBtnText}>Fechar</Text>
         </TouchableOpacity>
@@ -945,70 +859,21 @@ function RivalProfileCard({
   );
 }
 
-// Estilos do Rival Profile
+// ---------------- ESTILOS RivalProfileCard ----------------
 const stylesRival = StyleSheet.create({
-  profileContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  rivalCard: {
-    width: "90%",
-    borderWidth: 2,
-    borderColor: "#333",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-  },
-  rivalName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  rivalAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    marginBottom: 16,
-  },
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    width: "100%",
-    marginVertical: 6,
-  },
-  statCard: {
-    backgroundColor: "rgba(0,0,0,0.3)",
-    borderRadius: 8,
-    padding: 8,
-    alignItems: "center",
-    width: 80,
-  },
-  statLabel: {
-    marginTop: 2,
-    fontSize: 12,
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: "bold",
-    marginTop: 2,
-  },
-  closeBtn: {
-    marginTop: 20,
-    backgroundColor: "#E3350D",
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  closeBtnText: {
-    color: "#FFF",
-    fontWeight: "bold",
-  },
+  profileContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  rivalCard: { width: "90%", borderWidth: 2, borderColor: "#333", borderRadius: 12, padding: 16, alignItems: "center" },
+  rivalName: { fontSize: 20, fontWeight: "bold", marginBottom: 8, textAlign: "center" },
+  rivalAvatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, marginBottom: 16 },
+  statsRow: { flexDirection: "row", justifyContent: "space-around", width: "100%", marginVertical: 6 },
+  statCard: { backgroundColor: "rgba(0,0,0,0.3)", borderRadius: 8, padding: 8, alignItems: "center", width: 80 },
+  statLabel: { marginTop: 2, fontSize: 12 },
+  statValue: { fontSize: 14, fontWeight: "bold", marginTop: 2 },
+  closeBtn: { marginTop: 20, backgroundColor: "#E3350D", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
+  closeBtnText: { color: "#FFF", fontWeight: "bold" },
 });
 
-// ============ ESTILOS GERAIS PLAYER SCREEN ============
+// ---------------- ESTILOS GERAIS PLAYER SCREEN ----------------
 const DARK_BG = "#1E1E1E";
 const CARD_BG = "#292929";
 const BORDER_COLOR = "#4D4D4D";
@@ -1016,233 +881,40 @@ const RED = "#E3350D";
 const WHITE = "#FFFFFF";
 
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    backgroundColor: DARK_BG,
-  },
-  loaderContainer: {
-    flex: 1,
-    backgroundColor: DARK_BG,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  header: {
-    marginTop: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    paddingHorizontal: 16,
-    marginBottom: 10,
-  },
-  searchContainer: {
-    backgroundColor: CARD_BG,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: BORDER_COLOR,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    overflow: "hidden",
-  },
-  searchInput: {
-    color: WHITE,
-    fontSize: 14,
-    width: "100%",
-    paddingVertical: 4,
-  },
-  searchOverlay: {
-    position: "absolute",
-    top: 80,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 999,
-  },
-  searchResultBox: {
-    marginHorizontal: 16,
-    backgroundColor: CARD_BG,
-    borderRadius: 8,
-    padding: 8,
-  },
-  searchItem: {
-    backgroundColor: "#444",
-    borderRadius: 6,
-    padding: 8,
-    marginVertical: 4,
-  },
-  playerCard: {
-    backgroundColor: CARD_BG,
-    marginHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: BORDER_COLOR,
-    padding: 16,
-    alignItems: "center",
-    position: "relative",
-    marginTop: 10,
-  },
-  templateIconContainer: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-  },
-  gearIconContainer: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-  },
-  playerName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginVertical: 12,
-    borderWidth: 2,
-  },
-  streakContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  streakText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    marginLeft: 5,
-  },
-  statsRow: {
-    flexDirection: "row",
-    marginVertical: 6,
-    justifyContent: "space-around",
-    width: "100%",
-  },
-  statBox: {
-    alignItems: "center",
-    flex: 1,
-    marginVertical: 6,
-  },
-  statLabel: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  recommendationCard: {
-    backgroundColor: "#444",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 14,
-    width: "100%",
-    position: "relative",
-  },
-  recommendationText: {
-    color: "#fff",
-    fontStyle: "italic",
-    textAlign: "center",
-  },
-  closeRecommendation: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-  },
-
-  titlesButton: {
-    borderWidth: 1,
-    borderColor: "#FFFFFF",
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginHorizontal: 16,
-    marginTop: 20,
-  },
-  titlesButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-  newTitleBadge: {
-    backgroundColor: RED,
-    borderRadius: 10,
-    marginLeft: 6,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  newTitleBadgeText: {
-    color: "#FFF",
-    fontSize: 10,
-    fontWeight: "bold",
-  },
-  historyButton: {
-    borderWidth: 1,
-    borderColor: "#FFFFFF",
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginHorizontal: 16,
-    marginTop: 10,
-  },
-  historyButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    backgroundColor: CARD_BG,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: BORDER_COLOR,
-    maxHeight: "85%",
-    alignItems: "center",
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  closeModalBtn: {
-    backgroundColor: RED,
-    borderRadius: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    alignSelf: "center",
-    marginTop: 10,
-  },
-  closeModalText: {
-    color: WHITE,
-    fontWeight: "bold",
-    fontSize: 14,
-  },
-
-  rivalModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  avatarChoice: {
-    margin: 8,
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: BORDER_COLOR,
-  },
-  avatarImage: {
-    width: 80,
-    height: 80,
-  },
+  mainContainer: { flex: 1, backgroundColor: DARK_BG },
+  loaderContainer: { flex: 1, backgroundColor: DARK_BG, justifyContent: "center", alignItems: "center" },
+  header: { marginTop: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: 16, marginBottom: 10 },
+  searchContainer: { backgroundColor: CARD_BG, borderRadius: 8, borderWidth: 1, borderColor: BORDER_COLOR, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, overflow: "hidden" },
+  searchInput: { color: WHITE, fontSize: 14, width: "100%", paddingVertical: 4 },
+  searchOverlay: { position: "absolute", top: 80, left: 0, right: 0, bottom: 0, zIndex: 999 },
+  searchResultBox: { marginHorizontal: 16, backgroundColor: CARD_BG, borderRadius: 8, padding: 8 },
+  searchItem: { backgroundColor: "#444", borderRadius: 6, padding: 8, marginVertical: 4 },
+  playerCard: { backgroundColor: CARD_BG, marginHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: BORDER_COLOR, padding: 16, alignItems: "center", position: "relative", marginTop: 10 },
+  templateIconContainer: { position: "absolute", top: 10, right: 10 },
+  gearIconContainer: { position: "absolute", top: 10, left: 10 },
+  playerName: { fontSize: 20, fontWeight: "bold", marginBottom: 6, textAlign: "center" },
+  avatar: { width: 100, height: 100, borderRadius: 50, marginVertical: 12, borderWidth: 2 },
+  streakContainer: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
+  streakText: { fontSize: 16, fontWeight: "bold", marginLeft: 5 },
+  statsRow: { flexDirection: "row", marginVertical: 6, justifyContent: "space-around", width: "100%" },
+  statBox: { alignItems: "center", flex: 1, marginVertical: 6 },
+  statLabel: { fontSize: 14, marginBottom: 4 },
+  statValue: { fontSize: 16, fontWeight: "bold" },
+  recommendationCard: { backgroundColor: "#444", borderRadius: 8, padding: 10, marginTop: 14, width: "100%", position: "relative" },
+  recommendationText: { color: "#fff", fontStyle: "italic", textAlign: "center" },
+  closeRecommendation: { position: "absolute", top: 6, right: 6 },
+  titlesButton: { borderWidth: 1, borderColor: "#FFFFFF", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginHorizontal: 16, marginTop: 20 },
+  titlesButtonText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 16 },
+  newTitleBadge: { backgroundColor: RED, borderRadius: 10, marginLeft: 6, paddingHorizontal: 5, paddingVertical: 2 },
+  newTitleBadgeText: { color: "#FFF", fontSize: 10, fontWeight: "bold" },
+  historyButton: { borderWidth: 1, borderColor: "#FFFFFF", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginHorizontal: 16, marginTop: 10 },
+  historyButtonText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 16 },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" },
+  modalContent: { backgroundColor: CARD_BG, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: BORDER_COLOR, maxHeight: "85%", alignItems: "center" },
+  modalTitle: { fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 10 },
+  closeModalBtn: { backgroundColor: RED, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 20, alignSelf: "center", marginTop: 10 },
+  closeModalText: { color: WHITE, fontWeight: "bold", fontSize: 14 },
+  rivalModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center" },
+  avatarChoice: { margin: 8, borderRadius: 8, overflow: "hidden", borderWidth: 2, borderColor: BORDER_COLOR },
+  avatarImage: { width: 80, height: 80 },
 });
