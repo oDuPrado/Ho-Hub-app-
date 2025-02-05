@@ -1,538 +1,838 @@
-// app/(tabs)/classicos.tsx
-
-import React, { useEffect, useState } from "react";
+////////////////////////////////////////
+// ARQUIVO: (tabs)/classicos.tsx
+////////////////////////////////////////
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
+  Modal,
+  BackHandler,
+  Alert,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import * as Animatable from "react-native-animatable";
+import { useFocusEffect } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
+import moment from "moment";
+import "moment/locale/pt-br";
 
-import { collectionGroup, getDocs, doc, getDoc } from "firebase/firestore";
+import * as Animatable from "react-native-animatable"; // <-- animações
+
+import { fetchAllMatches, MatchData } from "../../lib/matchService";
+import classicosList, {
+  computePlayerVsPlayerStats,
+  getActiveClassicosForDuo,
+} from "../classicosConfig";
+
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Exemplo de “Clássico”
-interface Classico {
-  id: number;
-  name: string;
-  description: string;
-  icon: string;
-  iconColor: string;
-  checkCondition: (matches: RivalMatchInfo) => boolean;
+interface PlayerInfo {
+  id: string;
+  fullname: string;
 }
 
-// Info de Rival X user
-interface RivalMatchInfo {
-  rivalId: string;
-  matchesCount: number;
-  userWins: number;
-  rivalWins: number;
-  isRivalCurrent: boolean; // se for o rival atual
-}
-
-// Filtraremos e atribuiremos “clássicos”
-const classicosList: Classico[] = [
-    {
-      id: 1,
-      name: "Ash vs Gary: Rivalidade Eterna",
-      description: "Mais de 10 batalhas épicas com vitórias equilibradas. Quem será o verdadeiro Mestre Pokémon?",
-      icon: "pokeball",
-      iconColor: "#E3350D",
-      checkCondition: (info) => info.matchesCount > 10 && Math.abs(info.userWins - info.rivalWins) <= 2,
-    },
-    {
-      id: 2,
-      name: "Confronto de Titãs: Dialga vs Palkia",
-      description: "Ambos com 5+ vitórias. Uma batalha que transcende o tempo e o espaço!",
-      icon: "sword-cross",
-      iconColor: "#FFC312",
-      checkCondition: (info) => info.userWins >= 5 && info.rivalWins >= 5,
-    },
-    {
-      id: 3,
-      name: "Desafio do Arquipélago de Alola",
-      description: "15+ batalhas intensas. Provem seu valor em todas as ilhas!",
-      icon: "island",
-      iconColor: "#1DD1A1",
-      checkCondition: (info) => info.matchesCount >= 15,
-    },
-    {
-      id: 4,
-      name: "Kyogre vs Groudon: Tempestade Primordial",
-      description: "20+ vitórias combinadas. Uma batalha que pode remodelar o mundo!",
-      icon: "weather-windy-variant",
-      iconColor: "#A3CB38",
-      checkCondition: (info) => (info.userWins + info.rivalWins) >= 20,
-    },
-    {
-      id: 5,
-      name: "Campeão Invicto de Galar",
-      description: "70%+ de vitórias. Digno de enfrentar o lendário Leon!",
-      icon: "crown",
-      iconColor: "#F79F1F",
-      checkCondition: (info) => {
-        const userWR = (info.matchesCount > 0) ? (info.userWins / info.matchesCount)*100 : 0;
-        const rivalWR = (info.matchesCount > 0) ? (info.rivalWins / info.matchesCount)*100 : 0;
-        return (userWR >= 70) || (rivalWR >= 70);
-      },
-    },
-    {
-      id: 6,
-      name: "O Legado de Red",
-      description: "5+ vitórias sem derrotas. Uma performance digna do lendário Red!",
-      icon: "alpha-z-box",
-      iconColor: "#EE5A24",
-      checkCondition: (info) => info.matchesCount >= 5 && info.userWins === info.matchesCount,
-    },
-    {
-      id: 7,
-      name: "Batalha dos Cem: Maratona Pokémon",
-      description: "100+ partidas disputadas. Uma rivalidade que resistiu ao teste do tempo!",
-      icon: "numeric-100-box",
-      iconColor: "#FF6F00",
-      checkCondition: (info) => info.matchesCount >= 100,
-    },
-    {
-      id: 8,
-      name: "Equilíbrio Perfeito: Yin e Yang",
-      description: "50+ partidas com diferença de vitórias de no máximo 3. Um duelo equilibrado!",
-      icon: "yin-yang",
-      iconColor: "#FFFFFF",
-      checkCondition: (info) => info.matchesCount >= 50 && Math.abs(info.userWins - info.rivalWins) <= 3,
-    },
-    {
-      id: 9,
-      name: "Mestre e Aprendiz: A Jornada do Conhecimento",
-      description: "Um jogador com 2x mais vitórias que o outro após 30+ partidas. Quem é o mestre?",
-      icon: "school",
-      iconColor: "#4CAF50",
-      checkCondition: (info) => info.matchesCount >= 30 && (info.userWins >= 2 * info.rivalWins || info.rivalWins >= 2 * info.userWins),
-    },
-    {
-      id: 10,
-      name: "Duelo dos Campeões: Elite Four Challenge",
-      description: "Ambos os jogadores com 40+ vitórias. Uma batalha digna da Elite Four!",
-      icon: "shield-star",
-      iconColor: "#FFC107",
-      checkCondition: (info) => info.userWins >= 40 && info.rivalWins >= 40,
-    },
-    {
-      id: 11,
-      name: "Rivalidade Acirrada: Cada Vitória Conta",
-      description: "75+ partidas com diferença de no máximo 5 vitórias. Quem será o vencedor final?",
-      icon: "fire",
-      iconColor: "#FF5722",
-      checkCondition: (info) => info.matchesCount >= 75 && Math.abs(info.userWins - info.rivalWins) <= 5,
-    },
-    {
-      id: 12,
-      name: "Domínio Absoluto: O Reinado do Campeão",
-      description: "Um jogador com 80%+ de vitórias após 50+ partidas. Uma demonstração de maestria!",
-      icon: "crown",
-      iconColor: "#9C27B0",
-      checkCondition: (info) => {
-        const winRate = info.matchesCount > 0 ? Math.max(info.userWins, info.rivalWins) / info.matchesCount : 0;
-        return info.matchesCount >= 50 && winRate >= 0.8;
-      },
-    },
-    
-  ];
-  
-
-interface RivalStats {
-  rivalId: string;
-  rivalName: string;
-  matchesCount: number;
-  userWins: number;
-  rivalWins: number;
-  classicosIds: number[];  // Quais clássicos se encaixam
-  isRivalCurrent: boolean; // Destacar
-}
-
-// Filtros
-type FilterType = "todoDia" | "fregues" | "deixaQuieto";
+type DisplayFilter = "normal" | "vejo" | "fregues" | "deixa";
 
 export default function ClassicosScreen() {
-  const router = useRouter();
+  const [allMatches, setAllMatches] = useState<MatchData[]>([]);
+  const [players, setPlayers] = useState<PlayerInfo[]>([]);
 
-  const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState("");
-  const [rivalsData, setRivalsData] = useState<RivalStats[]>([]);
-  const [filterType, setFilterType] = useState<FilterType>("todoDia"); 
-  const [currentRivalId, setCurrentRivalId] = useState<string>(""); // Rival atual
+  const [rivalId, setRivalId] = useState("");
+  const [rivalName, setRivalName] = useState("Sem Rival");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        const storedId = await AsyncStorage.getItem("@userId");
-        if (!storedId) {
-          router.replace("/(auth)/login");
-          return;
+  // Modal states
+  const [classicosModalVisible, setClassicosModalVisible] = useState(false);
+  const [classicosInfoModalVisible, setClassicosInfoModalVisible] = useState(false);
+
+  // Lista de {pA, pB, stats, classicos[]} p/ exibir no modal “Clássicos da Liga”
+  const [duoStatsList, setDuoStatsList] = useState<any[]>([]);
+
+  // Filtro local: "normal", "vejo", "fregues", "deixa"
+  const [displayFilter, setDisplayFilter] = useState<DisplayFilter>("normal");
+
+  // ============ useFocusEffect p/ recarregar toda vez que focar na tela ============
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          // 1) Carrega user
+          const uid = await AsyncStorage.getItem("@userId");
+          if (!uid) return;
+          setUserId(uid);
+
+          // 2) Carrega partidas com filtro
+          console.log("🔄 [Classicos] Carregando partidas via filter...");
+          const matches = await fetchAllMatches();
+          setAllMatches(matches);
+
+          // 3) Carrega lista de jogadores (liga/cidade)
+          await loadPlayers();
+
+          // 4) Detecta Rival
+          const newRival = await detectUserRival(uid, matches);
+          if (newRival) {
+            setRivalId(newRival.rivalId);
+            setRivalName(newRival.rivalName);
+          } else {
+            setRivalId("");
+            setRivalName("Sem Rival");
+          }
+
+          // 5) Monta stats para TODAS as duplas
+          const listStats = buildAllDuoStats(matches);
+          setDuoStatsList(listStats);
+
+        } catch (err) {
+          console.log("❌ Erro no useFocusEffect de Classicos:", err);
         }
-        setUserId(storedId);
+      })();
+    }, [])
+  );
 
-        // Rival atual
-        const oldRivalId = await AsyncStorage.getItem("@lastRivalId");
-        setCurrentRivalId(oldRivalId || "");
+  // =========== Detectar Rival do usuário (mais partidas) ===========
+  async function detectUserRival(uid: string, matches: MatchData[]) {
+    const rivalMap: Record<string, number> = {};
+    
+    matches.forEach((m) => {
+      if (!m.player1_id || !m.player2_id) return;
+      if (m.player1_id === uid) {
+        rivalMap[m.player2_id] = (rivalMap[m.player2_id] || 0) + 1;
+      } else if (m.player2_id === uid) {
+        rivalMap[m.player1_id] = (rivalMap[m.player1_id] || 0) + 1;
+      }
+    });
+  
+    let topCount = 0;
+    let topRival = "";
+  
+    for (const rid of Object.keys(rivalMap)) {
+      if (rivalMap[rid] > topCount) {
+        topCount = rivalMap[rid];
+        topRival = rid;
+      }
+    }
+  
+    if (!topRival) return null;
 
-        // Pegar partidas
-        const allMatches = await fetchAllMatches();
-        const userMatches = allMatches.filter(
-          (m) => m.player1_id === storedId || m.player2_id === storedId
-        );
+    // Busca no array players
+    const found = players.find((pl) => pl.id === topRival);
+    if (found) {
+      return { rivalId: topRival, rivalName: found.fullname };
+    }
 
-        // Montar RivalStats
-        const statsMap: Record<string, RivalStats> = {};
+    // Se não achou, tenta no Firebase
+    try {
+      const leagueStored = await AsyncStorage.getItem("@leagueId");
+      if (!leagueStored) return null;
 
-        for (let mm of userMatches) {
-          const isP1 = mm.player1_id === storedId;
-          const rId = isP1 ? mm.player2_id : mm.player1_id;
-          if (!rId || rId === "N/A") continue;
+      const pRef = doc(db, `leagues/${leagueStored}/players/${topRival}`);
+      const pSnap = await getDoc(pRef);
+      if (pSnap.exists()) {
+        const fullname = pSnap.data().fullname || `Desconhecido`;
+        return { rivalId: topRival, rivalName: fullname };
+      }
+    } catch (error) {
+      console.error("Erro ao buscar nome do rival:", error);
+    }
+    return { rivalId: topRival, rivalName: `User ${topRival}` };
+  }
 
-          if (!statsMap[rId]) {
-            statsMap[rId] = {
-              rivalId: rId,
-              rivalName: `User ${rId}`, // buscaremos no getName
-              matchesCount: 0,
-              userWins: 0,
-              rivalWins: 0,
-              classicosIds: [],
-              isRivalCurrent: false,
-            };
+  // =========== Carrega lista de jogadores respeitando filter ===========
+  async function loadPlayers() {
+    try {
+      const filterType = await AsyncStorage.getItem("@filterType");
+      const cityStored = await AsyncStorage.getItem("@selectedCity");
+      const leagueStored = await AsyncStorage.getItem("@leagueId");
+
+      console.log("📌 [Classicos] Carregando players => filter:", filterType, cityStored, leagueStored);
+
+      let leagueIds: string[] = [];
+      if (!filterType || filterType === "all") {
+        // Carrega todos
+        const leaguesSnap = await getDocs(collection(db, "leagues"));
+        leaguesSnap.forEach((docSnap) => leagueIds.push(docSnap.id));
+      } else if (filterType === "city" && cityStored) {
+        const allLeaguesSnap = await getDocs(collection(db, "leagues"));
+        allLeaguesSnap.forEach((ds) => {
+          const data = ds.data();
+          if (data.city === cityStored) {
+            leagueIds.push(ds.id);
           }
+        });
+      } else if (filterType === "league" && leagueStored) {
+        leagueIds.push(leagueStored);
+      }
 
-          statsMap[rId].matchesCount += 1;
+      let allPlayers: PlayerInfo[] = [];
+      for (const lId of leagueIds) {
+        const pRef = collection(db, `leagues/${lId}/players`);
+        const pSnap = await getDocs(pRef);
+        pSnap.forEach((ds) => {
+          const d = ds.data();
+          allPlayers.push({
+            id: ds.id,
+            fullname: d.fullname || `User ${ds.id}`,
+          });
+        });
+      }
 
-          const outcome = mm.outcomeNumber || 0;
-          if (outcome === 1) {
-            if (isP1) statsMap[rId].userWins++;
-            else statsMap[rId].rivalWins++;
-          } else if (outcome === 2) {
-            if (isP1) statsMap[rId].rivalWins++;
-            else statsMap[rId].userWins++;
-          } else if (outcome === 10) {
-            if (isP1) statsMap[rId].rivalWins++;
-            else statsMap[rId].userWins++;
-          }
+      // Remove duplicados
+      const seen = new Set<string>();
+      const uniquePlayers = allPlayers.filter((pl) => {
+        if (seen.has(pl.id)) return false;
+        seen.add(pl.id);
+        return true;
+      });
+
+      console.log("✅ [Classicos] totalPlayers =>", uniquePlayers.length);
+      setPlayers(uniquePlayers);
+    } catch (err) {
+      console.log("❌ Erro ao carregar players em Classicos:", err);
+    }
+  }
+
+  // =========== Monta stats para TODAS as duplas (Clássicos da Liga) ==========
+  function buildAllDuoStats(matches: MatchData[]) {
+    const pairsSet = new Set<string>();
+
+    for (let i = 0; i < players.length; i++) {
+      for (let j = i + 1; j < players.length; j++) {
+        const pA = players[i].id;
+        const pB = players[j].id;
+        if (pA !== pB) {
+          const key = pA < pB ? `${pA}_${pB}` : `${pB}_${pA}`;
+          pairsSet.add(key);
         }
+      }
+    }
 
-        // Buscamos nomes no Firestore
-        const finalData: RivalStats[] = [];
-        for (let rid of Object.keys(statsMap)) {
-          const docRef = doc(db, "players", rid);
-          const snap = await getDoc(docRef);
-          let fname = `User ${rid}`;
-          if (snap.exists()) {
-            const data = snap.data();
-            fname = data?.fullname || fname;
-          }
-
-          // Determina se é rival atual
-          const isCurrent = rid === oldRivalId;
-
-          finalData.push({
-            ...statsMap[rid],
-            rivalName: fname,
-            isRivalCurrent: isCurrent,
+    const results: any[] = [];
+    pairsSet.forEach((key) => {
+      const [pA, pB] = key.split("_");
+      const statsDuo = computePlayerVsPlayerStats(matches, pA, pB);
+      if (statsDuo.matches > 0) {
+        const activeClassicos = getActiveClassicosForDuo(statsDuo);
+        if (activeClassicos.length > 0) {
+          results.push({
+            playerA: pA,
+            playerB: pB,
+            stats: statsDuo,
+            classicos: activeClassicos,
           });
         }
-
-        // Atribuir clássicos => "apenas 1 rival pode ter"
-        // 1) Checamos se se encaixa em classicoList
-        // 2) Escolhemos "vencedor" = quem tiver mais matches
-        let partialMap: Record<number, RivalStats[]> = {};
-        for (let c of classicosList) {
-          partialMap[c.id] = [];
-        }
-
-        // Identifica pra cada Rival quais clássicos se encaixam
-        for (let rs of finalData) {
-          const info: RivalMatchInfo = {
-            rivalId: rs.rivalId,
-            matchesCount: rs.matchesCount,
-            userWins: rs.userWins,
-            rivalWins: rs.rivalWins,
-            isRivalCurrent: rs.isRivalCurrent,
-          };
-          for (let c of classicosList) {
-            if (c.checkCondition(info)) {
-              // Se encaixa
-              partialMap[c.id].push(rs);
-            }
-          }
-        }
-
-        // 3) Em cada clássico, escolhe 1 Rival => o que tiver maior matchesCount
-        for (let cid of Object.keys(partialMap)) {
-          const cIdNum = parseInt(cid, 10);
-          let arr = partialMap[cIdNum];
-          if (!arr || arr.length === 0) continue;
-          // Ordena decrescente de matches
-          arr.sort((a, b) => b.matchesCount - a.matchesCount);
-
-          // O "vencedor" do clássico é arr[0]
-          let winnerId = arr[0].rivalId;
-
-          // Adicionamos no finalData
-          const idx = finalData.findIndex((x) => x.rivalId === winnerId);
-          finalData[idx].classicosIds.push(cIdNum);
-        }
-
-        setRivalsData(finalData);
-      } catch (error) {
-        console.log("Erro classicos:", error);
-      } finally {
-        setLoading(false);
       }
-    })();
-  }, [router]);
-
-  async function fetchAllMatches() {
-    const snap = await getDocs(collectionGroup(db, "matches"));
-    const arr: any[] = [];
-    snap.forEach((docSnap) => {
-      arr.push({ id: docSnap.id, ...docSnap.data() });
     });
-    return arr;
+    return results;
   }
 
-  // =============== FILTROS ===============
-  const filteredRivals = getFilteredRivals();
-
-  function getFilteredRivals(): RivalStats[] {
-    // Rival atual sempre no topo
-    let data = [...rivalsData];
-
-    // remover do array e re-add no topo
-    const currIdx = data.findIndex((x) => x.isRivalCurrent);
-    if (currIdx >= 0) {
-      const [curr] = data.splice(currIdx, 1);
-      data.unshift(curr);
-    }
-
-    // filtra/ordena
-    switch (filterType) {
-      case "todoDia":
-        // Mais partidas -> menor
-        data.sort((a, b) => b.matchesCount - a.matchesCount);
-        break;
-      case "fregues":
-        // quem mais perde p/ user => userWins - rivalWins? Maior => top
-        data.sort((a, b) => (b.userWins - b.rivalWins) - (a.userWins - a.rivalWins));
-        break;
-      case "deixaQuieto":
-        // quem mais te vence => rivalWins - userWins => maior => top
-        data.sort((a, b) => (b.rivalWins - b.userWins) - (a.rivalWins - a.userWins));
-        break;
-    }
-
-    // Rival atual no topo, mesmo se o filtro mudasse a posição
-    // (já movemos no começo)
-    return data;
+  // ------------- FILTROS LOCAIS -------------
+  function handleSetFilter(f: DisplayFilter) {
+    setDisplayFilter(f);
   }
+
+  // Retorna a lista de oponentes com stats, aplicando a lógica do filter
+  function getFilteredOpponents(): PlayerInfo[] {
+    // Primeiro pega todos que não são o user
+    let opps = players.filter((p) => p.id !== userId);
+
+    if (displayFilter === "normal") {
+      return opps;
+    }
+
+    // Para cada opponent, calculamos statsDuo
+    const sorted = [...opps].sort((a, b) => {
+      const stA = computePlayerVsPlayerStats(allMatches, userId, a.id);
+      const stB = computePlayerVsPlayerStats(allMatches, userId, b.id);
+
+      if (displayFilter === "vejo") {
+        // “Vejo Todo Dia”: ord. desc por matches
+        return stB.matches - stA.matches;
+      } else if (displayFilter === "fregues") {
+        // “Freguês”: ord. desc por winsA
+        return stB.winsA - stA.winsA;
+      } else if (displayFilter === "deixa") {
+        // “Deixa Quieto”: ord. desc por winsB
+        return stB.winsB - stA.winsB;
+      }
+      return 0;
+    });
+
+    return sorted;
+  }
+
+  // ------------- BOTÕES MODAIS -------------
+  function openClassicosModal() {
+    setClassicosModalVisible(true);
+  }
+  function closeClassicosModal() {
+    setClassicosModalVisible(false);
+  }
+
+  function openClassicosInfoModal() {
+    setClassicosInfoModalVisible(true);
+  }
+  function closeClassicosInfoModal() {
+    setClassicosInfoModalVisible(false);
+  }
+
+  // ------------- BACKHANDLER -------------
+  useEffect(() => {
+    const backAction = () => {
+      if (classicosModalVisible) {
+        setClassicosModalVisible(false);
+        return true;
+      }
+      if (classicosInfoModalVisible) {
+        setClassicosInfoModalVisible(false);
+        return true;
+      }
+      return false;
+    };
+    const subscription = BackHandler.addEventListener("hardwareBackPress", backAction);
+    return () => subscription.remove();
+  }, [classicosModalVisible, classicosInfoModalVisible]);
+
+  // =========== RENDER MAIN ============
+  const filteredOpponents = getFilteredOpponents();
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Clássicos</Text>
-      </View>
+      {/* TITULO */}
+      <Animatable.Text 
+        style={styles.title}
+        animation="fadeInDown" 
+        delay={100}
+      >
+        CLÁSSICOS
+      </Animatable.Text>
 
-      {/* Filtros */}
-      <View style={styles.filtersRow}>
-        <TouchableOpacity
-          style={[
-            styles.filterBtn,
-            filterType === "todoDia" && { backgroundColor: "#E3350D" },
-          ]}
-          onPress={() => setFilterType("todoDia")}
+      <ScrollView style={{ flex: 1, marginHorizontal: 10 }}>
+        {/* Rival do usuário */}
+        <Animatable.View 
+          style={styles.rivalCard}
+          animation="bounceIn"
+          delay={200}
         >
-          <Text style={styles.filterText}>Encontro Todo Dia</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.filterBtn,
-            filterType === "fregues" && { backgroundColor: "#E3350D" },
-          ]}
-          onPress={() => setFilterType("fregues")}
-        >
-          <Text style={styles.filterText}>Freguês</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.filterBtn,
-            filterType === "deixaQuieto" && { backgroundColor: "#E3350D" },
-          ]}
-          onPress={() => setFilterType("deixaQuieto")}
-        >
-          <Text style={styles.filterText}>Deixa Quieto</Text>
-        </TouchableOpacity>
-      </View>
+          <Ionicons name="flash" size={28} color="#E3350D" style={{ marginRight: 8 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rivalTitle}>Rival Atual</Text>
+            <Text style={styles.rivalName}>{rivalName}</Text>
+          </View>
+        </Animatable.View>
 
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#E3350D" />
+        {/* FILTROS LOCAIS */}
+        <View style={styles.filterRow}>
+          <TouchableOpacity 
+            style={[
+              styles.filterBtn, 
+              displayFilter === "normal" && styles.filterBtnActive
+            ]}
+            onPress={() => handleSetFilter("normal")}
+          >
+            <Ionicons name="options" size={18} color="#fff" style={{ marginRight: 4 }}/>
+            <Text style={styles.filterBtnText}>Normal</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[
+              styles.filterBtn, 
+              displayFilter === "vejo" && styles.filterBtnActive
+            ]}
+            onPress={() => handleSetFilter("vejo")}
+          >
+            <Ionicons name="eye" size={18} color="#fff" style={{ marginRight: 4 }}/>
+            <Text style={styles.filterBtnText}>Vejo Todo Dia</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[
+              styles.filterBtn, 
+              displayFilter === "fregues" && styles.filterBtnActive
+            ]}
+            onPress={() => handleSetFilter("fregues")}
+          >
+            <Ionicons name="checkmark-done" size={18} color="#fff" style={{ marginRight: 4 }}/>
+            <Text style={styles.filterBtnText}>Freguês</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[
+              styles.filterBtn, 
+              displayFilter === "deixa" && styles.filterBtnActive
+            ]}
+            onPress={() => handleSetFilter("deixa")}
+          >
+            <Ionicons name="skull" size={18} color="#fff" style={{ marginRight: 4 }}/>
+            <Text style={styles.filterBtnText}>Deixa Quieto</Text>
+          </TouchableOpacity>
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.scrollInner}>
-          <Text style={styles.infoText}>
-            Bem vindo a sua pagina de Clássicos, aqui você vai encontrar seus maiores
-          </Text>
 
-          {filteredRivals.map((rd) => (
-            <Animatable.View
-              key={rd.rivalId}
-              style={[
-                styles.rivalBox,
-                rd.isRivalCurrent && { borderColor: "#FFC312", backgroundColor: "#333" },
-              ]}
+        <Text style={styles.subParagraph}>
+          Selecione um filtro e veja como se comportam seus confrontos.
+        </Text>
+
+        {/* Lista de confrontos do usuario (com animações) */}
+        {filteredOpponents.map((opponent, index) => {
+          const statsDuo = computePlayerVsPlayerStats(allMatches, userId, opponent.id);
+          if (statsDuo.matches === 0) return null;
+          const classicosActive = getActiveClassicosForDuo(statsDuo);
+
+          return (
+            <Animatable.View 
+              style={styles.duoCard} 
+              key={opponent.id}
               animation="fadeInUp"
+              delay={100 * (index + 1)}
             >
-              <Text style={[styles.rivalTitle, rd.isRivalCurrent && { color: "#FFC312" }]}>
-                {rd.rivalName} {rd.isRivalCurrent && " (Rival Atual)"}
+              <Text style={styles.duoTitle}>
+                vs {opponent.fullname} ({statsDuo.matches} partidas)
               </Text>
-              <Text style={styles.rivalText}>
-                Partidas: {rd.matchesCount} | Você: {rd.userWins} vs Rival: {rd.rivalWins}
-              </Text>
+              <View style={styles.duoStatsContainer}>
+                <View style={styles.statBox}>
+                  <Ionicons name="trophy" size={16} color="#FFD700" />
+                  <Text style={styles.statText}>Vitórias: {statsDuo.winsA}</Text>
+                </View>
+                <View style={styles.statBox}>
+                  <Ionicons name="skull" size={16} color="#E3350D" />
+                  <Text style={styles.statText}>Derrotas: {statsDuo.winsB}</Text>
+                </View>
+                <View style={styles.statBox}>
+                  <Ionicons name="hand-left" size={16} color="#3498db" />
+                  <Text style={styles.statText}>Empates: {statsDuo.draws}</Text>
+                </View>
+              </View>
 
-              {/* Lista de Clássicos */}
-              {rd.classicosIds.length > 0 ? (
-                rd.classicosIds.map((cid) => {
-                  const cls = classicosList.find((c) => c.id === cid);
-                  if (!cls) return null;
+
+              {classicosActive.length > 0 && (
+          <View style={styles.classicoActiveContainer}>
+            <Text style={styles.classicoActiveHeader}>🔥 Clássicos Ativos 🔥</Text>
+            {classicosActive.map((cA) => {
+              // Função auxiliar para obter a cor com base no tier
+              const getTierColor = (tier: string): string => {
+                if (tier === "Épico") return "#FFD700";
+                if (tier === "Lendário") return "#FFA500";
+                if (tier === "Arceus") return "#DA70D6";
+                return "#FFF";
+              };
+
+              const tierColor = getTierColor(cA.tier);
+
+              return (
+                <Animatable.View 
+                  key={cA.id} 
+                  animation="fadeInUp" 
+                  duration={600} 
+                  style={[
+                    styles.classicoCard,
+                    { borderColor: tierColor, backgroundColor: "#333" } // sobrepõe a cor da borda
+                  ]}
+                >
+                  {cA.tier === "Épico" && (
+                    <Ionicons name="flame" size={20} color={tierColor} style={styles.classicoIcon} />
+                  )}
+                  {cA.tier === "Lendário" && (
+                    <Ionicons name="star" size={20} color={tierColor} style={styles.classicoIcon} />
+                  )}
+                  {cA.tier === "Arceus" && (
+                    <Ionicons name="sparkles" size={20} color={tierColor} style={styles.classicoIcon} />
+                  )}
+                  <View>
+                    <Text style={[styles.classicoTitle, { color: tierColor }]}>{cA.title}</Text>
+                    <Text style={[styles.classicoTier, { color: tierColor }]}>{cA.tier}</Text>
+                  </View>
+                </Animatable.View>
+              );
+            })}
+          </View>
+        )}
+
+
+            </Animatable.View>
+          );
+        })}
+      </ScrollView>
+
+      {/* BOTOES NO RODAPE */}
+      <View style={styles.footerButtons}>
+        <TouchableOpacity style={styles.footerBtn} onPress={openClassicosModal}>
+          <Ionicons name="people" size={20} color="#fff" style={{ marginRight: 6 }} />
+          <Text style={styles.footerBtnText}>Clássicos da Liga</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.footerBtn, { backgroundColor: "#666" }]} onPress={openClassicosInfoModal}>
+          <Ionicons name="information-circle" size={20} color="#fff" style={{ marginRight: 6 }} />
+          <Text style={styles.footerBtnText}>Clássicos - Info</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* MODAL: CLÁSSICOS DA LIGA (mostra duplas e clássicos) */}
+      <Modal
+        visible={classicosModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closeClassicosModal}
+      >
+        <View style={styles.overlay}>
+          <Animatable.View style={styles.modalContainer} animation="zoomIn">
+            <Text style={styles.modalTitle}>CLÁSSICOS DA LIGA</Text>
+            <ScrollView style={{ flex: 1 }}>
+              {duoStatsList.length === 0 ? (
+                <View style={{ alignItems: "center", marginTop: 20 }}>
+                  <Ionicons name="trophy-outline" size={40} color="#FFD700" />
+                  <Text style={{ 
+                    color: "#FFD700", 
+                    fontSize: 18, 
+                    fontWeight: "bold", 
+                    textAlign: "center", 
+                    marginTop: 10 
+                  }}>
+                    Nenhum Clássico Ativo na Liga!
+                  </Text>
+                  <Text style={{ 
+                    color: "#ccc", 
+                    fontSize: 14, 
+                    textAlign: "center", 
+                    marginTop: 5, 
+                    paddingHorizontal: 20 
+                  }}>
+                    As maiores rivalidades começam com grandes batalhas! 
+                    Participem de mais torneios e façam história nessa liga! 🔥⚔️
+                  </Text>
+                </View>
+              ) : (
+                duoStatsList.map((duo, idx) => {
+                  const pANm = players.find((pl) => pl.id === duo.playerA)?.fullname || duo.playerA;
+                  const pBNm = players.find((pl) => pl.id === duo.playerB)?.fullname || duo.playerB;
                   return (
-                    <Animatable.View
-                      key={cls.id}
-                      animation="fadeInRight"
-                      style={styles.classicoCard}
+                    <Animatable.View 
+                      key={idx} 
+                      style={styles.modalDuoCard}
+                      animation="fadeInUp"
+                      delay={100 * (idx + 1)}
                     >
-                      <MaterialCommunityIcons
-                        name={cls.icon as any}
-                        size={24}
-                        color={cls.iconColor}
-                        style={{ marginRight: 10 }}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.classicoName}>{cls.name}</Text>
-                        <Text style={styles.classicoDesc}>{cls.description}</Text>
-                      </View>
+                      <Text style={styles.modalDuoTitle}>
+                        {pANm} vs {pBNm} ({duo.stats.matches} Partidas)
+                      </Text>
+                      {duo.classicos.map((cc: any) => (
+                        <Text key={cc.id} style={styles.modalClassicoItem}>
+                          {cc.title} ({cc.tier})
+                        </Text>
+                      ))}
                     </Animatable.View>
                   );
                 })
-              ) : (
-                <Text style={styles.noClassicosText}>Sem clássicos</Text>
               )}
-            </Animatable.View>
-          ))}
-        </ScrollView>
-      )}
+            </ScrollView>
+
+            <TouchableOpacity style={styles.closeButton} onPress={closeClassicosModal}>
+              <Ionicons name="arrow-back" size={20} color="#fff" style={{ marginRight: 6 }}/>
+              <Text style={styles.closeButtonText}>Voltar</Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </View>
+      </Modal>
+
+      {/* MODAL: CLÁSSICOS - INFO (lista e descrições) */}
+{/* MODAL: CLÁSSICOS - INFO (lista e descrições) */}
+<Modal
+  visible={classicosInfoModalVisible}
+  transparent={true}
+  animationType="fade"
+  onRequestClose={closeClassicosInfoModal}
+>
+  <View style={styles.overlay}>
+    <Animatable.View style={styles.modalContainer} animation="zoomIn">
+      <ScrollView contentContainerStyle={styles.infoScrollContainer}>
+        {classicosList.map((cItem) => (
+          <Animatable.View 
+            key={cItem.id} 
+            animation="fadeInUp" 
+            duration={600}
+            style={styles.classicoCardInfo}
+          >
+            <View style={styles.classicoTitleCard}>
+              {/** Define o ícone de acordo com o tier */}
+              {cItem.tier === "Épico" && (
+                <Ionicons name="flame" size={20} color="#FFD700" style={styles.classicoIcon} />
+              )}
+              {cItem.tier === "Lendário" && (
+                <Ionicons name="star" size={20} color="#FFA500" style={styles.classicoIcon} />
+              )}
+              {cItem.tier === "Arceus" && (
+                <Ionicons name="sparkles" size={20} color="#DA70D6" style={styles.classicoIcon} />
+              )}
+              <Text style={styles.classicoTitle}>
+                {cItem.title} ({cItem.tier})
+              </Text>
+            </View>
+            <View style={styles.classicoDescriptionCard}>
+              <Text style={styles.classicoDesc}>
+                {cItem.description}
+              </Text>
+            </View>
+          </Animatable.View>
+        ))}
+      </ScrollView>
+      <TouchableOpacity style={styles.closeButton} onPress={closeClassicosInfoModal}>
+        <Ionicons name="arrow-back" size={20} color="#fff" style={{ marginRight: 6 }}/>
+        <Text style={styles.closeButtonText}>Voltar</Text>
+      </TouchableOpacity>
+    </Animatable.View>
+  </View>
+</Modal>
+
     </View>
   );
-
-  // ============ FUNÇÕES EXTRAS =============
-  async function getDocData(rid: string) {
-    const docRef = doc(db, "players", rid);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) return snap.data();
-    return null;
-  }
 }
 
+// ==================== ESTILOS ====================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#1E1E1E",
+    paddingTop: 40,
   },
-  header: {
-    backgroundColor: "#000",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: "center",
-  },
-  headerTitle: {
+  title: {
     color: "#E3350D",
-    fontSize: 20,
+    fontSize: 26,
     fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 12,
   },
-  filtersRow: {
+  rivalCard: {
     flexDirection: "row",
-    justifyContent: "space-around",
-    padding: 6,
-    backgroundColor: "#111",
-  },
-  filterBtn: {
-    borderColor: "#E3350D",
-    borderWidth: 1.5,
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginHorizontal: 4,
-  },
-  filterText: {
-    color: "#FFF",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
     alignItems: "center",
-  },
-  scrollInner: {
-    padding: 16,
-  },
-  infoText: {
-    color: "#FFF",
-    fontSize: 14,
-    marginBottom: 16,
-  },
-  rivalBox: {
-    backgroundColor: "#2A2A2A",
+    backgroundColor: "#292929",
+    padding: 14,
+    marginHorizontal: 16,
+    marginBottom: 12,
     borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: "#444",
   },
   rivalTitle: {
     color: "#FFF",
-    fontSize: 15,
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  rivalName: {
+    color: "#E3350D",
+    fontSize: 18,
+    marginTop: 2,
+  },
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: 16,
+    marginBottom: 6,
+    alignItems: "center",
+  },
+  filterBtn: {
+    backgroundColor: "#444",
+    borderRadius: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginRight: 8,
+    marginBottom: 6,
+  },
+  filterBtnActive: {
+    backgroundColor: "#E3350D",
+  },
+  filterBtnText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 12,
+  },
+  subParagraph: {
+    color: "#ccc",
+    fontSize: 13,
+    marginBottom: 8,
+    marginHorizontal: 16,
+  },
+  duoCard: {
+    backgroundColor: "#333",
+    padding: 10,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 8,
+  },
+  duoTitle: {
+    color: "#fff",
+    fontWeight: "bold",
+    marginBottom: 2,
+  },
+  duoSub: {
+    color: "#bbb",
+    fontSize: 13,
+  },
+  classicoActiveText: {
+    color: "#FFD700",
+    fontWeight: "bold",
+    marginTop: 4,
+  },
+  classicoActiveItem: {
+    color: "#FFD700",
+    fontSize: 13,
+    marginLeft: 10,
+  },
+  footerButtons: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    backgroundColor: "#000000aa",
+    padding: 8,
+  },
+  footerBtn: {
+    backgroundColor: "#E3350D",
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  footerBtnText: {
+    color: "#FFF",
+    fontWeight: "bold",
+  },
+  // Overlays e Modals
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+  },
+  modalContainer: {
+    backgroundColor: "#000",
+    margin: 20,
+    borderRadius: 10,
+    padding: 16,
+    flex: 1,
+  },
+  modalTitle: {
+    color: "#E3350D",
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  modalDuoCard: {
+    backgroundColor: "#292929",
+    borderRadius: 8,
+    marginBottom: 16,
+    padding: 10,
+  },
+  modalDuoTitle: {
+    color: "#FFF",
     fontWeight: "bold",
     marginBottom: 4,
   },
-  rivalText: {
+  modalClassicoItem: {
+    color: "#FFD700",
+    marginLeft: 10,
+  },
+  closeButton: {
+    backgroundColor: "#555",
+    borderRadius: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 10,
+    alignSelf: "flex-start",
+  },
+  closeButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  // Clássicos Info
+  classicoDesc: {
+    color: "#ccc",
+    fontSize: 14,
+  },
+  duoStatsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 6,
+    paddingHorizontal: 10,
+  },
+  statBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#222",
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  statText: {
     color: "#FFF",
     fontSize: 13,
-    marginBottom: 8,
+    marginLeft: 4,
+    fontWeight: "bold",
+  },
+  classicoActiveContainer: {
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: "#2A2A2A",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#808080",
+  },
+  classicoActiveHeader: {
+    color: "#FFFFF0",
+    fontWeight: "bold",
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 6,
   },
   classicoCard: {
     flexDirection: "row",
-    backgroundColor: "#3A3A3A",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 6,
     alignItems: "center",
+    backgroundColor: "#333",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
     borderWidth: 1,
-    borderColor: "#555",
   },
-  classicoName: {
+  classicoIcon: {
+    marginRight: 10,
+  },
+  classicoTitle: {
     color: "#FFF",
     fontSize: 14,
     fontWeight: "bold",
   },
-  classicoDesc: {
-    color: "#CCC",
+  classicoTier: {
+    color: "#FFD700",
     fontSize: 12,
-  },
-  noClassicosText: {
-    color: "#999",
     fontStyle: "italic",
   },
+  infoScrollContainer: {
+    padding: 16,
+    flexGrow: 1,
+    alignItems: "center",
+  },
+  classicoTitleCard: {
+    backgroundColor: "#444", 
+    padding: 8, 
+    borderTopLeftRadius: 8, 
+    borderTopRightRadius: 8,
+  },
+  classicoDescriptionCard: {
+    backgroundColor: "#333", 
+    padding: 10, 
+    borderBottomLeftRadius: 8, 
+    borderBottomRightRadius: 8,
+  },
+  classicoCardInfo: {
+    width: "90%",
+    backgroundColor: "#292929",
+    borderRadius: 8,
+    marginBottom: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#FFD",
+    },
 });
-
