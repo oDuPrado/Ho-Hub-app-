@@ -18,6 +18,9 @@ import {
   Keyboard,
   KeyboardAvoidingView,
 } from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Animatable from "react-native-animatable";
+import { TouchableWithoutFeedback } from "react-native-gesture-handler";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -43,10 +46,7 @@ import {
   JUDGE_PLAYER_IDS,
   fetchRoleMembers,
 } from "../hosts";
-
-import * as Animatable from "react-native-animatable";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { TouchableWithoutFeedback } from "react-native-gesture-handler";
+import { useFocusEffect } from "@react-navigation/native";
 
 interface Torneio {
   id: string;
@@ -89,17 +89,20 @@ export default function CalendarScreen() {
   const [playerId, setPlayerId] = useState("");
   const [isHost, setIsHost] = useState(false);
 
-  const [leagueId, setLeagueId] = useState("1186767"); // fallback
+  // Variáveis de FILTRO
+  const [filterType, setFilterType] = useState<"all"|"city"|"league"|"">("");
+  const [cityStored, setCityStored] = useState("");
+  const [leagueStored, setLeagueStored] = useState("");
 
   const [torneios, setTorneios] = useState<Torneio[]>([]);
   const [currentMonth, setCurrentMonth] = useState(moment());
 
-  // Mapeamentos de nomes
+  // Mapeamentos de nomes (para exibir fullname)
   const [judgeMap, setJudgeMap] = useState<Record<string, string>>({});
   const [headJudgeMap, setHeadJudgeMap] = useState<Record<string, string>>({});
   const [playerNameMap, setPlayerNameMap] = useState<Record<string, string>>({});
 
-  // Opções de Judge e HeadJudge (modal)
+  // Opções de Judge e HeadJudge
   const [judgeOptions, setJudgeOptions] = useState<{ userId: string; fullname: string }[]>([]);
   const [headJudgeOptions, setHeadJudgeOptions] = useState<{ userId: string; fullname: string }[]>([]);
 
@@ -107,18 +110,26 @@ export default function CalendarScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [editDate, setEditDate] = useState("");  // dd/mm/aaaa
-  const [editTime, setEditTime] = useState("");  // hh:mm
+  const [editDate, setEditDate] = useState("");   // dd/mm/aaaa
+  const [editTime, setEditTime] = useState("");   // HH:MM
   const [editJudge, setEditJudge] = useState("");
   const [editHeadJudge, setEditHeadJudge] = useState("");
   const [editEventType, setEditEventType] = useState("Cup");
 
-  // Modal de seleção de Juiz
+  // Modal de seleção
   const [judgeSelectModal, setJudgeSelectModal] = useState(false);
   const [headJudgeSelectModal, setHeadJudgeSelectModal] = useState(false);
-  // Modal de seleção de Tipo de Evento
   const [eventTypeSelectModal, setEventTypeSelectModal] = useState(false);
 
+  const eventTypesList = [
+    "Challenge",
+    "Cup",
+    "Liga Local",
+    "Pré-Release",
+    "Evento Especial",
+  ];
+
+  // Extras
   const [editMaxVagas, setEditMaxVagas] = useState<number | null>(null);
   const [editInscricoesAbertura, setEditInscricoesAbertura] = useState<string>("");
   const [editInscricoesFechamento, setEditInscricoesFechamento] = useState<string>("");
@@ -135,7 +146,7 @@ export default function CalendarScreen() {
   const [inscricoes, setInscricoes] = useState<Inscricao[]>([]);
   const [deckNameMap, setDeckNameMap] = useState<Record<string, string>>({});
 
-  // Sub-modal PDF do Deck
+  // Sub-modal de PDF do Deck
   const [deckPdfModalVisible, setDeckPdfModalVisible] = useState(false);
   const [selectedDeckIdForPdf, setSelectedDeckIdForPdf] = useState("");
 
@@ -163,16 +174,6 @@ export default function CalendarScreen() {
   const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState<boolean>(false);
 
-  // Tipo de Evento (lista)
-  const eventTypesList = [
-    "Challenge",
-    "Cup",
-    "Liga Local",
-    "Pré-Release",
-    "Evento Especial",
-  ];
-
-  // =========================== useEffect Inicial ===========================
   useEffect(() => {
     moment.locale("pt-br");
 
@@ -182,88 +183,297 @@ export default function CalendarScreen() {
         if (pid) {
           setPlayerId(pid);
           setIsHost(HOST_PLAYER_IDS.includes(pid));
+        } else {
+          // Se não tiver user logado, poderia redirecionar para login
         }
-        const storedLeagueId = await AsyncStorage.getItem("@leagueId");
-        if (storedLeagueId) setLeagueId(storedLeagueId);
 
-        // Carregar Judge e HeadJudge da league
-        const jArray = await fetchRoleMembers(leagueId, "judge");
-        const jMapObj: Record<string, string> = {};
-        jArray.forEach((j) => {
-          jMapObj[j.userId] = j.fullname;
-        });
-        setJudgeOptions(jArray);
-        setJudgeMap(jMapObj);
+        const fType = (await AsyncStorage.getItem("@filterType")) as
+          | "all"
+          | "city"
+          | "league"
+          | ""
+          | null;
+        const cStored = (await AsyncStorage.getItem("@selectedCity")) || "";
+        const lStored = (await AsyncStorage.getItem("@leagueId")) || "";
 
-        const hjArray = await fetchRoleMembers(leagueId, "head");
-        const hjMapObj: Record<string, string> = {};
-        hjArray.forEach((hj) => {
-          hjMapObj[hj.userId] = hj.fullname;
-        });
-        setHeadJudgeOptions(hjArray);
-        setHeadJudgeMap(hjMapObj);
+        setFilterType(fType || "all");
+        setCityStored(cStored);
+        setLeagueStored(lStored);
 
+        // Carregar Judge e HeadJudge via roles
+        await loadJudgeData(lStored);
+
+        // Carregar sets p/ imagens
         loadSetIdMap();
       } catch (error) {
         console.log("Erro no fetch inicial:", error);
       }
     })();
-  }, [leagueId]);
+  }, []);
 
-  // =========================== Carrega torneios do Firestore ===========================
-  useEffect(() => {
-    // Precisamos de um caminho impar: leagues/{leagueId}/calendar
-    // {leagueId} e "calendar" => 3 segmentos => colecao
-    if (!leagueId) return;
+useFocusEffect(
+  React.useCallback(() => {
+    (async () => {
+      try {
+        console.log("🔄 Tela Calendário aberta - Atualizando filtros e torneios...");
 
-    const colRef = collection(db, "leagues", leagueId, "calendar");
-    const unsub = onSnapshot(colRef, (snap) => {
-      const arr: Torneio[] = [];
-      snap.forEach((docSnap) => {
-        const d = docSnap.data();
-        arr.push({
-          id: docSnap.id,
-          name: d.name,
-          date: d.date,
-          time: d.time,
-          createdBy: d.createdBy,
-          judge: d.judge || "",
-          headJudge: d.headJudge || "",
-          eventType: d.eventType || "Cup",
-          judgeAccepted: d.judgeAccepted || false,
-          maxVagas: d.maxVagas || null,
-          inscricoesAbertura: d.inscricoesAbertura || "",
-          inscricoesFechamento: d.inscricoesFechamento || "",
-          prioridadeVip: d.prioridadeVip || false,
-          inscricoesVipAbertura: d.inscricoesVipAbertura || "",
-          inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+        // Obtém os filtros armazenados
+        const fType = (await AsyncStorage.getItem("@filterType")) as
+          | "all"
+          | "city"
+          | "league"
+          | ""
+          | null;
+        const cStored = (await AsyncStorage.getItem("@selectedCity")) || "";
+        const lStored = (await AsyncStorage.getItem("@leagueId")) || "";
+
+        // Atualiza os estados com os valores mais recentes
+        setFilterType(fType || "all");
+        setCityStored(cStored);
+        setLeagueStored(lStored);
+
+        console.log("📌 Novo Filter Type:", fType);
+        console.log("📌 Nova League ID:", lStored);
+        console.log("📌 Nova Cidade:", cStored);
+
+        // Recarrega os torneios com base nos filtros atualizados
+        loadTorneios();
+      } catch (error) {
+        console.log("❌ Erro ao atualizar filtros ao focar na tela Calendário:", error);
+      }
+    })();
+  }, [])
+);
+
+
+  // Efeito que observa currentMonth ou filterType, etc.
+  // Atualiza torneios quando algum filtro ou mês mudar
+useEffect(() => {
+  console.log("🔄 Atualizando torneios - Filtros:");
+  console.log("📍 Filter Type:", filterType);
+  console.log("📍 League ID:", leagueStored);
+  console.log("📍 City:", cityStored);
+  
+  loadTorneios();
+}, [currentMonth, filterType, cityStored, leagueStored]);; // <-- Removi cityStored se não for necessário
+
+  async function loadJudgeData(currLeagueId: string) {
+    try {
+      if (!currLeagueId) return;
+
+      // Buscar "judge"
+      const jArray = await fetchRoleMembers(currLeagueId, "judge");
+      const jMapObj: Record<string, string> = {};
+      jArray.forEach((j) => {
+        jMapObj[j.userId] = j.fullname;
+      });
+      setJudgeOptions(jArray);
+      setJudgeMap(jMapObj);
+
+      // Buscar "head"
+      const hjArray = await fetchRoleMembers(currLeagueId, "head");
+      const hjMapObj: Record<string, string> = {};
+      hjArray.forEach((hj) => {
+        hjMapObj[hj.userId] = hj.fullname;
+      });
+      setHeadJudgeOptions(hjArray);
+      setHeadJudgeMap(hjMapObj);
+    } catch (err) {
+      console.log("Erro loadJudgeData:", err);
+    }
+  }
+
+  // ============== Carrega Torneios (Respeitando Filtro) ==============
+  async function loadTorneios() {
+    try {
+      // 1️⃣ Recupera os valores mais recentes do filtro e do leagueId do AsyncStorage
+      const filterType = await AsyncStorage.getItem("@filterType");
+      const leagueStored = await AsyncStorage.getItem("@leagueId");
+      const cityStored = await AsyncStorage.getItem("@selectedCity");
+  
+      // Log para depuração: imprime os valores atuais do filtro e da liga
+      console.log("🔍 Filter Type atualizado:", filterType);
+      console.log("🔍 League ID atualizado:", leagueStored);
+      console.log("🔍 Cidade armazenada:", cityStored);
+  
+      // 2️⃣ Verifica o tipo de filtro e realiza a busca de torneios de acordo com ele
+      if (filterType === "league" && leagueStored) {
+        // Caso: Filtro "league" (liga específica)
+        console.log("📡 Buscando torneios na liga:", leagueStored);
+        const colRef = collection(db, "leagues", leagueStored, "calendar");
+        onSnapshot(colRef, (snap) => {
+          const arr: Torneio[] = [];
+          snap.forEach((docSnap) => {
+            const d = docSnap.data();
+            arr.push({
+              id: docSnap.id,
+              name: d.name,
+              date: d.date,
+              time: d.time,
+              createdBy: d.createdBy,
+              judge: d.judge || "",
+              headJudge: d.headJudge || "",
+              eventType: d.eventType || "Cup",
+              judgeAccepted: d.judgeAccepted || false,
+              maxVagas: d.maxVagas || null,
+              inscricoesAbertura: d.inscricoesAbertura || "",
+              inscricoesFechamento: d.inscricoesFechamento || "",
+              prioridadeVip: d.prioridadeVip || false,
+              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+            });
+          });
+          // 3️⃣ Aplica filtro por data (mês atual)
+          const start = currentMonth.clone().startOf("month");
+          const end = currentMonth.clone().endOf("month");
+          const filtered = arr.filter((t) => {
+            const dt = moment(t.date, "DD/MM/YYYY");
+            return dt.isBetween(start, end, undefined, "[]");
+          });
+          console.log(`✅ Torneios encontrados na liga ${leagueStored}:`, filtered.length);
+          setTorneios(filtered);
+  
+          // 4️⃣ Para cada torneio filtrado, busca o nome do criador (fullname) na subcoleção "players"
+          filtered.forEach(async (tor) => {
+            if (tor.createdBy && !playerNameMap[tor.createdBy]) {
+              const pRef = doc(db, "leagues", leagueStored, "players", tor.createdBy);
+              const pSnap = await getDoc(pRef);
+              if (pSnap.exists()) {
+                const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
+                setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
+              } else {
+                setPlayerNameMap((prev) => ({
+                  ...prev,
+                  [tor.createdBy]: `Jogador não cadastrado: ${tor.createdBy}`,
+                }));
+              }
+            }
+          });
         });
-      });
-      // Filtrar só do mês atual
-      const start = currentMonth.clone().startOf("month");
-      const end = currentMonth.clone().endOf("month");
-      const filtered = arr.filter((t) => {
-        const dt = moment(t.date, "DD/MM/YYYY");
-        return dt.isBetween(start, end, undefined, "[]");
-      });
-      setTorneios(filtered);
-
-      // Carrega o nome do "createdBy" no playerMap
-      arr.forEach(async (tor) => {
-        if (tor.createdBy && !playerNameMap[tor.createdBy]) {
-          const pRef = doc(db, "players", tor.createdBy);
-          const pSnap = await getDoc(pRef);
-          if (pSnap.exists()) {
-            const nm = pSnap.data().fullname || `Jogador ${tor.createdBy}`;
-            setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
-          }
+      } else if (filterType === "city" && cityStored) {
+        // Caso: Filtro "city" – pega todas as ligas da cidade armazenada
+        console.log("📡 Buscando torneios nas ligas da cidade:", cityStored);
+        const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
+        const citySnap = await getDocs(qCity);
+        let arrGlobal: Torneio[] = [];
+        // Percorre cada liga encontrada na cidade
+        for (const leagueDoc of citySnap.docs) {
+          const lId = leagueDoc.id;
+          const colRef = collection(db, "leagues", lId, "calendar");
+          const colSnap = await getDocs(colRef);
+          colSnap.forEach((docSnap) => {
+            const d = docSnap.data();
+            arrGlobal.push({
+              id: docSnap.id,
+              name: d.name,
+              date: d.date,
+              time: d.time,
+              createdBy: d.createdBy,
+              judge: d.judge || "",
+              headJudge: d.headJudge || "",
+              eventType: d.eventType || "Cup",
+              judgeAccepted: d.judgeAccepted || false,
+              maxVagas: d.maxVagas || null,
+              inscricoesAbertura: d.inscricoesAbertura || "",
+              inscricoesFechamento: d.inscricoesFechamento || "",
+              prioridadeVip: d.prioridadeVip || false,
+              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+            });
+          });
         }
-      });
-    });
-    return () => unsub();
-  }, [currentMonth, leagueId]);
-
-  // =========================== Carrega sets p/ imagens ===========================
+        // Aplica filtro por mês
+        const start = currentMonth.clone().startOf("month");
+        const end = currentMonth.clone().endOf("month");
+        const filtered = arrGlobal.filter((t) => {
+          const dt = moment(t.date, "DD/MM/YYYY");
+          return dt.isBetween(start, end, undefined, "[]");
+        });
+        console.log(`✅ Torneios encontrados na cidade ${cityStored}:`, filtered.length);
+        setTorneios(filtered);
+  
+        // Para cada torneio, busca o nome do criador usando a liga onde foi criado (simplificação)
+        filtered.forEach(async (tor) => {
+          // Como não temos o leagueId direto no torneio, usaremos o primeiro league da cidade
+          const lId = citySnap.docs[0]?.id || "";
+          if (tor.createdBy && !playerNameMap[tor.createdBy]) {
+            const pRef = doc(db, "leagues", lId, "players", tor.createdBy);
+            const pSnap = await getDoc(pRef);
+            if (pSnap.exists()) {
+              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
+              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
+            } else {
+              setPlayerNameMap((prev) => ({
+                ...prev,
+                [tor.createdBy]: `Jogador não cadastrado: ${tor.createdBy}`,
+              }));
+            }
+          }
+        });
+      } else if (filterType === "all") {
+        // Caso: Filtro "all" – busca torneios de todas as ligas
+        console.log("📡 Buscando torneios de todas as ligas");
+        const leaguesSnap = await getDocs(collection(db, "leagues"));
+        let arrGlobal: Torneio[] = [];
+        for (const leagueDoc of leaguesSnap.docs) {
+          const lId = leagueDoc.id;
+          const colRef = collection(db, "leagues", lId, "calendar");
+          const colSnap = await getDocs(colRef);
+          colSnap.forEach((docSnap) => {
+            const d = docSnap.data();
+            arrGlobal.push({
+              id: docSnap.id,
+              name: d.name,
+              date: d.date,
+              time: d.time,
+              createdBy: d.createdBy,
+              judge: d.judge || "",
+              headJudge: d.headJudge || "",
+              eventType: d.eventType || "Cup",
+              judgeAccepted: d.judgeAccepted || false,
+              maxVagas: d.maxVagas || null,
+              inscricoesAbertura: d.inscricoesAbertura || "",
+              inscricoesFechamento: d.inscricoesFechamento || "",
+              prioridadeVip: d.prioridadeVip || false,
+              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+            });
+          });
+        }
+        // Filtra pelo mês atual
+        const start = currentMonth.clone().startOf("month");
+        const end = currentMonth.clone().endOf("month");
+        const filtered = arrGlobal.filter((t) => {
+          const dt = moment(t.date, "DD/MM/YYYY");
+          return dt.isBetween(start, end, undefined, "[]");
+        });
+        console.log(`✅ Torneios encontrados (all):`, filtered.length);
+        setTorneios(filtered);
+  
+        // Para cada torneio, tenta buscar o nome do criador em qualquer liga
+        filtered.forEach(async (tor) => {
+          const leaguesSnap2 = await getDocs(collection(db, "leagues"));
+          for (const lDoc of leaguesSnap2.docs) {
+            const pRef = doc(db, "leagues", lDoc.id, "players", tor.createdBy);
+            const pSnap = await getDoc(pRef);
+            if (pSnap.exists()) {
+              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
+              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
+              break;
+            }
+          }
+        });
+      } else {
+        // Se não houver um filterType válido, define torneios como vazio
+        console.log("⚠️ Nenhum filtro válido encontrado.");
+        setTorneios([]);
+      }
+    } catch (err) {
+      console.log("❌ Erro ao carregar torneios:", err);
+    }
+  }
+  
+  // =========================== loadSetIdMap ===========================
   async function loadSetIdMap() {
     try {
       const response = await fetch("https://api.pokemontcg.io/v2/sets");
@@ -291,7 +501,7 @@ export default function CalendarScreen() {
     }
   }
 
-  // =========================== Navegação de Mês ===========================
+  // =========================== NAVEGAÇÃO DE MÊS ===========================
   function handlePrevMonth() {
     setCurrentMonth((prev) => prev.clone().subtract(1, "month"));
   }
@@ -299,22 +509,45 @@ export default function CalendarScreen() {
     setCurrentMonth((prev) => prev.clone().add(1, "month"));
   }
 
-  // =========================== CRIAR/EDITAR TORN. ===========================
-  function openCreateModal() {
-    setEditId(null);
-    setEditName("");
-    setEditDate(moment().format("DD/MM/YYYY"));
-    setEditTime("10:00");
-    setEditJudge("");
-    setEditHeadJudge("");
-    setEditEventType("Cup");
-    setEditMaxVagas(null);
-    setEditInscricoesAbertura("");
-    setEditInscricoesFechamento("");
-    setEditPrioridadeVip(false);
-    setEditInscricoesVipAbertura("");
-    setEditInscricoesVipFechamento("");
-    setModalVisible(true);
+  // =========================== CRIAR/EDITAR TORN ===========================
+  async function openCreateModal() {
+    try {
+      // Obtém os valores armazenados
+      const filterType = await AsyncStorage.getItem("@filterType");
+      const leagueStored = await AsyncStorage.getItem("@leagueId");
+  
+      // Log dos valores armazenados
+      console.log("🔍 Filter Type:", filterType);
+      console.log("🔍 League ID armazenado:", leagueStored);
+  
+      // Se o filtro não for "league" ou não houver um leagueId válido, exibe alerta
+      if (filterType !== "league" || !leagueStored) {
+        Alert.alert(
+          "Filtro inválido",
+          "Para criar torneio, selecione uma liga específica primeiro."
+        );
+        return;
+      }
+  
+      // Configuração inicial do torneio
+      setEditId(null);
+      setEditName("");
+      setEditDate(moment().format("DD/MM/YYYY"));
+      setEditTime("10:00");
+      setEditJudge("");
+      setEditHeadJudge("");
+      setEditEventType("Cup");
+      setEditMaxVagas(null);
+      setEditInscricoesAbertura("");
+      setEditInscricoesFechamento("");
+      setEditPrioridadeVip(false);
+      setEditInscricoesVipAbertura("");
+      setEditInscricoesVipFechamento("");
+  
+      setModalVisible(true);
+    } catch (error) {
+      console.error("❌ Erro ao abrir modal de criação de torneio:", error);
+    }
   }
 
   function openEditModal(t: Torneio) {
@@ -331,12 +564,10 @@ export default function CalendarScreen() {
     setEditPrioridadeVip(t.prioridadeVip ?? false);
     setEditInscricoesVipAbertura(t.inscricoesVipAbertura ?? "");
     setEditInscricoesVipFechamento(t.inscricoesVipFechamento ?? "");
-
     setModalVisible(true);
   }
 
   function handleMaskDate(text: string, setFunc: (val: string) => void) {
-    // dd/mm/aaaa => 10 caracteres
     let cleaned = text.replace(/\D/g, "");
     if (cleaned.length > 8) cleaned = cleaned.slice(0, 8);
 
@@ -353,7 +584,6 @@ export default function CalendarScreen() {
   }
 
   function handleMaskTime(text: string, setFunc: (val: string) => void) {
-    // hh:mm => 5 caracteres
     let cleaned = text.replace(/\D/g, "");
     if (cleaned.length > 4) cleaned = cleaned.slice(0, 4);
 
@@ -367,18 +597,24 @@ export default function CalendarScreen() {
   }
 
   async function handleSaveTorneio() {
-    if (!editName.trim()) {
-      Alert.alert("Erro", "Nome do torneio é obrigatório.");
-      return;
-    }
-    if (!moment(editDate, "DD/MM/YYYY", true).isValid()) {
-      Alert.alert("Erro", "Data inválida.");
-      return;
-    }
-    // Caminho => leagues/{leagueId}/calendar => docId
     try {
-      const colRef = collection(db, "leagues", leagueId, "calendar");
+      // Recupera o ID da liga selecionada antes de criar o torneio
+      const leagueId = await AsyncStorage.getItem("@leagueId");
+  
+      // Se por algum motivo não tiver um ID de liga válido, exibe um erro
+      if (!leagueId) {
+        Alert.alert("Erro", "Não foi possível obter a liga para criar o torneio.");
+        console.error("❌ ERRO: Tentativa de criar torneio sem League ID!");
+        return;
+      }
+  
+      console.log("📌 Criando torneio na liga:", leagueId);
+  
+      // Caminho correto para salvar na liga selecionada
+      const colRef = collection(db, `leagues/${leagueId}/calendar`);
+  
       if (editId) {
+        // Se for edição de torneio existente
         const docRef = doc(colRef, editId);
         await updateDoc(docRef, {
           name: editName.trim(),
@@ -395,13 +631,14 @@ export default function CalendarScreen() {
           inscricoesVipAbertura: editInscricoesVipAbertura,
           inscricoesVipFechamento: editInscricoesVipFechamento,
         });
+        console.log(`✏️ Torneio ${editId} atualizado na liga ${leagueId}`);
       } else {
-        // Novo
-        const newDoc = await addDoc(colRef, {
+        // Criar novo torneio
+        const docRef = await addDoc(colRef, {
           name: editName.trim(),
           date: editDate,
           time: editTime,
-          createdBy: playerId,
+          createdBy: await AsyncStorage.getItem("@userId"), // Obtém ID do usuário logado
           judge: editJudge,
           headJudge: editHeadJudge,
           eventType: editEventType,
@@ -412,17 +649,18 @@ export default function CalendarScreen() {
           prioridadeVip: editPrioridadeVip,
           inscricoesVipAbertura: editInscricoesVipAbertura,
           inscricoesVipFechamento: editInscricoesVipFechamento,
+          timestamp: serverTimestamp(),
         });
-        if (editJudge) {
-          sendNotificationToJudge(editJudge, newDoc.id, editName.trim());
-        }
+  
+        console.log(`✅ Novo torneio criado na liga ${leagueId}: ${docRef.id}`);
       }
+  
       setModalVisible(false);
     } catch (err) {
-      console.log("Erro handleSaveTorneio:", err);
-      Alert.alert("Erro", "Falha ao salvar torneio.");
+      console.error("❌ Erro ao salvar torneio:", err);
+      Alert.alert("Erro", "Falha ao salvar o torneio.");
     }
-  }
+  }  
 
   async function sendNotificationToJudge(judgeId: string, torneioId: string, torneioName: string) {
     try {
@@ -439,7 +677,7 @@ export default function CalendarScreen() {
     }
   }
 
-  // =========================== EXCLUIR TORNEIO ===========================
+  // =========================== EXCLUIR TORN ===========================
   async function handleDeleteTorneio(torneio: Torneio) {
     Alert.alert(
       "Confirmação",
@@ -451,7 +689,11 @@ export default function CalendarScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              const colRef = collection(db, "leagues", leagueId, "calendar");
+              if (!leagueStored) {
+                Alert.alert("Erro", "Sem leagueId para excluir torneio.");
+                return;
+              }
+              const colRef = collection(db, "leagues", leagueStored, "calendar");
               const docRef = doc(colRef, torneio.id);
               await deleteDoc(docRef);
             } catch (err) {
@@ -471,43 +713,38 @@ export default function CalendarScreen() {
 
   async function handleInscrever(t: Torneio) {
     const agora = moment();
+
+    // Checa VIP
     if (t.prioridadeVip && isVip(playerId)) {
       if (t.inscricoesVipAbertura && agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))) {
-        Alert.alert(
-          "Inscrições VIP Não Abertas",
-          `As inscrições VIP para este torneio abrem às ${t.inscricoesVipAbertura}.`
-        );
+        Alert.alert("Inscrições VIP Não Abertas", `Abrem às ${t.inscricoesVipAbertura}.`);
         return;
       }
       if (t.inscricoesVipFechamento && agora.isAfter(moment(t.inscricoesVipFechamento, "HH:mm"))) {
-        Alert.alert(
-          "Inscrições VIP Encerradas",
-          "As inscrições VIP para este torneio já foram encerradas."
-        );
+        Alert.alert("Inscrições VIP Encerradas", "As inscrições VIP foram encerradas.");
         return;
       }
     } else {
       if (t.inscricoesAbertura && agora.isBefore(moment(t.inscricoesAbertura, "HH:mm"))) {
-        Alert.alert(
-          "Inscrições Não Abertas",
-          `As inscrições para este torneio abrem às ${t.inscricoesAbertura}.`
-        );
+        Alert.alert("Inscrições Não Abertas", `Abrem às ${t.inscricoesAbertura}.`);
         return;
       }
       if (t.inscricoesFechamento && agora.isAfter(moment(t.inscricoesFechamento, "HH:mm"))) {
-        Alert.alert(
-          "Inscrições Encerradas",
-          "As inscrições para este torneio já foram encerradas."
-        );
+        Alert.alert("Inscrições Encerradas", "Não é mais possível se inscrever.");
         return;
       }
     }
 
+    if (!leagueStored) {
+      Alert.alert("Erro", "Filtro inválido ou leagueId não selecionada.");
+      return;
+    }
+
     // Verifica se já está inscrito
-    const colRef = collection(db, "leagues", leagueId, "calendar", t.id, "inscricoes");
+    const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
     const snap = await getDoc(doc(colRef, playerId));
     if (snap.exists()) {
-      Alert.alert("Aviso", "Você já está inscrito neste torneio.");
+      Alert.alert("Aviso", "Você já se inscreveu neste torneio.");
       return;
     }
 
@@ -528,7 +765,7 @@ export default function CalendarScreen() {
       return;
     }
 
-    // Se chegou aqui => abre modal p/ escolher deck
+    // Se chegou aqui, abre modal p/ escolher deck
     setDetalhesTorneio(t);
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
@@ -549,11 +786,9 @@ export default function CalendarScreen() {
   }
 
   async function handleWaitlist(t: Torneio, vip: boolean) {
-    Alert.alert(
-      "Lista de Espera",
-      "O torneio está lotado. Você foi adicionado à lista de espera."
-    );
-    const waitColRef = collection(db, "leagues", leagueId, "calendar", t.id, "espera");
+    Alert.alert("Lista de Espera", "O torneio está lotado. Você foi adicionado à lista de espera.");
+    if (!leagueStored) return;
+    const waitColRef = collection(db, "leagues", leagueStored, "calendar", t.id, "espera");
     await setDoc(doc(waitColRef, playerId), {
       userId: playerId,
       createdAt: new Date().toISOString(),
@@ -562,19 +797,34 @@ export default function CalendarScreen() {
   }
 
   async function handleSalvarInscricao() {
-    if (!inscricaoTorneioId) return;
+    if (!inscricaoTorneioId || !detalhesTorneio) {
+      return;
+    }
+    if (!leagueStored) {
+      Alert.alert("Erro", "Nenhuma liga selecionada para esta inscrição.");
+      return;
+    }
 
-    if (detalhesTorneio?.eventType !== "Liga Local" && !selectedDeckId) {
-      Alert.alert("Erro", "Selecione um deck para se inscrever.");
+    // Se não for "Liga Local", precisa de deck
+    if (detalhesTorneio.eventType !== "Liga Local" && !selectedDeckId) {
+      Alert.alert("Erro", "Selecione um deck para se inscrever ou verifique tipo de evento.");
       return;
     }
 
     try {
-      const colRef = collection(db, "leagues", leagueId, "calendar", inscricaoTorneioId, "inscricoes");
+      const colRef = collection(db, "leagues", leagueStored, "calendar", inscricaoTorneioId, "inscricoes");
       const docRef = doc(colRef, playerId);
+      // Verifica se por acaso acabou de se inscrever (anti-lag)
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        Alert.alert("Aviso", "Você já se inscreveu neste torneio (possível duplicado).");
+        setInscricaoModalVisible(false);
+        return;
+      }
+
       await setDoc(docRef, {
         userId: playerId,
-        deckId: detalhesTorneio?.eventType === "Liga Local" ? null : selectedDeckId,
+        deckId: detalhesTorneio.eventType === "Liga Local" ? null : selectedDeckId,
         createdAt: new Date().toISOString(),
       });
       Alert.alert("Sucesso", "Inscrição realizada com sucesso!");
@@ -595,11 +845,12 @@ export default function CalendarScreen() {
     setDetalhesTorneio(null);
   }
 
-  // =========================== INSCRIÇÕES (LISTA) ===========================
-  async function openInscricoesModa(t: Torneio) {
+  // =========================== LISTA INSCRICOES ===========================
+  async function openInscricoesModal(t: Torneio) {
     setDetalhesTorneio(t);
 
-    const colRef = collection(db, "leagues", leagueId, "calendar", t.id, "inscricoes");
+    if (!leagueStored) return;
+    const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
     onSnapshot(colRef, (snap) => {
       const arr: Inscricao[] = [];
       snap.forEach((ds) => {
@@ -612,7 +863,7 @@ export default function CalendarScreen() {
       arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
       setInscricoes(arr);
 
-      // Carrega info de deck e jogador
+      // Carrega info do Deck / Jogador
       const deckIdsSet = new Set<string>();
       const userIdsSet = new Set<string>();
       arr.forEach((i) => {
@@ -631,22 +882,26 @@ export default function CalendarScreen() {
 
       userIdsSet.forEach(async (uId) => {
         if (!playerNameMap[uId]) {
-          const pRef = doc(db, "players", uId);
+          // Tenta achar jogador na subcoleção da league
+          const pRef = doc(db, "leagues", leagueStored, "players", uId);
           const pSnap = await getDoc(pRef);
           if (pSnap.exists()) {
-            const nm = pSnap.data().fullname || `Jogador ${uId}`;
+            const nm = pSnap.data().fullname || `Jogador não cadastrado: ${uId}`;
             setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+          } else {
+            setPlayerNameMap((prev) => ({
+              ...prev,
+              [uId]: `Jogador não cadastrado: ${uId}`,
+            }));
           }
         }
       });
     });
 
-    // Carrega lista de espera
-    const waitColRef = collection(db, "leagues", leagueId, "calendar", t.id, "espera");
-    onSnapshot(waitColRef, async (wanp) => {
+    // Lista de espera
+    const waitColRef = collection(db, "leagues", leagueStored, "calendar", t.id, "espera");
+    onSnapshot(waitColRef, (wanp) => {
       const arr: Espera[] = [];
-      const userIdsToLoad = new Set<string>();
-
       wanp.forEach((ds) => {
         arr.push({
           userId: ds.id,
@@ -654,26 +909,27 @@ export default function CalendarScreen() {
           createdAt: ds.data().createdAt || "",
           vip: ds.data().vip || false,
         });
-        userIdsToLoad.add(ds.id);
       });
-
-      // Ordena VIP e data
       arr.sort((a, b) => {
         if (a.vip && !b.vip) return -1;
         if (!a.vip && b.vip) return 1;
         return a.createdAt.localeCompare(b.createdAt);
       });
-
       setEspera(arr);
 
-      // Buscar nome do jogador
-      userIdsToLoad.forEach(async (uId) => {
-        if (!playerNameMap[uId]) {
-          const pRef = doc(db, "players", uId);
+      // Carregar nome
+      arr.forEach(async (obj) => {
+        if (!playerNameMap[obj.userId]) {
+          const pRef = doc(db, "leagues", leagueStored, "players", obj.userId);
           const pSnap = await getDoc(pRef);
           if (pSnap.exists()) {
-            const nm = pSnap.data().fullname || `Jogador ${uId}`;
-            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+            const nm = pSnap.data().fullname || `Jogador não cadastrado: ${obj.userId}`;
+            setPlayerNameMap((prev) => ({ ...prev, [obj.userId]: nm }));
+          } else {
+            setPlayerNameMap((prev) => ({
+              ...prev,
+              [obj.userId]: `Jogador não cadastrado: ${obj.userId}`,
+            }));
           }
         }
       });
@@ -683,14 +939,23 @@ export default function CalendarScreen() {
   }
 
   function closeInscricoesModal() {
-    setInscricoesModalVisible(false);
     setInscricoes([]);
     setEspera([]);
+    setInscricoesModalVisible(false);
   }
 
   async function handleExcluirInscricao(tournamentId: string, pId: string) {
+    if (!leagueStored) return;
     try {
-      const inscricaoRef = doc(db, "leagues", leagueId, "calendar", tournamentId, "inscricoes", pId);
+      const inscricaoRef = doc(
+        db,
+        "leagues",
+        leagueStored,
+        "calendar",
+        tournamentId,
+        "inscricoes",
+        pId
+      );
       await deleteDoc(inscricaoRef);
       Alert.alert("Sucesso", "Inscrição excluída!");
       await handleSubirListaEspera(tournamentId);
@@ -702,7 +967,8 @@ export default function CalendarScreen() {
 
   async function handleSubirListaEspera(tournamentId: string) {
     try {
-      const waitColRef = collection(db, "leagues", leagueId, "calendar", tournamentId, "espera");
+      if (!leagueStored) return;
+      const waitColRef = collection(db, "leagues", leagueStored, "calendar", tournamentId, "espera");
       const docsSnap = await getDocs(waitColRef);
       if (docsSnap.empty) return;
 
@@ -715,7 +981,6 @@ export default function CalendarScreen() {
           vip: ds.data().vip || false,
         });
       });
-      // Ordena
       arr.sort((a, b) => {
         if (a.vip && !b.vip) return -1;
         if (!a.vip && b.vip) return 1;
@@ -725,8 +990,16 @@ export default function CalendarScreen() {
       const primeiro = arr[0];
       if (!primeiro) return;
 
-      // Move esse jogador para inscrições
-      const inscricaoRef = doc(db, "leagues", leagueId, "calendar", tournamentId, "inscricoes", primeiro.userId);
+      // Move para inscrições
+      const inscricaoRef = doc(
+        db,
+        "leagues",
+        leagueStored,
+        "calendar",
+        tournamentId,
+        "inscricoes",
+        primeiro.userId
+      );
       await setDoc(inscricaoRef, {
         userId: primeiro.userId,
         deckId: primeiro.deckId || null,
@@ -734,7 +1007,15 @@ export default function CalendarScreen() {
       });
 
       // Remove da espera
-      const waitDocRef = doc(db, "leagues", leagueId, "calendar", tournamentId, "espera", primeiro.userId);
+      const waitDocRef = doc(
+        db,
+        "leagues",
+        leagueStored,
+        "calendar",
+        tournamentId,
+        "espera",
+        primeiro.userId
+      );
       await deleteDoc(waitDocRef);
 
       sendNotificationToPlayer(primeiro.userId, tournamentId);
@@ -759,8 +1040,9 @@ export default function CalendarScreen() {
 
   // =========================== CONFIRMAR/RECUSAR JUIZ ===========================
   async function confirmJudge(tournament: Torneio) {
+    if (!leagueStored) return;
     try {
-      const docRef = doc(db, "leagues", leagueId, "calendar", tournament.id);
+      const docRef = doc(db, "leagues", leagueStored, "calendar", tournament.id);
       await updateDoc(docRef, { judgeAccepted: true });
 
       Alert.alert("Sucesso", `Você confirmou como juiz no torneio: ${tournament.name}`);
@@ -777,8 +1059,9 @@ export default function CalendarScreen() {
   }
 
   async function declineJudge(tournament: Torneio) {
+    if (!leagueStored) return;
     try {
-      const docRef = doc(db, "leagues", leagueId, "calendar", tournament.id);
+      const docRef = doc(db, "leagues", leagueStored, "calendar", tournament.id);
       await updateDoc(docRef, { judge: "", judgeAccepted: false });
 
       Alert.alert("Sucesso", `Você recusou ser juiz no torneio: ${tournament.name}`);
@@ -871,9 +1154,7 @@ export default function CalendarScreen() {
 
       const url = `https://api.pokemontcg.io/v2/cards?q=${query}`;
       const resp = await fetch(url, {
-        headers: {
-          "X-Api-Key": "8d293a2a-4949-4d04-a06c-c20672a7a12c",
-        },
+        headers: { "X-Api-Key": "8d293a2a-4949-4d04-a06c-c20672a7a12c" },
       });
       const data = await resp.json();
       if (data && data.data && data.data.length > 0) {
@@ -896,15 +1177,11 @@ export default function CalendarScreen() {
     const isThisJudgePending = tor.judge === playerId && tor.judgeAccepted === false;
     const canAccessDetails = isHost || (tor.judge === playerId && tor.judgeAccepted);
 
-    const creatorName = playerNameMap[tor.createdBy] || `Jogador ${tor.createdBy}`;
+    const creatorFullname =
+      playerNameMap[tor.createdBy] || `Jogador não cadastrado: ${tor.createdBy}`;
 
     return (
-      <Animatable.View
-        style={styles.card}
-        key={`t-${tor.id}`}
-        animation="fadeInUp"
-        duration={700}
-      >
+      <Animatable.View style={styles.card} key={`t-${tor.id}`} animation="fadeInUp" duration={700}>
         <Text style={styles.cardTitle}>{tor.name}</Text>
         <Text style={styles.cardSub}>
           <MaterialCommunityIcons name="calendar" size={14} color="#ccc" />
@@ -912,7 +1189,7 @@ export default function CalendarScreen() {
           {tor.date} às {tor.time} | [{eventLabel}]
         </Text>
         <Text style={styles.cardSub}>
-          Criado por: {creatorName}
+          Criado por: {creatorFullname}
           {"\n"}
           Juiz: {judgeName}
           {tor.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
@@ -959,16 +1236,13 @@ export default function CalendarScreen() {
             {canAccessDetails && (
               <TouchableOpacity
                 style={[styles.inscreverButton, { marginRight: 8 }]}
-                onPress={() => handleOpenDetalhe(tor)}
+                onPress={() => handleOpenDetalhes(tor)}
               >
                 <Ionicons name="information-circle" size={16} color="#fff" />
                 <Text style={styles.inscreverButtonText}>  Detalhes</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity
-              style={styles.inscreverButton}
-              onPress={() => handleInscrever(tor)}
-            >
+            <TouchableOpacity style={styles.inscreverButton} onPress={() => handleInscrever(tor)}>
               <Ionicons name="checkmark-circle" size={16} color="#fff" />
               <Text style={styles.inscreverButtonText}>  Inscrever</Text>
             </TouchableOpacity>
@@ -988,205 +1262,282 @@ export default function CalendarScreen() {
     );
   }
 
-  // =========================== MODAL DETALHES ===========================
-  function handleOpenDetalhe(t: Torneio) {
-    setDetalhesTorneio(t);
-    setDetalhesModalVisible(true);
-  }
-  function closeDetalhe() {
-    setDetalhesModalVisible(false);
-    setDetalhesTorneio(null);
-  }
+  return (
+    <SafeAreaView style={styles.safe}>
+      {/* HEADER MÊS */}
+      <View style={[styles.header, { justifyContent: "space-between" }]}>
+        <TouchableOpacity onPress={handlePrevMonth} style={{ paddingHorizontal: 20 }}>
+          <Ionicons name="chevron-back" size={26} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{currentMonth.format("MMMM [de] YYYY")}</Text>
+        <TouchableOpacity onPress={handleNextMonth} style={{ paddingHorizontal: 20 }}>
+          <Ionicons name="chevron-forward" size={26} color="#fff" />
+        </TouchableOpacity>
+      </View>
 
-  // Fullscreen
-  function renderDetalhesModal() {
-    if (!detalhesTorneio) return null;
-    const maxStr = detalhesTorneio.maxVagas
-      ? detalhesTorneio.maxVagas.toString()
-      : "Ilimitado";
+      {isHost && (
+        <TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
+          <MaterialCommunityIcons name="plus" size={20} color="#FFF" />
+          <Text style={styles.createButtonText}>  Criar Torneio</Text>
+        </TouchableOpacity>
+      )}
 
-    return (
+      <ScrollView style={{ flex: 1, marginTop: 10 }}>
+        {torneios.map((t) => renderCard(t))}
+      </ScrollView>
+
+      {/* MODAL CRIAR/EDITAR */}
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.modalContainer]}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          >
+            <ScrollView style={{ padding: 16 }}>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View>
+                  <Text style={styles.modalTitle}>
+                    {editId ? "Editar Torneio" : "Criar Torneio"}
+                  </Text>
+
+                  <Text style={styles.modalLabel}>Nome do Torneio</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editName}
+                    onChangeText={setEditName}
+                  />
+
+                  <Text style={styles.modalLabel}>Data (DD/MM/AAAA)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editDate}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskDate(txt, setEditDate)}
+                    maxLength={10}
+                    placeholder="Ex: 15/03/2025"
+                    placeholderTextColor="#777"
+                  />
+
+                  <Text style={styles.modalLabel}>Horário (HH:MM)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editTime}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskTime(txt, setEditTime)}
+                    maxLength={5}
+                    placeholder="Ex: 09:30"
+                    placeholderTextColor="#777"
+                  />
+
+                  <Text style={styles.modalLabel}>Tipo de Evento</Text>
+                  <TouchableOpacity
+                    style={[styles.modalInput, styles.selectFakeInput]}
+                    onPress={() => setEventTypeSelectModal(true)}
+                  >
+                    <Text style={{ color: "#fff" }}>{editEventType}</Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.modalLabel}>Juiz</Text>
+                  <TouchableOpacity
+                    style={[styles.modalInput, styles.selectFakeInput]}
+                    onPress={() => setJudgeSelectModal(true)}
+                  >
+                    <Text style={{ color: "#fff" }}>
+                      {editJudge
+                        ? judgeOptions.find((j) => j.userId === editJudge)?.fullname ||
+                          `Jogador não cadastrado: ${editJudge}`
+                        : "Nenhum (Padrão)"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.modalLabel}>Head Judge</Text>
+                  <TouchableOpacity
+                    style={[styles.modalInput, styles.selectFakeInput]}
+                    onPress={() => setHeadJudgeSelectModal(true)}
+                  >
+                    <Text style={{ color: "#fff" }}>
+                      {editHeadJudge
+                        ? headJudgeOptions.find((hj) => hj.userId === editHeadJudge)?.fullname ||
+                          `Jogador não cadastrado: ${editHeadJudge}`
+                        : "Nenhum"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.modalLabel}>Máximo de Vagas</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    keyboardType="numeric"
+                    value={editMaxVagas?.toString() || ""}
+                    onChangeText={(v) => setEditMaxVagas(Number(v) || null)}
+                  />
+
+                  <Text style={styles.modalLabel}>Abertura Inscrições (HH:MM)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editInscricoesAbertura}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesAbertura)}
+                    maxLength={5}
+                    placeholder="Ex: 08:00"
+                    placeholderTextColor="#777"
+                  />
+
+                  <Text style={styles.modalLabel}>Fechamento Inscrições (HH:MM)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editInscricoesFechamento}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesFechamento)}
+                    maxLength={5}
+                    placeholder="Ex: 10:00"
+                    placeholderTextColor="#777"
+                  />
+
+                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
+                    <Text style={{ color: "#fff", marginRight: 10 }}>Prioridade VIP</Text>
+                    <Switch value={editPrioridadeVip} onValueChange={setEditPrioridadeVip} />
+                  </View>
+
+                  {editPrioridadeVip && (
+                    <>
+                      <Text style={styles.modalLabel}>Abertura (VIP) (HH:MM)</Text>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={editInscricoesVipAbertura}
+                        keyboardType="numeric"
+                        onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesVipAbertura)}
+                        maxLength={5}
+                        placeholder="Ex: 07:30"
+                        placeholderTextColor="#777"
+                      />
+
+                      <Text style={styles.modalLabel}>Fechamento (VIP) (HH:MM)</Text>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={editInscricoesVipFechamento}
+                        keyboardType="numeric"
+                        onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesVipFechamento)}
+                        maxLength={5}
+                        placeholder="Ex: 09:00"
+                        placeholderTextColor="#777"
+                      />
+                    </>
+                  )}
+
+                  <View style={[styles.modalButtons, { marginTop: 20 }]}>
+                    <TouchableOpacity
+                      style={[styles.button, { backgroundColor: "#999" }]}
+                      onPress={() => setModalVisible(false)}
+                    >
+                      <Text style={styles.buttonText}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.button} onPress={handleSaveTorneio}>
+                      <Text style={styles.buttonText}>Salvar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* MODAL DETALHES (fullscreen) */}
       <Modal
         visible={detalhesModalVisible}
         animationType="slide"
         onRequestClose={closeDetalhes}
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: DARK }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#1E1E1E" }}>
           <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>Detalhes do Torneio</Text>
-
-            <Text style={styles.modalLabel}>Nome:</Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.name}</Text>
-
-            <Text style={styles.modalLabel}>Data:</Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.date}</Text>
-
-            <Text style={styles.modalLabel}>Horário:</Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.time}</Text>
-
-            <Text style={styles.modalLabel}>Tipo de Evento:</Text>
-            <Text style={styles.modalInput}>{detalhesTorneio.eventType}</Text>
-
-            <Text style={styles.modalLabel}>Juiz:</Text>
-            <Text style={styles.modalInput}>
-              {judgeMap[detalhesTorneio.judge] || "Sem juiz"}
-              {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
-            </Text>
-
-            <Text style={styles.modalLabel}>Head Judge:</Text>
-            <Text style={styles.modalInput}>
-              {headJudgeMap[detalhesTorneio.headJudge] || "Sem head judge"}
-            </Text>
-
-            <Text style={styles.modalLabel}>Máximo de Vagas:</Text>
-            <Text style={styles.modalInput}>{maxStr}</Text>
-
-            <Text style={styles.modalLabel}>Abertura Inscrições:</Text>
-            <Text style={styles.modalInput}>
-              {detalhesTorneio.inscricoesAbertura || "Não definido"}
-            </Text>
-
-            <Text style={styles.modalLabel}>Fechamento Inscrições:</Text>
-            <Text style={styles.modalInput}>
-              {detalhesTorneio.inscricoesFechamento || "Não definido"}
-            </Text>
-
-            {detalhesTorneio.prioridadeVip && (
+            {detalhesTorneio && (
               <>
-                <Text style={styles.modalLabel}>Abertura (VIP):</Text>
+                <Text style={styles.modalTitle}>Detalhes do Torneio</Text>
+
+                <Text style={styles.modalLabel}>Nome:</Text>
+                <Text style={styles.modalInput}>{detalhesTorneio.name}</Text>
+
+                <Text style={styles.modalLabel}>Data:</Text>
+                <Text style={styles.modalInput}>{detalhesTorneio.date}</Text>
+
+                <Text style={styles.modalLabel}>Horário:</Text>
+                <Text style={styles.modalInput}>{detalhesTorneio.time}</Text>
+
+                <Text style={styles.modalLabel}>Tipo de Evento:</Text>
+                <Text style={styles.modalInput}>{detalhesTorneio.eventType}</Text>
+
+                <Text style={styles.modalLabel}>Juiz:</Text>
                 <Text style={styles.modalInput}>
-                  {detalhesTorneio.inscricoesVipAbertura || "Não definido"}
+                  {judgeMap[detalhesTorneio.judge] || `Jogador não cadastrado: ${detalhesTorneio.judge}`}
+                  {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
                 </Text>
-                <Text style={styles.modalLabel}>Fechamento (VIP):</Text>
+
+                <Text style={styles.modalLabel}>Head Judge:</Text>
                 <Text style={styles.modalInput}>
-                  {detalhesTorneio.inscricoesVipFechamento || "Não definido"}
+                  {headJudgeMap[detalhesTorneio.headJudge] ||
+                    `Jogador não cadastrado: ${detalhesTorneio.headJudge}`}
                 </Text>
+
+                <Text style={styles.modalLabel}>Máx. Vagas:</Text>
+                <Text style={styles.modalInput}>
+                  {detalhesTorneio.maxVagas ? detalhesTorneio.maxVagas : "Ilimitado"}
+                </Text>
+
+                <Text style={styles.modalLabel}>Abertura:</Text>
+                <Text style={styles.modalInput}>
+                  {detalhesTorneio.inscricoesAbertura || "Não definido"}
+                </Text>
+
+                <Text style={styles.modalLabel}>Fechamento:</Text>
+                <Text style={styles.modalInput}>
+                  {detalhesTorneio.inscricoesFechamento || "Não definido"}
+                </Text>
+
+                {detalhesTorneio.prioridadeVip && (
+                  <>
+                    <Text style={styles.modalLabel}>Abertura (VIP):</Text>
+                    <Text style={styles.modalInput}>
+                      {detalhesTorneio.inscricoesVipAbertura || "Não definido"}
+                    </Text>
+                    <Text style={styles.modalLabel}>Fechamento (VIP):</Text>
+                    <Text style={styles.modalInput}>
+                      {detalhesTorneio.inscricoesVipFechamento || "Não definido"}
+                    </Text>
+                  </>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.button, { marginTop: 20 }]}
+                  onPress={() => openInscricoesModal(detalhesTorneio)}
+                >
+                  <Text style={styles.buttonText}>Ver Inscrições</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
+                  onPress={closeDetalhes}
+                >
+                  <Text style={styles.buttonText}>Fechar</Text>
+                </TouchableOpacity>
               </>
             )}
-
-            <TouchableOpacity
-              style={[styles.button, { marginTop: 20 }]}
-              onPress={() => openInscricoesModal(detalhesTorneio)}
-            >
-              <Text style={styles.buttonText}>Ver Inscrições</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
-              onPress={closeDetalhes}
-            >
-              <Text style={styles.buttonText}>Fechar</Text>
-            </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
       </Modal>
-    );
-  }
 
-  // =========================== MODAL INSCRIÇÕES ===========================
-  async function openInscricoesModal(t: Torneio) {
-    setDetalhesTorneio(t);
-
-    const colRef = collection(db, "leagues", leagueId, "calendar", t.id, "inscricoes");
-    onSnapshot(colRef, (snap) => {
-      const arr: Inscricao[] = [];
-      snap.forEach((ds) => {
-        arr.push({
-          userId: ds.id,
-          deckId: ds.data().deckId,
-          createdAt: ds.data().createdAt || "",
-        });
-      });
-      arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
-      setInscricoes(arr);
-
-      // Carrega info de deck e jogador
-      const deckIdsSet = new Set<string>();
-      const userIdsSet = new Set<string>();
-      arr.forEach((i) => {
-        if (i.deckId) deckIdsSet.add(i.deckId);
-        userIdsSet.add(i.userId);
-      });
-
-      deckIdsSet.forEach(async (dkId) => {
-        const dRef = doc(db, "decks", dkId);
-        const dSnap = await getDoc(dRef);
-        if (dSnap.exists()) {
-          const nm = dSnap.data().name || `Deck ${dkId}`;
-          setDeckNameMap((prev) => ({ ...prev, [dkId]: nm }));
-        }
-      });
-
-      userIdsSet.forEach(async (uId) => {
-        if (!playerNameMap[uId]) {
-          const pRef = doc(db, "players", uId);
-          const pSnap = await getDoc(pRef);
-          if (pSnap.exists()) {
-            const nm = pSnap.data().fullname || `Jogador ${uId}`;
-            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
-          }
-        }
-      });
-    });
-
-    // Carrega lista de espera
-    const waitColRef = collection(db, "leagues", leagueId, "calendar", t.id, "espera");
-    onSnapshot(waitColRef, async (wanp) => {
-      const arr: Espera[] = [];
-      const userIdsToLoad = new Set<string>();
-
-      wanp.forEach((ds) => {
-        arr.push({
-          userId: ds.id,
-          deckId: ds.data().deckId,
-          createdAt: ds.data().createdAt || "",
-          vip: ds.data().vip || false,
-        });
-        userIdsToLoad.add(ds.id);
-      });
-
-      // Ordena VIP e data
-      arr.sort((a, b) => {
-        if (a.vip && !b.vip) return -1;
-        if (!a.vip && b.vip) return 1;
-        return a.createdAt.localeCompare(b.createdAt);
-      });
-
-      setEspera(arr);
-
-      // Buscar nome do jogador
-      userIdsToLoad.forEach(async (uId) => {
-        if (!playerNameMap[uId]) {
-          const pRef = doc(db, "players", uId);
-          const pSnap = await getDoc(pRef);
-          if (pSnap.exists()) {
-            const nm = pSnap.data().fullname || `Jogador ${uId}`;
-            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
-          }
-        }
-      });
-    });
-
-    setInscricoesModalVisible(true);
-  }
-
-  function closeInscricoesModa() {
-    setInscricoesModalVisible(false);
-    setInscricoes([]);
-    setEspera([]);
-  }
-
-  function renderInscricoesModal() {
-    if (!detalhesTorneio) return null;
-    return (
+      {/* MODAL INSCRIÇÕES */}
       <Modal
         visible={inscricoesModalVisible}
         animationType="slide"
-        onRequestClose={closeInscricoesModa}
+        onRequestClose={closeInscricoesModal}
       >
         <SafeAreaView style={[styles.modalContainer, { paddingBottom: 40 }]}>
           <ScrollView style={{ padding: 16 }}>
-            <Text style={styles.modalTitle}>Inscrições e Decks</Text>
+            <Text style={styles.modalTitle}>Inscrições / Decks</Text>
             {inscricoes.length === 0 ? (
               <Text style={{ color: "#ccc", marginVertical: 10 }}>
                 Nenhuma inscrição encontrada.
@@ -1213,13 +1564,10 @@ export default function CalendarScreen() {
                     }}
                   >
                     <Text style={styles.inscricaoItemText}>
-                      Jogador: {playerNameMap[ins.userId] || ins.userId}
+                      Jogador: {playerNameMap[ins.userId] || `Jogador não cadastrado: ${ins.userId}`}
                     </Text>
                     <Text style={styles.inscricaoItemText}>
-                      Deck:{" "}
-                      {ins.deckId
-                        ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})`
-                        : "Sem deck"}
+                      Deck: {ins.deckId ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})` : "Sem deck"}
                     </Text>
                     <Text style={styles.inscricaoItemText}>
                       Data/Hora: {formatIsoDate(ins.createdAt)}
@@ -1228,7 +1576,7 @@ export default function CalendarScreen() {
 
                   {isHost && (
                     <TouchableOpacity
-                      onPress={() => handleExcluirInscricao(detalhesTorneio.id, ins.userId)}
+                      onPress={() => handleExcluirInscricao(detalhesTorneio?.id || "", ins.userId)}
                       style={{
                         backgroundColor: "#fe5f55",
                         paddingHorizontal: 10,
@@ -1238,9 +1586,7 @@ export default function CalendarScreen() {
                         marginLeft: 10,
                       }}
                     >
-                      <Text style={{ color: "#fff", fontWeight: "bold" }}>
-                        Excluir
-                      </Text>
+                      <Text style={{ color: "#fff", fontWeight: "bold" }}>Excluir</Text>
                     </TouchableOpacity>
                   )}
                 </Animatable.View>
@@ -1258,17 +1604,13 @@ export default function CalendarScreen() {
               style={[styles.button, { marginTop: 10, backgroundColor: "#777" }]}
               onPress={() => setEsperaModalVisible(true)}
             >
-              <Text style={styles.buttonText}>Ver Lista de Espera</Text>
+              <Text style={styles.buttonText}>Lista de Espera</Text>
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
       </Modal>
-    );
-  }
 
-  // =========================== LISTA DE ESPERA MODAL ===========================
-  function renderEsperaModal() {
-    return (
+      {/* MODAL LISTA DE ESPERA */}
       <Modal
         visible={esperaModalVisible}
         animationType="fade"
@@ -1290,7 +1632,7 @@ export default function CalendarScreen() {
                   duration={600}
                 >
                   <Text style={styles.inscricaoItemText}>
-                    Jogador: {playerNameMap[e.userId] || e.userId}
+                    Jogador: {playerNameMap[e.userId] || `Jogador não cadastrado: ${e.userId}`}
                   </Text>
                   <Text style={styles.inscricaoItemText}>VIP: {e.vip ? "Sim" : "Não"}</Text>
                   <Text style={styles.inscricaoItemText}>
@@ -1299,7 +1641,6 @@ export default function CalendarScreen() {
                 </Animatable.View>
               ))
             )}
-
             <TouchableOpacity
               style={[styles.button, { marginTop: 20 }]}
               onPress={() => setEsperaModalVisible(false)}
@@ -1309,12 +1650,8 @@ export default function CalendarScreen() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
-    );
-  }
 
-  // =========================== MODAL INSCRIÇÃO USUÁRIO ===========================
-  function renderInscricaoModal() {
-    return (
+      {/* MODAL INSCRIÇÃO (ESCOLHER DECK) */}
       <Modal
         visible={inscricaoModalVisible}
         animationType="slide"
@@ -1347,7 +1684,7 @@ export default function CalendarScreen() {
               )
             ) : (
               <Text style={{ color: "#ccc", marginBottom: 10 }}>
-                Este tipo de torneio não exige deck.
+                Este tipo de torneio (Liga Local) não exige deck.
               </Text>
             )}
 
@@ -1365,12 +1702,8 @@ export default function CalendarScreen() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
-    );
-  }
 
-  // =========================== MODAL DECK (PDF) ===========================
-  function renderDeckPdfModal() {
-    return (
+      {/* MODAL DETALHES DECK (PDF) */}
       <Modal
         visible={deckPdfModalVisible}
         animationType="slide"
@@ -1434,10 +1767,14 @@ export default function CalendarScreen() {
           </TouchableOpacity>
         </SafeAreaView>
       </Modal>
-    );
-  }
 
-  // =========================== SELEÇÃO DE JUÍZ E HEADJUDGE ===========================
+      {renderJudgeSelectModal()}
+      {renderHeadJudgeSelectModal()}
+      {renderEventTypeSelectModal()}
+    </SafeAreaView>
+  );
+
+  // =========================== SELEÇÃO DE JUÍZ, HEAD, EVENT TYPE ===========================
   function renderJudgeSelectModal() {
     return (
       <Modal
@@ -1480,7 +1817,6 @@ export default function CalendarScreen() {
       </Modal>
     );
   }
-
   function renderHeadJudgeSelectModal() {
     return (
       <Modal
@@ -1523,8 +1859,6 @@ export default function CalendarScreen() {
       </Modal>
     );
   }
-
-  // =========================== SELEÇÃO DO TIPO DE EVENTO ===========================
   function renderEventTypeSelectModal() {
     return (
       <Modal
@@ -1558,214 +1892,9 @@ export default function CalendarScreen() {
       </Modal>
     );
   }
-
-  // =========================== RENDER FINAL ===========================
-  return (
-    <SafeAreaView style={styles.safe}>
-      {/* Header do Mês */}
-      <View style={[styles.header, { justifyContent: "space-between" }]}>
-        <TouchableOpacity onPress={handlePrevMonth} style={{ paddingHorizontal: 20 }}>
-          <Ionicons name="chevron-back" size={26} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{currentMonth.format("MMMM [de] YYYY")}</Text>
-        <TouchableOpacity onPress={handleNextMonth} style={{ paddingHorizontal: 20 }}>
-          <Ionicons name="chevron-forward" size={26} color="#fff" />
-        </TouchableOpacity>
-      </View>
-
-      {isHost && (
-        <TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
-          <MaterialCommunityIcons name="plus" size={20} color="#FFF" />
-          <Text style={styles.createButtonText}>  Criar Torneio</Text>
-        </TouchableOpacity>
-      )}
-
-      <ScrollView style={{ flex: 1, marginTop: 10 }}>
-        {torneios.map((t) => renderCard(t))}
-      </ScrollView>
-
-      {/* MODAL CRIAR/EDITAR TORN. */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <SafeAreaView style={[styles.modalContainer]}>
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-          >
-            <ScrollView style={{ padding: 16 }}>
-              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                <View>
-                  <Text style={styles.modalTitle}>
-                    {editId ? "Editar Torneio" : "Criar Torneio"}
-                  </Text>
-
-                  <Text style={styles.modalLabel}>Nome do Torneio</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={editName}
-                    onChangeText={setEditName}
-                  />
-
-                  <Text style={styles.modalLabel}>Data (DD/MM/AAAA)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={editDate}
-                    keyboardType="numeric"
-                    onChangeText={(txt) => handleMaskDate(txt, setEditDate)}
-                    maxLength={10}
-                    placeholder="Ex: 15/03/2023"
-                    placeholderTextColor="#777"
-                  />
-
-                  <Text style={styles.modalLabel}>Horário (HH:MM)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={editTime}
-                    keyboardType="numeric"
-                    onChangeText={(txt) => handleMaskTime(txt, setEditTime)}
-                    maxLength={5}
-                    placeholder="Ex: 09:30"
-                    placeholderTextColor="#777"
-                  />
-
-                  <Text style={styles.modalLabel}>Tipo de Evento</Text>
-                  <TouchableOpacity
-                    style={[styles.modalInput, styles.selectFakeInput]}
-                    onPress={() => setEventTypeSelectModal(true)}
-                  >
-                    <Text style={{ color: "#fff" }}>{editEventType}</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.modalLabel}>Juiz</Text>
-                  <TouchableOpacity
-                    style={[styles.modalInput, styles.selectFakeInput]}
-                    onPress={() => setJudgeSelectModal(true)}
-                  >
-                    <Text style={{ color: "#fff" }}>
-                      {editJudge
-                        ? judgeOptions.find((j) => j.userId === editJudge)?.fullname ||
-                          "Juiz Desconhecido"
-                        : "Nenhum (Padrão)"}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.modalLabel}>Head Judge</Text>
-                  <TouchableOpacity
-                    style={[styles.modalInput, styles.selectFakeInput]}
-                    onPress={() => setHeadJudgeSelectModal(true)}
-                  >
-                    <Text style={{ color: "#fff" }}>
-                      {editHeadJudge
-                        ? headJudgeOptions.find((hj) => hj.userId === editHeadJudge)?.fullname ||
-                          "Head Desconhecido"
-                        : "Nenhum"}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.modalLabel}>Máximo de Vagas</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    keyboardType="numeric"
-                    value={editMaxVagas?.toString() || ""}
-                    onChangeText={(v) => setEditMaxVagas(Number(v) || null)}
-                  />
-
-                  <Text style={styles.modalLabel}>Abertura Inscrições (HH:MM)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={editInscricoesAbertura}
-                    keyboardType="numeric"
-                    onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesAbertura)}
-                    maxLength={5}
-                    placeholder="Ex: 08:00"
-                    placeholderTextColor="#777"
-                  />
-
-                  <Text style={styles.modalLabel}>Fechamento Inscrições (HH:MM)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={editInscricoesFechamento}
-                    keyboardType="numeric"
-                    onChangeText={(txt) => handleMaskTime(txt, setEditInscricoesFechamento)}
-                    maxLength={5}
-                    placeholder="Ex: 10:00"
-                    placeholderTextColor="#777"
-                  />
-
-                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
-                    <Text style={{ color: "#fff", marginRight: 10 }}>Prioridade VIP</Text>
-                    <Switch value={editPrioridadeVip} onValueChange={setEditPrioridadeVip} />
-                  </View>
-
-                  {editPrioridadeVip && (
-                    <>
-                      <Text style={styles.modalLabel}>
-                        Abertura (VIP) (HH:MM)
-                      </Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={editInscricoesVipAbertura}
-                        keyboardType="numeric"
-                        onChangeText={(txt) =>
-                          handleMaskTime(txt, setEditInscricoesVipAbertura)
-                        }
-                        maxLength={5}
-                        placeholder="Ex: 07:30"
-                        placeholderTextColor="#777"
-                      />
-
-                      <Text style={styles.modalLabel}>
-                        Fechamento (VIP) (HH:MM)
-                      </Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={editInscricoesVipFechamento}
-                        keyboardType="numeric"
-                        onChangeText={(txt) =>
-                          handleMaskTime(txt, setEditInscricoesVipFechamento)
-                        }
-                        maxLength={5}
-                        placeholder="Ex: 09:00"
-                        placeholderTextColor="#777"
-                      />
-                    </>
-                  )}
-
-                  <View style={[styles.modalButtons, { marginTop: 20 }]}>
-                    <TouchableOpacity
-                      style={[styles.button, { backgroundColor: "#999" }]}
-                      onPress={() => setModalVisible(false)}
-                    >
-                      <Text style={styles.buttonText}>Cancelar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.button} onPress={handleSaveTorneio}>
-                      <Text style={styles.buttonText}>Salvar</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </Modal>
-
-      {detalhesModalVisible && renderDetalhesModal()}
-      {renderInscricoesModal()}
-      {renderDeckPdfModal()}
-      {renderEsperaModal()}
-      {renderInscricaoModal()}
-
-      {renderJudgeSelectModal()}
-      {renderHeadJudgeSelectModal()}
-      {renderEventTypeSelectModal()}
-    </SafeAreaView>
-  );
 }
 
-// =========================== FUNÇÕES AUXILIARES ===========================
+// ================ FUNÇÕES AUXILIARES ================
 function formatIsoDate(isoStr: string) {
   if (!isoStr) return "";
   const m = moment(isoStr);
@@ -1773,7 +1902,7 @@ function formatIsoDate(isoStr: string) {
   return m.format("DD/MM/YYYY HH:mm");
 }
 
-// =========================== ESTILOS ===========================
+// ================ ESTILOS ================
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
@@ -1941,8 +2070,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "center",
   },
-
-  // Para as listas de seleção (Juiz, HeadJudge, Tipo Evento)
   selectFakeInput: {
     justifyContent: "center",
   },
