@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,6 @@ import {
   Modal,
   ScrollView,
   ActivityIndicator,
-  Animated,
 } from "react-native";
 import {
   collection,
@@ -23,6 +22,7 @@ import {
   getDoc,
   updateDoc,
   arrayUnion,
+  getDocs
 } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import moment from "moment";
@@ -30,9 +30,19 @@ import { db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "expo-router";
 import * as Animatable from "react-native-animatable";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native"; // <-- Importado para foco
 
-/** Mantendo a lógica e as interfaces originais **/
+/**
+ * Neste arquivo, NÃO iremos mais usar "collection(db, 'trade')".
+ * Agora, precisamos buscar nas subcoleções:
+ *   /leagues/{leagueId}/trades
+ * se e somente se filterType = "league".
+ *
+ * Se filterType for "city" ou "all", exibimos uma mensagem indicando
+ * que não há trocas disponíveis nesse modo.
+ */
+
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 48) / 2;
 
@@ -51,54 +61,116 @@ interface TradePost {
 
 export default function UserTradeFeed() {
   const { t } = useTranslation();
+  const router = useRouter();
 
   const [playerId, setPlayerId] = useState("");
   const [posts, setPosts] = useState<TradePost[]>([]);
+  const [cachedPosts, setCachedPosts] = useState<TradePost[] | null>(null); // <-- Cache
+  const [updateCount, setUpdateCount] = useState(0); // <-- Contador para o cache
+
   const [searchText, setSearchText] = useState("");
   const [filterType, setFilterType] = useState<"all" | "sale" | "trade" | "want">("all");
   const [onlyMine, setOnlyMine] = useState(false);
-  const router = useRouter();
+
+  // Filtro geral
+  const [globalFilterType, setGlobalFilterType] = useState<string>(""); // "all"|"city"|"league"
+  const [leagueStored, setLeagueStored] = useState<string>("");
 
   // Modal de Detalhes
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailPost, setDetailPost] = useState<TradePost | null>(null);
 
-  useEffect(() => {
-    moment.locale("pt-br");
-    (async () => {
-      const pid = await AsyncStorage.getItem("@userId");
-      if (pid) setPlayerId(pid);
-    })();
+  // ---------------- useFocusEffect para sempre recarregar league/filter ao focar -------------
+  useFocusEffect(
+    useCallback(() => {
+        let isActive = true;
 
-    const collRef = collection(db, "trade");
-    const unsub = onSnapshot(collRef, (snap) => {
-      const arr: TradePost[] = [];
-      const now = Date.now();
-      snap.forEach((ds) => {
-        const data = ds.data();
-        // remove posts com +3 dias
-        if (data.createdAt && now - data.createdAt > 3 * 86400000) {
-          return; // filtra
-        }
-        arr.push({
-          id: ds.id,
-          cardName: data.cardName,
-          cardImage: data.cardImage,
-          type: data.type,
-          price: data.price,
-          obs: data.obs || "",
-          ownerId: data.ownerId,
-          ownerName: data.ownerName || "Jogador",
-          interested: data.interested || [],
-          createdAt: data.createdAt,
+        (async () => {
+            try {
+                const pid = await AsyncStorage.getItem("@userId");
+                if (isActive && pid) setPlayerId(pid);
+
+                const fType = (await AsyncStorage.getItem("@filterType")) || "";
+                const lId = (await AsyncStorage.getItem("@leagueId")) || "";
+
+                if (isActive) {
+                    setGlobalFilterType(fType as string);
+                    setLeagueStored(lId);
+                }
+
+                if (fType === "league" && lId) {
+                    // Aqui passamos o estado atualizado do cache para evitar loop infinito
+                    loadTradesForLeague(lId, isActive, cachedPosts);
+                } else {
+                    if (isActive) setPosts([]);
+                }
+            } catch (err) {
+                console.log("Erro ao ler dados do AsyncStorage:", err);
+            }
+        })();
+
+        return () => {
+            isActive = false;
+        };
+    }, []) // Removemos dependências que poderiam fazer o `useFocusEffect` rodar constantemente
+);
+
+/** Lê todos os trades na coleção /leagues/{lId}/trades */
+async function loadTradesForLeague(lId: string, isActive: boolean, cache: TradePost[] | null) {
+    try {
+        const tradesRef = collection(db, `leagues/${lId}/trades`);
+        const snap = await getDocs(tradesRef);
+
+        let tempPosts: TradePost[] = [];
+        const now = Date.now();
+
+        snap.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (data.createdAt && now - data.createdAt > 3 * 86400000) {
+                return; // Remove posts com mais de 3 dias
+            }
+            tempPosts.push({
+                id: docSnap.id,
+                cardName: data.cardName,
+                cardImage: data.cardImage,
+                type: data.type,
+                price: data.price,
+                obs: data.obs || "",
+                ownerId: data.ownerId,
+                ownerName: data.ownerName || "Jogador",
+                interested: data.interested || [],
+                createdAt: data.createdAt,
+            });
         });
-      });
-      arr.sort((a, b) => b.createdAt - a.createdAt);
-      setPosts(arr);
-    });
-    return () => unsub();
-  }, []);
 
+        // Organiza por data
+        tempPosts.sort((a, b) => b.createdAt - a.createdAt);
+
+        if (isActive) {
+            // Comparação com cache para evitar atualizações desnecessárias
+            if (cache && JSON.stringify(tempPosts) === JSON.stringify(cache)) {
+                if (updateCount >= 5) {
+                    console.log("Dados inalterados 5 vezes, forçando atualização do cache...");
+                    setCachedPosts(tempPosts);
+                    setUpdateCount(0);
+                    setPosts(tempPosts);
+                } else {
+                    console.log("Usando cache (sem atualização)...");
+                    setUpdateCount((prev) => prev + 1);
+                }
+            } else {
+                console.log("Dados atualizados, salvando no cache...");
+                setCachedPosts(tempPosts);
+                setUpdateCount(0);
+                setPosts(tempPosts);
+            }
+        }
+    } catch (err) {
+        console.log("Erro ao carregar trades da liga:", err);
+    }
+}
+
+  // ============ Filtra => onlyMine + type + searchText =============
   function getFilteredPosts(): TradePost[] {
     return posts.filter((p) => {
       if (onlyMine && p.ownerId !== playerId) return false;
@@ -111,83 +183,86 @@ export default function UserTradeFeed() {
     });
   }
 
+  // ============================ DETALHE ============================
   async function openDetailModal(post: TradePost) {
-    const interestedNames: string[] = [];
-  
+    // Precisamos buscar "interested" -> converter em Nomes
+    let interestedNames: string[] = [];
     if (post.interested.length > 0) {
-      try {
-        for (const pId of post.interested) {
-          const userDocRef = doc(db, "players", pId);
-          const userDoc = await getDoc(userDocRef);
-          if (userDoc.exists()) {
-            interestedNames.push(userDoc.data().fullname || "Desconhecido"); // ✅ Correção aqui!
+      for (const pId of post.interested) {
+        try {
+          const pRef = doc(db, `leagues/${leagueStored}/players/${pId}`);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+            interestedNames.push(pSnap.data().fullname || `Desconhecido ${pId}`);
           } else {
-            interestedNames.push("Desconhecido");
+            interestedNames.push(`Desconhecido ${pId}`);
           }
+        } catch (err) {
+          interestedNames.push(`Desconhecido ${pId}`);
         }
-      } catch (err) {
-        console.error("Erro ao buscar nomes dos interessados:", err);
       }
     }
-  
     setDetailPost({ ...post, interested: interestedNames });
     setDetailModalVisible(true);
-  }  
+  }
 
   function closeDetailModal() {
     setDetailPost(null);
     setDetailModalVisible(false);
   }
 
+  /** Registra interesse do userId no post */
   async function handleInterest(post: TradePost) {
     if (!playerId) {
-      Alert.alert(t("common.error"), t("trocas.alerts.not_logged_in"));
+      Alert.alert("Erro", "Você não está logado.");
       return;
     }
     if (post.ownerId === playerId) {
-      Alert.alert(t("common.error"), t("trocas.alerts.owner"));
+      Alert.alert("Aviso", "Você já é o dono deste post.");
       return;
     }
-    const collRef = collection(db, "trade");
-    const docRef = doc(collRef, post.id);
-    await updateDoc(docRef, {
-      interested: arrayUnion(playerId),
-    });
-    Alert.alert(
-      t("common.success"),
-      t("trocas.alerts.interest_registered")
-    );
+
+    try {
+      const docRef = doc(db, `leagues/${leagueStored}/trades`, post.id);
+      await updateDoc(docRef, {
+        interested: arrayUnion(playerId),
+      });
+
+      Alert.alert("Sucesso", "Interesse registrado!");
+    } catch (err) {
+      console.log("Erro ao registrar interesse:", err);
+      Alert.alert("Erro", "Falha ao registrar interesse.");
+    }
   }
 
-  function handleOpenChat(targetId: string) {
-    router.push({
-      pathname: "/(tabs)/chats",
-      params: { userId: targetId },
-    });
-  }
-
+  /** Deleta post do Firestore */
   async function handleDeletePost(post: TradePost) {
     Alert.alert(
-      t("common.confirmation_title"),
-      t("trocas.alerts.delete_confirm", { cardName: post.cardName }),
+      "Confirmação",
+      `Deseja excluir a carta ${post.cardName}?`,
       [
-        { text: t("calendar.form.cancel_button"), style: "cancel" },
+        { text: "Cancelar", style: "cancel" },
         {
-          text: t("common.delete"),
+          text: "Excluir",
           style: "destructive",
           onPress: async () => {
             try {
-              const collRef = collection(db, "trade");
-              await deleteDoc(doc(collRef, post.id));
-              Alert.alert(t("common.success"), t("trocas.alerts.deleted"));
+              const docRef = doc(db, `leagues/${leagueStored}/trades`, post.id);
+              await deleteDoc(docRef);
+              Alert.alert("Sucesso", "Carta excluída.");
             } catch (err) {
               console.log("Erro ao excluir card:", err);
-              Alert.alert(t("common.error"), t("trocas.alerts.delete_failed"));
+              Alert.alert("Erro", "Não foi possível excluir.");
             }
           },
         },
       ]
     );
+  }
+
+  /** Abre chat com o user */
+  function handleOpenChat(targetName: string) {
+    Alert.alert("Chat", `Abrir chat com: ${targetName} (futuro)...`);
   }
 
   // ============ Ícones e cores p/ cada tipo ============
@@ -212,7 +287,7 @@ export default function UserTradeFeed() {
     }
   }
 
-  // ====================== Render Item ======================
+  // ====================== RENDER ITEM ======================
   function renderItem({ item }: { item: TradePost }) {
     const { icon, borderColor } = getTypeIconAndColor(item.type);
 
@@ -254,7 +329,7 @@ export default function UserTradeFeed() {
             {icon}
             {item.type === "want" ? (
               <Text style={[styles.postTypeLabel, { color: "#FBC02D" }]}>
-                {t("trocas.filters.want")}
+                Quero
               </Text>
             ) : item.type === "sale" ? (
               <Text style={[styles.postTypeLabel, { color: "#4CAF50" }]} numberOfLines={1}>
@@ -262,12 +337,29 @@ export default function UserTradeFeed() {
               </Text>
             ) : (
               <Text style={[styles.postTypeLabel, { color: "#2196F3" }]}>
-                {t("trocas.filters.trade")}
+                Troca
               </Text>
             )}
           </View>
         </TouchableOpacity>
       </Animatable.View>
+    );
+  }
+
+  // ====================== RENDER PRINCIPAL ======================
+  if (globalFilterType !== "league" || !leagueStored) {
+    // Se user está em city ou all => exibe mensagem
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={{ padding: 16 }}>
+          <Text style={{ color: "#fff", fontSize: 18, fontWeight: "bold" }}>
+            Sistema de Trocas/Posts indisponível para esse tipo de filtro.
+          </Text>
+          <Text style={{ color: "#999", marginTop: 10 }}>
+            Selecione uma LIGA específica para ver as cartas listadas.
+          </Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -277,7 +369,7 @@ export default function UserTradeFeed() {
     <SafeAreaView style={styles.safe}>
       {/* Header Row */}
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>{t("trocas.header")}</Text>
+        <Text style={styles.headerTitle}>Trocas / Vendas</Text>
 
         <TouchableOpacity
           style={[
@@ -292,7 +384,7 @@ export default function UserTradeFeed() {
             color="#FFF"
           />
           <Text style={styles.switchMyCardsText}>
-            {onlyMine ? t("trocas.buttons.my_cards") : t("trocas.buttons.all_cards")}
+            {onlyMine ? "Meus Cards" : "Todos"}
           </Text>
         </TouchableOpacity>
       </View>
@@ -303,7 +395,7 @@ export default function UserTradeFeed() {
           <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
           <TextInput
             style={styles.searchInput}
-            placeholder={t("trocas.placeholders.search") || ""}
+            placeholder="Buscar por Nome"
             placeholderTextColor="#888"
             value={searchText}
             onChangeText={setSearchText}
@@ -313,26 +405,22 @@ export default function UserTradeFeed() {
         <View style={styles.filterRow}>
           {["all","trade","sale","want"].map((ft) => {
             const isActive = ft === filterType;
-            let label = t("trocas.filters.all");
-            let iconName = "layers"; // genérico
+            let label = "Todos";
+            let iconName = "layers";
             let color = "#FFF";
 
             if(ft === "trade") {
-              label = t("trocas.filters.trade");
+              label = "Troca";
               iconName = "swap-horizontal";
               color = "#2196F3";
             } else if(ft === "sale") {
-              label = t("trocas.filters.sale");
+              label = "Venda";
               iconName = "cart";
               color = "#4CAF50";
             } else if(ft === "want") {
-              label = t("trocas.filters.want");
+              label = "Quero";
               iconName = "heart";
               color = "#FBC02D";
-            } else {
-              // "all"
-              label = t("trocas.filters.all");
-              iconName = "layers";
             }
 
             return (
@@ -362,7 +450,9 @@ export default function UserTradeFeed() {
         contentContainerStyle={{ paddingBottom: 60, paddingTop: 6 }}
         ListEmptyComponent={() => (
           <View style={{ alignItems: "center", marginTop: 20 }}>
-            <Text style={{ color: "#ccc" }}>{t("trocas.alerts.no_posts")}</Text>
+            <Text style={{ color: "#ccc" }}>
+              Nenhum post encontrado.
+            </Text>
           </View>
         )}
       />
@@ -397,7 +487,7 @@ export default function UserTradeFeed() {
                 <View style={styles.modalRow}>
                   <Ionicons name="person-circle-outline" size={20} color="#ccc" style={{marginRight: 6}}/>
                   <Text style={styles.modalLabel}>
-                    {t("trocas.details.owner")}: {detailPost.ownerName}
+                    Dono: {detailPost.ownerName}
                   </Text>
                 </View>
 
@@ -405,7 +495,7 @@ export default function UserTradeFeed() {
                   <View style={styles.modalRow}>
                     <Ionicons name="heart" size={20} color="#FBC02D" style={{marginRight: 6}}/>
                     <Text style={[styles.modalLabel, { color: "#FBC02D" }]}>
-                      {t("trocas.filters.want")}
+                      Quero
                     </Text>
                   </View>
                 ) : detailPost.type === "sale" ? (
@@ -419,25 +509,25 @@ export default function UserTradeFeed() {
                   <View style={styles.modalRow}>
                     <Ionicons name="swap-horizontal" size={20} color="#2196F3" style={{marginRight: 6}}/>
                     <Text style={[styles.modalLabel, { color: "#2196F3" }]}>
-                      {t("trocas.filters.trade")}
+                      Troca
                     </Text>
                   </View>
                 )}
 
                 {!!detailPost.obs && (
                   <Text style={[styles.modalLabel, { marginTop: 8 }]}>
-                    {t("trocas.details.obs")}: {detailPost.obs}
+                    Obs: {detailPost.obs}
                   </Text>
                 )}
 
                 {detailPost.ownerId === playerId ? (
                   <>
                     <Text style={[styles.modalLabel, { marginTop: 8, fontWeight:"bold" }]}>
-                      {t("trocas.details.interested")}:
+                      Interessados:
                     </Text>
                     {detailPost.interested.length === 0 ? (
                       <Text style={{ color: "#ccc" }}>
-                        {t("trocas.details.no_interested")}
+                        Nenhum interessado ainda.
                       </Text>
                     ) : (
                       detailPost.interested.map((name, idx) => (
@@ -461,7 +551,7 @@ export default function UserTradeFeed() {
                         handleDeletePost(detailPost);
                       }}
                     >
-                      <Text style={styles.buttonText}>{t("trocas.buttons.delete")}</Text>
+                      <Text style={styles.buttonText}>Excluir</Text>
                     </TouchableOpacity>
                   </>
                 ) : (
@@ -472,7 +562,7 @@ export default function UserTradeFeed() {
                       closeDetailModal();
                     }}
                   >
-                    <Text style={styles.buttonText}>{t("trocas.buttons.interest")}</Text>
+                    <Text style={styles.buttonText}>Tenho Interesse</Text>
                   </TouchableOpacity>
                 )}
 
@@ -480,7 +570,7 @@ export default function UserTradeFeed() {
                   style={[styles.button, { backgroundColor: "#999", marginTop: 16 }]}
                   onPress={closeDetailModal}
                 >
-                  <Text style={styles.buttonText}>{t("trocas.buttons.close")}</Text>
+                  <Text style={styles.buttonText}>Fechar</Text>
                 </TouchableOpacity>
               </ScrollView>
             )}
@@ -491,10 +581,9 @@ export default function UserTradeFeed() {
   );
 }
 
-/** ESTILOS REFEITOS PARA MELHOR APARÊNCIA **/
+/** ESTILOS */
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
-const GRAY = "#2A2A2A";
 
 const styles = StyleSheet.create({
   safe: {
@@ -540,7 +629,7 @@ const styles = StyleSheet.create({
   },
   searchRow: {
     flexDirection: "row",
-    backgroundColor: GRAY,
+    backgroundColor: "#2A2A2A",
     borderRadius: 6,
     alignItems: "center",
     paddingHorizontal: 8,

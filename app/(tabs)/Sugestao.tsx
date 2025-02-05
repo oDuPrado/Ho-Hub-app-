@@ -8,8 +8,9 @@ import {
   Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import { useTranslation } from "react-i18next"; // <--- i18n
+import * as Animatable from "react-native-animatable";
+import { Ionicons } from "@expo/vector-icons";
 
 const SENDGRID_API_KEY = "SUA_API_KEY_AQUI"; // lembre de ocultar
 
@@ -106,7 +107,14 @@ Mensagem: ${message}`,
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>{t("sugestao.header")}</Text>
+      <Animatable.View
+        animation="bounceInDown"
+        duration={800}
+        style={styles.headerContainer}
+      >
+        <Ionicons name="mail" size={28} color="#FFD700" style={styles.headerIcon} />
+        <Text style={styles.header}>{t("sugestao.header")}</Text>
+      </Animatable.View>
 
       <Text style={styles.label}>{t("sugestao.labels.subject")}</Text>
       <TextInput
@@ -128,12 +136,17 @@ Mensagem: ${message}`,
         numberOfLines={6}
       />
 
-      <TouchableOpacity style={styles.button} onPress={handleSendEmail}>
-        <Text style={styles.buttonText}>{t("sugestao.buttons.send")}</Text>
-      </TouchableOpacity>
+      <Animatable.View animation="pulse" iterationCount="infinite" duration={1500}>
+        <TouchableOpacity style={styles.button} onPress={handleSendEmail}>
+          <Ionicons name="send" size={20} color="#FFFFFF" style={{ marginRight: 6 }} />
+          <Text style={styles.buttonText}>{t("sugestao.buttons.send")}</Text>
+        </TouchableOpacity>
+      </Animatable.View>
 
       {!canSendEmail() && (
-        <Text style={styles.warning}>{t("sugestao.warnings.daily_limit")}</Text>
+        <Animatable.Text animation="fadeIn" duration={800} style={styles.warning}>
+          {t("sugestao.warnings.daily_limit")}
+        </Animatable.Text>
       )}
     </View>
   );
@@ -150,12 +163,20 @@ const styles = StyleSheet.create({
     backgroundColor: DARK,
     padding: 20,
   },
+  headerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+    justifyContent: "center",
+  },
+  headerIcon: {
+    marginRight: 10,
+  },
   header: {
     fontSize: 24,
     fontWeight: "bold",
     color: "#FFD700",
     textAlign: "center",
-    marginBottom: 20,
   },
   label: {
     color: WHITE,
@@ -177,11 +198,13 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   button: {
+    flexDirection: "row",
     backgroundColor: PRIMARY,
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
     marginTop: 10,
+    justifyContent: "center",
   },
   buttonText: {
     color: WHITE,

@@ -88,32 +88,22 @@ export default function TorneioScreen() {
       setLoading(true);
       const storedId = await AsyncStorage.getItem("@userId");
       const storedName = await AsyncStorage.getItem("@userName");
-      const leagueId = await AsyncStorage.getItem("@leagueId");
 
       if (!storedId) {
         Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.not_logged_in"));
         router.replace("/(auth)/login");
         return;
       }
-      if (!leagueId) {
-        Alert.alert(
-          t("torneio.alerts.attention"),
-          "Nenhuma liga selecionada. Vá em configurações."
-        );
-        router.replace("/(auth)/login");
-        return;
-      }
       setUserName(storedName ?? t("torneio.info.none"));
 
-      // ==== Consulta ao backend com o ID da liga ====
-      const url = `https://Doprado.pythonanywhere.com/get-data/${leagueId}`;
-      const res = await fetch(url);
+      // ==== Consulta ao seu backend (main_2.py) ====
+      const res = await fetch("https://Doprado.pythonanywhere.com/get-data");
       if (!res.ok) {
         throw new Error(`Falha ao obter dados do torneio: ${res.status}`);
       }
       const jsonTorneio = await res.json();
 
-      // Estrutura dos rounds
+      // Montamos a estrutura que você já utilizava
       const roundObj = jsonTorneio.round ?? {};
       const roundKeys = Object.keys(roundObj).map((rk) => parseInt(rk, 10));
       if (roundKeys.length === 0) {
@@ -130,16 +120,17 @@ export default function TorneioScreen() {
       const maxRound = Math.max(...roundKeys);
       setCurrentRound(maxRound);
 
-      // Obtém divisões e mesas
+      // Aqui você já tinha divisions, table etc.
       const divisions = roundObj[maxRound];
       const divKeys = Object.keys(divisions);
+      // Ex: se tiver only 1 division
       const currentDiv = divKeys[0] ?? "None";
       const tables = divisions[currentDiv].table;
 
       let foundMesa: string | null = null;
       let foundOpponent: string | null = null;
 
-      // Percorre as mesas para encontrar o usuário
+      // Percorre as mesas para achar o user
       for (const tableId in tables) {
         const matchInfo = tables[tableId];
         const p1_id = matchInfo.player1_id;
@@ -159,9 +150,9 @@ export default function TorneioScreen() {
       setMesaNumber(foundMesa);
       setOpponentName(foundOpponent || null);
 
-      // ==== Link correto para o report, incluindo a liga ====
+      // Link do report (como antes)
       if (foundMesa) {
-        const link = `https://Doprado.pythonanywhere.com/${leagueId}/mesa/${foundMesa}`;
+        const link = `https://Doprado.pythonanywhere.com/mesa/${foundMesa}`;
         setLinkReport(link);
 
         await checkRoundAndNotify(maxRound, foundMesa, foundOpponent || "");

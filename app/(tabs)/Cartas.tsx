@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -25,6 +25,7 @@ import { db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next";
 import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native"; // <-- Importamos para focar a tela
 
 // -------------------- Tipagens Originais --------------------
 interface CardData {
@@ -75,12 +76,19 @@ export default function CardsSearchScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredCards, setFilteredCards] = useState<CardData[]>([]);
   const [collections, setCollections] = useState<CollectionData[]>([]);
+  const [cachedCollections, setCachedCollections] = useState<CollectionData[] | null>(null); // <-- Cache
+  const [updateCount, setUpdateCount] = useState(0); // <-- Contador de atualizações iguais
+
   const [selectedCard, setSelectedCard] = useState<CardData | null>(null);
   const [loading, setLoading] = useState(false);
 
   // user info
   const [playerId, setPlayerId] = useState("");
   const [playerName, setPlayerName] = useState("Jogador");
+
+  // Filtro (para salvamento)
+  const [leagueId, setLeagueId] = useState<string>("");    // se "league", então salvamos
+  const [filterType, setFilterType] = useState<string>(""); // "all"|"city"|"league"
 
   // Modal de detalhes
   const [detailModalVisible, setDetailModalVisible] = useState(false);
@@ -97,28 +105,68 @@ export default function CardsSearchScreen() {
     obs: "",
   });
 
-  // -------------------- Efeito Inicial (Carrega coleções e user) --------------------
-  useEffect(() => {
-    (async () => {
-      const uid = await AsyncStorage.getItem("@userId");
-      const uname = await AsyncStorage.getItem("@userName");
-      if (uid) setPlayerId(uid);
-      if (uname) setPlayerName(uname);
-    })();
+  // -------------------- useFocusEffect para carregar user/filtro/coleções --------------------
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
 
-    async function fetchCollections() {
-      try {
-        const resp = await fetch("https://api.pokemontcg.io/v2/sets");
-        const data = await resp.json();
-        if (data && data.data) {
-          setCollections(data.data);
+      (async () => {
+        try {
+          // Carrega filtro
+          const fType = (await AsyncStorage.getItem("@filterType")) || "all";
+          const lId = (await AsyncStorage.getItem("@leagueId")) || "";
+          if (isActive) {
+            setFilterType(fType);
+            setLeagueId(lId);
+          }
+
+          // Carrega coleções TCG (com cache)
+          fetchCollections(isActive, cachedCollections);
+        } catch (err) {
+          console.error("Erro ao buscar coleções:", err);
         }
-      } catch (err) {
-        console.error("Erro ao buscar coleções:", err);
+      })();
+
+      return () => {
+        isActive = false;
+      };
+    }, []) // <-- Remove dependências para evitar loops infinitos
+  );
+
+  /** Função para buscar as coleções da API Pokémon TCG */
+  async function fetchCollections(isActive: boolean, cache: CollectionData[] | null) {
+    try {
+      setLoading(true);
+      const resp = await fetch("https://api.pokemontcg.io/v2/sets");
+      const data = await resp.json();
+
+      if (isActive && data && data.data) {
+        const newCollections: CollectionData[] = data.data;
+
+        // Verifica se os dados mudaram em relação ao cache
+        if (cache && JSON.stringify(newCollections) === JSON.stringify(cache)) {
+          if (updateCount >= 5) {
+            console.log("Dados inalterados 5 vezes, atualizando cache mesmo assim...");
+            setCachedCollections(newCollections);
+            setUpdateCount(0);
+            setCollections(newCollections);
+          } else {
+            console.log("Usando cache de coleções...");
+            setUpdateCount((prev) => prev + 1);
+          }
+        } else {
+          console.log("Coleções atualizadas, salvando no cache...");
+          setCachedCollections(newCollections);
+          setUpdateCount(0);
+          setCollections(newCollections);
+        }
       }
+    } catch (error) {
+      console.error("Erro ao buscar coleções:", error);
+    } finally {
+      setLoading(false);
     }
-    fetchCollections();
-  }, []);
+  }
 
   // -------------------- Função de busca de Cartas --------------------
   async function searchCard(query: string) {
@@ -126,13 +174,13 @@ export default function CardsSearchScreen() {
     try {
       const text = query.trim();
       if (/^\d+$/.test(text)) {
-        // se for só número, ignora
+        // se for só número, não buscar (ou buscar de outro jeito)
         setFilteredCards([]);
         setLoading(false);
         return;
       }
 
-      // Tenta separação setCode + cardNumber
+      // Tenta separação setCode + cardNumber (Ex: "PGO 68")
       const parts = text.split(/\s+/);
       if (parts.length === 2) {
         const setCode = parts[0].toUpperCase();
@@ -166,7 +214,7 @@ export default function CardsSearchScreen() {
         return;
       }
 
-      // Assume que o usuário digitou nome
+      // Assume que o usuário digitou nome (busca por Name)
       const nameUrl = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
       const resp2 = await fetch(nameUrl);
       const data2 = await resp2.json();
@@ -213,39 +261,44 @@ export default function CardsSearchScreen() {
     setCreateState((prev) => ({ ...prev, visible: false, card: null }));
   }
 
-  // -------------------- Salvar Post (Lógica original) --------------------
+  // -------------------- Salvar Post (agora no caminho da liga) --------------------
   async function handleSavePost() {
     if (!playerId) {
-      Alert.alert(t("common.error"), t("cartas.alerts.not_logged_in"));
+      Alert.alert("Erro", "Você não está logado.");
       return;
     }
     if (!createState.card) {
-      Alert.alert(t("common.error"), t("cartas.alerts.no_card_selected"));
+      Alert.alert("Erro", "Nenhuma carta selecionada.");
       return;
     }
-    // Limite de 5 post
-    const collRef = collection(db, "trade");
-    const snapshot = await getDocs(collRef);
-    const userPosts = snapshot.docs.filter(
-      (d) => d.data().ownerId === playerId
-    );
+
+    if (filterType !== "league" || !leagueId) {
+      Alert.alert("Filtro inválido", "Para criar um post, selecione uma liga.");
+      closeCreateModal();
+      return;
+    }
+
+    // Caminho atualizado: /leagues/{leagueId}/trades/{tradeId}
+    const collRef = collection(db, `leagues/${leagueId}/trades`);
+
+    // Checa limite de 5 posts do mesmo usuário
+    const snap = await getDocs(collRef);
+    const userPosts = snap.docs.filter((d) => d.data().ownerId === playerId);
     if (userPosts.length >= 5) {
-      Alert.alert(t("common.error"), t("cartas.alerts.limit_reached"));
+      Alert.alert("Limite Atingido", "Você já tem 5 posts criados.");
       closeCreateModal();
       return;
     }
 
     let finalPrice = "";
     if (createState.type === "sale") {
-      // Se for venda
       if (createState.priceMode === "manual") {
         if (!createState.priceValue.trim()) {
-          Alert.alert(t("common.error"), t("cartas.alerts.no_price"));
+          Alert.alert("Erro", "Informe o preço manualmente.");
           return;
         }
         finalPrice = createState.priceValue.trim();
       } else {
-        // "liga"
         finalPrice = `Liga - ${createState.ligaPercent}`;
       }
     } else if (createState.type === "trade") {
@@ -255,7 +308,8 @@ export default function CardsSearchScreen() {
     }
 
     try {
-      const docRef = doc(collRef);
+      // Criando trade no novo caminho centralizado
+      const docRef = doc(collRef); // ID automático
       await setDoc(docRef, {
         cardName: createState.card.name,
         cardImage: createState.card.images.small,
@@ -267,25 +321,26 @@ export default function CardsSearchScreen() {
         interested: [],
         createdAt: Date.now(),
       });
-      Alert.alert(t("common.success"), t("cartas.alerts.post_created"));
+
+      Alert.alert("Sucesso", "Post criado com sucesso!");
       closeCreateModal();
     } catch (err) {
       console.log("Erro ao criar post:", err);
-      Alert.alert(t("common.error"), t("cartas.alerts.post_failed"));
+      Alert.alert("Erro", "Falha ao criar o post de troca/venda.");
     }
   }
 
   // -------------------- RENDER --------------------
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>{t("cartas.header")} (Pokémon TCG)</Text>
+      <Text style={styles.title}>Cartas Pokémon TCG</Text>
 
       {/* Barra de busca */}
       <Animatable.View animation="fadeInDown" style={styles.searchContainer}>
         <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
         <TextInput
           style={styles.searchInput}
-          placeholder={`${t("cartas.placeholders.search")} (Ex: "PGO 68")`}
+          placeholder='Buscar carta (Ex: "PGO 68")'
           placeholderTextColor="#999"
           value={searchQuery}
           onChangeText={handleSearchChange}
@@ -306,7 +361,7 @@ export default function CardsSearchScreen() {
             animation="fadeIn"
             duration={500}
           >
-            {t("cartas.alerts.no_results")}
+            Nenhuma carta encontrada.
           </Animatable.Text>
         )}
 
@@ -358,8 +413,7 @@ export default function CardsSearchScreen() {
                 {selectedCard.tcgplayer ? (
                   <>
                     <Text style={styles.modalText}>
-                      {t("cartas.details.updated_at", "Preço atualizado em")}:{" "}
-                      {selectedCard.tcgplayer.updatedAt}
+                      Preço atualizado em: {selectedCard.tcgplayer.updatedAt}
                     </Text>
 
                     <View style={styles.rarityRow}>
@@ -394,14 +448,12 @@ export default function CardsSearchScreen() {
                     >
                       <Ionicons name="open-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
                       <Text style={styles.linkButtonText}>
-                        {t("cartas.details.open_tcgplayer", "Abrir TCGPlayer")}
+                        Abrir TCGPlayer
                       </Text>
                     </TouchableOpacity>
                   </>
                 ) : (
-                  <Text style={styles.modalText}>
-                    {t("cartas.details.no_price", "(Sem info de preço)")}
-                  </Text>
+                  <Text style={styles.modalText}>(Sem info de preço)</Text>
                 )}
 
                 {/* Botões TENHO / QUERO */}
@@ -413,7 +465,7 @@ export default function CardsSearchScreen() {
                     >
                       <Ionicons name="checkmark-done" size={18} color="#FFF" style={{ marginRight: 6 }} />
                       <Text style={styles.actionButtonText}>
-                        {t("cartas.buttons.have")} 
+                        Tenho
                       </Text>
                     </TouchableOpacity>
                   </Animatable.View>
@@ -425,7 +477,7 @@ export default function CardsSearchScreen() {
                     >
                       <Ionicons name="heart" size={18} color="#FFF" style={{ marginRight: 6 }} />
                       <Text style={styles.actionButtonText}>
-                        {t("cartas.buttons.want")}
+                        Quero
                       </Text>
                     </TouchableOpacity>
                   </Animatable.View>
@@ -437,7 +489,7 @@ export default function CardsSearchScreen() {
                 >
                   <Ionicons name="close" size={20} color="#FFF" style={{ marginRight: 6 }} />
                   <Text style={styles.closeButtonText}>
-                    {t("common.close", "Fechar")}
+                    Fechar
                   </Text>
                 </TouchableOpacity>
               </>
@@ -459,8 +511,8 @@ export default function CardsSearchScreen() {
               <>
                 <Text style={styles.modalTitle}>
                   {createState.action === "have"
-                    ? `${t("cartas.buttons.have")} ${t("cartas.header")}`
-                    : `${t("cartas.buttons.want")} ${t("cartas.header")}`}
+                    ? `Tenho esta Carta`
+                    : `Quero esta Carta`}
                 </Text>
 
                 <Image
@@ -484,7 +536,7 @@ export default function CardsSearchScreen() {
                           setCreateState((prev) => ({ ...prev, type: "sale" }))
                         }
                       >
-                        <Ionicons name="cash-outline" size={16} color="#FFF" style={{ marginRight: 4 }}/>
+                        <Ionicons name="cash-outline" size={16} color="#FFF" style={{ marginRight:4 }}/>
                         <Text style={styles.switchTypeText}>Venda</Text>
                       </TouchableOpacity>
 
@@ -497,7 +549,7 @@ export default function CardsSearchScreen() {
                           setCreateState((prev) => ({ ...prev, type: "trade" }))
                         }
                       >
-                        <Ionicons name="swap-horizontal" size={16} color="#FFF" style={{ marginRight: 4 }}/>
+                        <Ionicons name="swap-horizontal" size={16} color="#FFF" style={{ marginRight:4 }}/>
                         <Text style={styles.switchTypeText}>Troca</Text>
                       </TouchableOpacity>
                     </View>
@@ -568,7 +620,7 @@ export default function CardsSearchScreen() {
 
                 {createState.action === "want" && (
                   <Text style={[styles.modalLabel, { marginBottom: 6 }]}>
-                    {t("cartas.want_text", 'Você deseja obter esta carta (tipo: "want").')}
+                    Você deseja obter esta carta (tipo: "want").
                   </Text>
                 )}
 
@@ -591,14 +643,14 @@ export default function CardsSearchScreen() {
                   >
                     <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight:4 }}/>
                     <Text style={styles.buttonText}>
-                      {t("calendar.form.cancel_button", "Cancelar")}
+                      Cancelar
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={[styles.button, { marginLeft: 8 }]} onPress={handleSavePost}>
                     <Ionicons name="send" size={16} color="#FFF" style={{ marginRight:4 }}/>
                     <Text style={styles.buttonText}>
-                      {t("calendar.registration.submit_button", "Enviar")}
+                      Enviar
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -775,6 +827,7 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     fontWeight: "bold",
     fontSize: 16,
+    marginLeft: 4,
   },
 
   // ------------------ Modal Create ------------------

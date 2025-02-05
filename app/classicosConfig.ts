@@ -27,31 +27,31 @@ export interface ClassicoItem {
 const classicosList: ClassicoItem[] = [
   {
     id: 101,
-    title: "Clássico Dragônico",
-    description: "Duas forças que duelam sem parar, inspirados nos maiores dragões de Pokémon!",
+    title: "Duelo de Titãs",
+    description: "Duas forças que duelam sem parar, ja tiveram mais de 250 embates!!",
     tier: "Épico",
-    condition: (stats) => stats.matches >= 1,
+    condition: (stats) => stats.matches >= 250,
   },
   {
     id: 202,
-    title: "PokéBrasileirão",
-    description: "Rivalidade inspirada no futebol nacional. Batalhas intensas com gosto de final!",
+    title: "Voltando pra EX",
+    description: "Jogadores que tem confrontos demais mas continuam se vendo nos torneios! ",
     tier: "Lendário",
     condition: (stats) =>
       stats.matches >= 10 && Math.abs(stats.winsA - stats.winsB) <= 2,
   },
   {
     id: 303,
-    title: "Rivalidade Arceus",
-    description: "Um embate divino, onde ambos jogadores se enfrentaram dezenas de vezes!",
+    title: "Rivalidade nascente",
+    description: "Um embate que esta nascendo, ja se enfretaram 100 vezes!!",
     tier: "Arceus",
-    condition: (stats) => stats.matches >= 15,
+    condition: (stats) => stats.matches >= 100,
   },
   {
     id: 404,
-    title: "Virada Inesquecível",
+    title: "Do lixo, ao Luxo",
     description:
-      "Depois de muitas derrotas, um dos jogadores deu a volta por cima com vitórias consecutivas!",
+      "Depois de muitas derrotas, um dos jogadores deu a volta por cima com vitórias 2 consecutivas!",
     tier: "Épico",
     condition: (stats) =>
       stats.matches >= 8 &&
@@ -59,16 +59,16 @@ const classicosList: ClassicoItem[] = [
   },
   {
     id: 505,
-    title: "Duelo dos Lendários",
+    title: "Duelo dos Melhores",
     description:
-      "Inspirado nos lendários do anime, ambos competem em torneios há tempos, com empates marcantes.",
+      "os melhores jogadores, se enfretando varias vezes, buscando o titulo de melhor da liga!.",
     tier: "Lendário",
-    condition: (stats) => stats.matches >= 12 && stats.draws >= 3,
+    condition: (stats) => stats.matches >= 150 && stats.draws >= 50,
   },
   // ----- Novos Clássicos Adicionados -----
   {
     id: 606,
-    title: "Vice Campeão",
+    title: "Buscando o topo!!",
     description:
       "Uma rivalidade onde ambos jogadores alcançaram, pelo menos, 10 vice-campeonatos em seus confrontos.",
     tier: "Lendário",
@@ -96,9 +96,9 @@ const classicosList: ClassicoItem[] = [
     id: 909,
     title: "Ash vs Paul",
     description:
-      "Uma batalha lendária: mais de 10 confrontos com uma diferença de pelo menos 5 vitórias a favor de um dos lados.",
+      "Uma batalha lendária: mais de 30 confrontos com uma diferença de pelo menos 5 vitórias a favor de um dos lados.",
     tier: "Épico",
-    condition: (stats) => stats.matches > 10 && Math.abs(stats.winsA - stats.winsB) >= 5,
+    condition: (stats) => stats.matches > 30 && Math.abs(stats.winsA - stats.winsB) >= 5,
   },
   {
     id: 1010,
@@ -122,9 +122,9 @@ const classicosList: ClassicoItem[] = [
     id: 1212,
     title: "Evolução Conjunta",
     description:
-      "Uma batalha de evolução: mais de 5 confrontos com uma disputa tão equilibrada que a diferença de vitórias é inferior a 2.",
+      "Se um evolui, o outro evolui junto: mais de 10 confrontos com uma diferença de vitórias é inferior a 2.",
     tier: "Épico",
-    condition: (stats) => stats.matches > 5 && Math.abs(stats.winsA - stats.winsB) < 2,
+    condition: (stats) => stats.matches > 10 && Math.abs(stats.winsA - stats.winsB) < 2,
   },
 ];
 
