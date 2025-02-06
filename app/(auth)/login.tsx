@@ -1,4 +1,3 @@
-// (auth)/login.tsx
 import React, { useEffect, useRef, useState } from "react";
 import {
   View,
@@ -16,9 +15,8 @@ import {
   ActivityIndicator,
   ScrollView,
   Modal,
-  Image,
   ImageBackground,
-  FlatList,
+  Image,
   LayoutAnimation,
   UIManager,
 } from "react-native";
@@ -32,40 +30,25 @@ import {
   signOut,
   User,
 } from "firebase/auth";
-import {
-  doc,
-  setDoc,
-  getDoc,
-  collection,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { doc, setDoc, getDoc } from "firebase/firestore";
+import { Ionicons } from "@expo/vector-icons";
 
 import { auth, db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next"; // i18n
 import LSselector from "../../LSselector";
 
-// Importamos a lista de banimento
 import { BAN_PLAYER_IDS } from "../hosts";
 
 // --------------- Cores & Constantes ---------------
 const { width, height } = Dimensions.get("window");
-const BACKGROUND = "#1E1E1";
+const BACKGROUND = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
 const INPUT_BG = "#292929";
 const INPUT_BORDER = "#4D4D4D";
-const SWITCH_TRACK = "#555555";
-const SWITCH_THUMB = PRIMARY;
 const ACCENT = "#FF6F61";
 
-// Para animar layout no Android
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
@@ -86,10 +69,10 @@ function checkPasswordStrength(password: string) {
 }
 
 function getPasswordStrengthColor(strength: string): string {
-  if (strength === "Fraca") return "#E3350D"; // Vermelho
-  if (strength === "Média") return "#FFC107"; // Amarelo
-  if (strength === "Forte") return "#4CAF50"; // Verde
-  if (strength === "Muito Forte") return "#009688"; // Verde mais escuro
+  if (strength === "Fraca") return "#E3350D";
+  if (strength === "Média") return "#FFC107";
+  if (strength === "Forte") return "#4CAF50";
+  if (strength === "Muito Forte") return "#009688";
   return SECONDARY;
 }
 
@@ -99,7 +82,6 @@ function validateEmail(mail: string): boolean {
 }
 
 function validatePassword(pw: string): boolean {
-  // Ao menos 1 maiúscula, 1 minúscula, 1 dígito, 1 especial, >=8 chars
   const upper = /[A-Z]/.test(pw);
   const lower = /[a-z]/.test(pw);
   const digit = /\d/.test(pw);
@@ -121,6 +103,7 @@ export default function LoginScreen() {
   const [pin, setPin] = useState("");
   const [playerName, setPlayerName] = useState("");
 
+  // Booleans
   const [stayLogged, setStayLogged] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showPin, setShowPin] = useState(false);
@@ -135,18 +118,8 @@ export default function LoginScreen() {
   // Animação de logotipo
   const logoScale = useRef(new Animated.Value(1)).current;
 
-  // Modal de Configurações (Engrenagem)
-  const [adminModalVisible, setAdminModalVisible] = useState(false);
-
-  // Listas e seleções de cidades/ligas
-  const [cities, setCities] = useState<string[]>([]);
-  const [selectedCity, setSelectedCity] = useState<string>("");
-  const [leagues, setLeagues] = useState<any[]>([]);
-  const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
-
-  // Flags para expandir/ocultar listas
-  const [showCities, setShowCities] = useState(false);
-  const [showLeagues, setShowLeagues] = useState(false);
+  // Observação: removemos a engrenagem que mostra filtros de cidade/ligas
+  // conforme pedido ("retire a parte visual referente aos filtros")
 
   // --------------- Efeito de animação no logotipo ---------------
   useEffect(() => {
@@ -168,13 +141,13 @@ export default function LoginScreen() {
     ).start();
   }, [logoScale]);
 
-  // --------------- Checa AsyncStorage p/ ver se user quer permanecer logado ---------------
+  // --------------- Carrega a preferencia "stayLogged" do AsyncStorage ---------------
   useEffect(() => {
     (async () => {
       try {
         const stay = await AsyncStorage.getItem("@stayLogged");
         if (stay === "true") {
-          setStayLogged(true); // Atualiza o estado
+          setStayLogged(true);
         }
       } catch (error) {
         console.error("Erro ao carregar @stayLogged:", error);
@@ -182,12 +155,15 @@ export default function LoginScreen() {
     })();
   }, []);
 
-  // --------------- Observa estado do Auth ---------------
+  // --------------- Observa estado do Auth e cria "autoLogin" ---------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
         setLoading(true);
         try {
+          // Renovar o token Firebase
+          const firebaseToken = await user.getIdToken(true);
+
           // Buscar doc "login/{uid}"
           const docRef = doc(db, "login", user.uid);
           const snap = await getDoc(docRef);
@@ -213,12 +189,9 @@ export default function LoginScreen() {
             return;
           }
 
-          // === Verifica banimento ===
+          // Verifica ban
           if (BAN_PLAYER_IDS.includes(data.playerId)) {
-            // Exibe modal de ban
             setBanModalVisible(true);
-
-            // Força signOut pra não entrar
             await signOut(auth);
             setLoading(false);
             return;
@@ -231,19 +204,16 @@ export default function LoginScreen() {
           await AsyncStorage.setItem("@userId", data.playerId);
           await AsyncStorage.setItem("@userPin", data.pin);
           await AsyncStorage.setItem("@userName", docName);
+          await AsyncStorage.setItem("@firebaseUID", user.uid);
+          await AsyncStorage.setItem("@firebaseToken", firebaseToken);
 
-          // Armazena preferencia de stayLogged
           if (stayLogged) {
             await AsyncStorage.setItem("@stayLogged", "true");
           } else {
             await AsyncStorage.removeItem("@stayLogged");
           }
 
-          // Alerta de boas vindas
-          Alert.alert(
-            t("login.alerts.welcome"),
-            t("login.alerts.welcome") + `, ${docName}!`
-          );
+          Alert.alert(t("login.alerts.welcome"), `${t("login.alerts.welcome")}, ${docName}!`);
           router.push("/(tabs)/home");
         } catch (error) {
           console.error("Erro ao verificar autenticação:", error);
@@ -258,6 +228,23 @@ export default function LoginScreen() {
 
     return () => unsubscribe();
   }, [router, t, stayLogged]);
+
+  // --------------- Renova o token do Firebase a cada 55 minutos (se user estiver logado) ---------------
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        try {
+          const newToken = await currentUser.getIdToken(true);
+          await AsyncStorage.setItem("@firebaseToken", newToken);
+        } catch (err) {
+          console.log("Erro ao renovar token:", err);
+        }
+      }
+    }, 55 * 60 * 1000); // 55 min
+
+    return () => clearInterval(interval);
+  }, []);
 
   // --------------- Observa password p/ medir força (em signup) ---------------
   useEffect(() => {
@@ -283,11 +270,10 @@ export default function LoginScreen() {
     }
     try {
       setLoading(true);
-
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       console.log("Conta criada, UID=", cred.user.uid);
 
-      // Salva doc "login/{uid}"
+      // Salva doc "login/{uid}" no Firestore
       const docRef = doc(db, "login", cred.user.uid);
       await setDoc(docRef, {
         email,
@@ -299,11 +285,11 @@ export default function LoginScreen() {
 
       Alert.alert(
         t("login.alerts.signup_success", {
-          playerId: playerId,
-          pin: pin,
+          playerId,
+          pin,
         })
       );
-      // onAuthStateChanged vai redirecionar ao home
+      // onAuthStateChanged faz o resto
     } catch (err: any) {
       console.log("Erro no SignUp:", err);
       Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
@@ -354,74 +340,7 @@ export default function LoginScreen() {
     }
   }
 
-  // --------------- Funções do Modal de Liga ---------------
-  const openAdminModal = async () => {
-    setAdminModalVisible(true);
-    await fetchCities(); // Carrega cidades quando abrir modal
-  };
-
-  const closeAdminModal = () => {
-    setAdminModalVisible(false);
-    setShowCities(false);
-    setShowLeagues(false);
-  };
-
-  // Busca todas as cidades disponíveis na coleção "leagues"
-  const fetchCities = async () => {
-    try {
-      setLoading(true);
-      const snapshot = await getDocs(collection(db, "leagues"));
-      const citySet = new Set<string>();
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.city) {
-          citySet.add(data.city);
-        }
-      });
-      setCities(Array.from(citySet));
-    } catch (error) {
-      console.log("Erro ao buscar cidades:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Busca as ligas na cidade
-  const fetchLeaguesByCity = async (cityName: string) => {
-    try {
-      setLoading(true);
-      setSelectedCity(cityName);
-      setShowLeagues(false);
-
-      // Animação de layout (Android)
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-
-      const qCity = query(collection(db, "leagues"), where("city", "==", cityName));
-      const citySnapshot = await getDocs(qCity);
-
-      const leaguesList: any[] = [];
-      citySnapshot.forEach((doc) => {
-        leaguesList.push({
-          id: doc.id,
-          ...doc.data(),
-        });
-      });
-      setLeagues(leaguesList);
-    } catch (error) {
-      console.error("Erro ao buscar ligas por cidade:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Define a liga selecionada
-  const handleSelectLeague = async (leagueId: string) => {
-    setSelectedLeagueId(leagueId);
-    await AsyncStorage.setItem("@leagueId", leagueId);
-    Alert.alert("Liga Selecionada", `League ID: ${leagueId}`);
-  };
-
-  // --------------- Render ---------------
+  // --------------- Render Principal ---------------
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -435,7 +354,7 @@ export default function LoginScreen() {
 
   return (
     <ImageBackground
-      source={require("../../assets/images/background_login.jpg")} 
+      source={require("../../assets/images/background_login.jpg")}
       style={styles.background}
     >
       <KeyboardAvoidingView
@@ -443,7 +362,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Modal de Ban (caso banModalVisible = true) */}
+          {/* Modal de Ban */}
           <Modal
             animationType="fade"
             transparent={true}
@@ -469,136 +388,6 @@ export default function LoginScreen() {
               </View>
             </View>
           </Modal>
-
-          {/* Modal de Seleção de Liga e Idioma */}
-          <Modal
-            visible={adminModalVisible}
-            transparent
-            animationType="slide"
-            onRequestClose={closeAdminModal}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContainer}>
-                <Text style={styles.modalTitle}>{t("common.config")}</Text>
-
-                {/* Seletor de Idioma */}
-                <LSselector />
-
-                {/* Botão para expandir/ocultar cidades */}
-                <TouchableOpacity
-                  style={styles.expandButton}
-                  onPress={() => {
-                    LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-                    setShowCities(!showCities);
-                  }}
-                >
-                  <Text style={styles.expandButtonText}>
-                    {t("common.select_city")}
-                  </Text>
-                  <Ionicons
-                    name={showCities ? "chevron-up" : "chevron-down"}
-                    size={24}
-                    color={ACCENT}
-                  />
-                </TouchableOpacity>
-
-                {/* Lista de Cidades (com ícones) */}
-                {showCities && (
-                  <FlatList
-                    style={styles.flatList}
-                    data={cities}
-                    keyExtractor={(item) => item}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={styles.cityItem}
-                        onPress={() => {
-                          fetchLeaguesByCity(item);
-                          setShowLeagues(true);
-                        }}
-                      >
-                        <MaterialCommunityIcons
-                          name="map-marker"
-                          size={20}
-                          color={ACCENT}
-                          style={{ marginRight: 8 }}
-                        />
-                        <Text style={styles.cityItemText}>{item}</Text>
-                      </TouchableOpacity>
-                    )}
-                  />
-                )}
-
-                {/* Botão para expandir ligas */}
-                {selectedCity !== "" && (
-                  <TouchableOpacity
-                    style={styles.expandButton}
-                    onPress={() => {
-                      LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-                      // Se não tiver ligas ainda, já buscou no click da cidade.
-                      setShowLeagues(!showLeagues);
-                    }}
-                  >
-                    <Text style={styles.expandButtonText}>
-                      {selectedCity
-                        ? `${t("common.select_league")} (${selectedCity})`
-                        : t("common.select_league")}
-                    </Text>
-                    <Ionicons
-                      name={showLeagues ? "chevron-up" : "chevron-down"}
-                      size={24}
-                      color={ACCENT}
-                    />
-                  </TouchableOpacity>
-                )}
-
-                {/* Lista de Ligas */}
-                {showLeagues && (
-                  <FlatList
-                    style={styles.flatList}
-                    data={leagues}
-                    keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={[
-                          styles.leagueItem,
-                          {
-                            backgroundColor:
-                              selectedLeagueId === item.id ? ACCENT : DARKER(INPUT_BG),
-                          },
-                        ]}
-                        onPress={() => handleSelectLeague(item.id)}
-                      >
-                        <Ionicons
-                          name="ribbon"
-                          size={20}
-                          color={SECONDARY}
-                          style={{ marginRight: 8 }}
-                        />
-                        <Text style={styles.cityItemText}>
-                          {item.leagueName || "Sem Nome"}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  />
-                )}
-
-                {/* Botão fechar */}
-                <TouchableOpacity
-                  style={styles.closeModalButton}
-                  onPress={closeAdminModal}
-                >
-                  <Text style={styles.closeModalButtonText}>
-                    {t("common.close")}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Modal>
-
-          {/* Ícone de Engrenagem no topo direito */}
-          <TouchableOpacity style={styles.gearButton} onPress={openAdminModal}>
-            <Ionicons name="settings" size={32} color={SECONDARY} />
-          </TouchableOpacity>
 
           {/* Logo animada */}
           <Animated.Image
@@ -671,7 +460,7 @@ export default function LoginScreen() {
             </Text>
           )}
 
-          {/* ID, PIN e Nome (apenas no signup) */}
+          {/* ID, PIN e Nome (apenas signup) */}
           {mode === "signup" && (
             <>
               <Text style={styles.label}>{t("login.player_name_label")}</Text>
@@ -718,14 +507,14 @@ export default function LoginScreen() {
             </>
           )}
 
-          {/* Switch: Continuar Conectado */}
+          {/* Switch: Manter Conectado */}
           <View style={styles.switchRow}>
             <Text style={styles.switchText}>{t("login.stay_logged")} </Text>
             <Switch
               value={stayLogged}
               onValueChange={setStayLogged}
-              trackColor={{ false: SWITCH_TRACK, true: PRIMARY }}
-              thumbColor={stayLogged ? SWITCH_THUMB : "#ccc"}
+              trackColor={{ false: "#555", true: PRIMARY }}
+              thumbColor={stayLogged ? "#FFF" : "#ccc"}
             />
           </View>
 
@@ -735,7 +524,7 @@ export default function LoginScreen() {
               <Text style={styles.buttonText}>{t("login.signup_button")}</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={styles.button} onPress={handleSignIn}>
+            <TouchableOpacity style={styles.loginButton} onPress={handleSignIn}>
               <Text style={styles.buttonText}>{t("login.login_button")}</Text>
             </TouchableOpacity>
           )}
@@ -766,12 +555,11 @@ export default function LoginScreen() {
   );
 }
 
-// --------------- ESTILOS ---------------
 const styles = StyleSheet.create({
   background: {
     flex: 1,
-    width: width,
-    height: height,
+    width,
+    height,
     resizeMode: "cover",
   },
   loadingContainer: {
@@ -836,15 +624,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginRight: 8,
   },
-  button: {
-    backgroundColor: PRIMARY,
+  signupButton: {
+    backgroundColor: ACCENT,
     paddingVertical: 12,
     paddingHorizontal: 40,
     borderRadius: 8,
     marginTop: 5,
   },
-  signupButton: {
-    backgroundColor: ACCENT,
+  loginButton: {
+    backgroundColor: PRIMARY,
     paddingVertical: 12,
     paddingHorizontal: 40,
     borderRadius: 8,
@@ -867,8 +655,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     alignSelf: "center",
   },
-
-  // Ban Modal
   banOverlay: {
     flex: 1,
     justifyContent: "center",
@@ -910,109 +696,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
   },
-
-  // Modal Admin
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContainer: {
-    width: "85%",
-    backgroundColor: INPUT_BG,
-    padding: 16,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  modalTitle: {
-    color: SECONDARY,
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 12,
-  },
-
-  // Botão de expansão (cidades/ligas)
-  expandButton: {
-    flexDirection: "row",
-    backgroundColor: "#444444",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-    marginTop: 10,
-    width: "100%",
-  },
-  expandButtonText: {
-    color: ACCENT,
-    fontWeight: "600",
-    fontSize: 16,
-  },
-  flatList: {
-    width: "100%",
-    maxHeight: 150,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-
-  cityItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: DARKER(INPUT_BG),
-    padding: 10,
-    marginVertical: 4,
-    borderRadius: 6,
-  },
-  cityItemText: {
-    color: SECONDARY,
-    fontSize: 15,
-  },
-  leagueItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    marginVertical: 4,
-    borderRadius: 6,
-  },
-
-  closeModalButton: {
-    backgroundColor: PRIMARY,
-    marginTop: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  closeModalButtonText: {
-    color: SECONDARY,
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-  gearButton: {
-    position: "absolute",
-    top: 40,
-    right: 20,
-    zIndex: 10,
-  },
 });
-
-// Helper para escurecer cor
-function DARKER(hexColor: string) {
-  const amt = -20;
-  let num = parseInt(hexColor.replace("#", ""), 16);
-  let r = (num >> 16) + amt;
-  let b = ((num >> 8) & 0x00ff) + amt;
-  let g = (num & 0x0000ff) + amt;
-
-  const newColor =
-    "#" +
-    (
-      0x1000000 +
-      (r < 255 ? (r < 0 ? 0 : r) : 255) * 0x10000 +
-      (b < 255 ? (b < 0 ? 0 : b) : 255) * 0x100 +
-      (g < 255 ? (g < 0 ? 0 : g) : 255)
-    )
-      .toString(16)
-      .slice(1);
-  return newColor;
-}
