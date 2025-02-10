@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -11,48 +11,36 @@ import {
   ActivityIndicator,
   Animated,
   Linking,
-  Easing,
   Modal,
   FlatList,
   LayoutAnimation,
   UIManager,
   Platform,
+  Easing,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
+import { auth, db } from "../../lib/firebaseConfig";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import * as Animatable from "react-native-animatable";
+import { Audio } from "expo-av";
+
+// Mantemos a importação e a lógica original de Titles e Stats (não alteramos)
+import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 import {
   collection,
-  collectionGroup,
   doc,
   getDoc,
   getDocs,
   query,
   where,
-  orderBy,
   limit,
-  startAfter
+  orderBy,
+  startAfter,
 } from "firebase/firestore";
-import { auth, db } from "../../lib/firebaseConfig";
-import titles, { TitleItem, PlayerStats } from "../titlesConfig";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
-import * as Animatable from "react-native-animatable";
 
-import { fetchAllMatches, MatchData } from "../../lib/matchService"; // Importa a função
-
-interface RivalData {
-  rivalId: string;
-  rivalName: string;
-  matches: number;
-  userWins: number;
-  rivalWins: number;
-  lastWinner: "user" | "rival" | "empate" | null;
-  wrPercentage: number;
-}
-
-interface TitleWithProgress extends TitleItem {
-  progress: number;
-  locked: boolean;
-}
+// Lógica de partidas sem mexer no core
+import { fetchAllMatches, MatchData } from "../../lib/matchService";
 
 const avatarList = [
   { id: 1, uri: require("../../assets/images/avatar/avatar1.jpg") },
@@ -65,28 +53,34 @@ const avatarList = [
   { id: 8, uri: require("../../assets/images/avatar/avatar8.jpg") },
 ];
 
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Interfaces originais
+interface RivalData {
+  rivalId: string;
+  rivalName: string;
+  matches: number;
+  userWins: number;
+  rivalWins: number;
+  lastWinner: "user" | "rival" | "empate" | null;
+  wrPercentage: number;
+}
+interface TitleWithProgress extends TitleItem {
+  progress: number;
+  locked: boolean;
 }
 
 export default function HomeScreen() {
   const router = useRouter();
 
   const [matches, setMatches] = useState<MatchData[]>([]);
-
-  // Loading e Cálculos
   const [loading, setLoading] = useState(true);
   const [isCalculating, setIsCalculating] = useState(false);
-
-  // Usuário
   const [userId, setUserId] = useState("");
   const [userName, setUserName] = useState("Jogador");
   const [avatarUri, setAvatarUri] = useState<any>(null);
-
-  // Stats do jogador
   const [stats, setStats] = useState<PlayerStats>({
     wins: 0,
     losses: 0,
@@ -96,46 +90,40 @@ export default function HomeScreen() {
     tournamentPlacements: [],
   });
 
-  // Títulos + progresso
+  // Títulos (não alterar lógica)
   const [closestTitles, setClosestTitles] = useState<TitleWithProgress[]>([]);
 
   // Rival
   const [rivalInfo, setRivalInfo] = useState<RivalData | null>(null);
-
-  // Modal de Rival (quando muda)
   const [rivalModalVisible, setRivalModalVisible] = useState(false);
 
-  // Modal de Coleções
+  // Som de batalha para Rival Modal
+  const battleMusicRef = useRef<Audio.Sound | null>(null);
+
+  // Modal de Coleções (sem mexer na lógica, apenas estilo)
   const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
   const [validCollections, setValidCollections] = useState<any[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
 
-  // Modal de Filtro
+  // Melhor Modal de Filtro
   const [filterModalVisible, setFilterModalVisible] = useState(false);
-
-  // Listas e seleções de Cidade/Liga
+  const [showMosaicCities, setShowMosaicCities] = useState(false);
+  const [showMosaicLeagues, setShowMosaicLeagues] = useState(false);
   const [cities, setCities] = useState<string[]>([]);
   const [leagues, setLeagues] = useState<any[]>([]);
-
-  // Estados de exibição
-  const [showCities, setShowCities] = useState(false);
-  const [showLeagues, setShowLeagues] = useState(false);
-
-  // Valores escolhidos
   const [selectedCity, setSelectedCity] = useState<string>("");
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
+  const [fetchingLeagues, setFetchingLeagues] = useState(false);
+  const [showAllLeagues, setShowAllLeagues] = useState(false);
 
-  
+  // Modal de Boas-Vindas (substitui o Alert)
+  const [welcomeModalVisible, setWelcomeModalVisible] = useState(false);
 
-  // ------------------------------------------------
-  // Efeito Inicial (carregar user e stats + filter)
-  // ------------------------------------------------
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
 
-        // Verifica user
         const storedId = await AsyncStorage.getItem("@userId");
         const storedName = await AsyncStorage.getItem("@userName");
         if (!storedId) {
@@ -145,7 +133,6 @@ export default function HomeScreen() {
         setUserId(storedId);
         setUserName(storedName || "Jogador");
 
-        // Carrega avatar
         const storedAvatar = await AsyncStorage.getItem("@userAvatar");
         if (storedAvatar) {
           const avId = parseInt(storedAvatar, 10);
@@ -153,26 +140,26 @@ export default function HomeScreen() {
           if (found) setAvatarUri(found.uri);
         }
 
-        // Usa a função centralizada para buscar as partidas, respeitando o filtro definido na Home
+        // Lê se devemos mostrar modal de boas-vindas
+        const showWelcome = await AsyncStorage.getItem("@showWelcomeModal");
+        if (showWelcome === "true") {
+          setWelcomeModalVisible(true);
+          await AsyncStorage.removeItem("@showWelcomeModal");
+        }
+
         const allMatches = await fetchAllMatches();
-        // Filtra somente as partidas do usuário
         const userMatches = allMatches.filter(
           (m) => m.player1_id === storedId || m.player2_id === storedId
         );
         setMatches(userMatches);
-        
-        // Stats
+
         const newStats = computeBasicStats(storedId, userMatches);
         setStats(newStats);
-
-        // Calcular Títulos
         computeTitlesProgress(newStats);
 
-        // Calcular Rival
         const newRival = await computeBiggestRival(storedId, userMatches);
         await handleRivalDetection(newRival);
       } catch (err) {
-        console.log("Erro:", err);
         Alert.alert("Erro", "Não foi possível carregar dados.");
       } finally {
         setLoading(false);
@@ -180,102 +167,16 @@ export default function HomeScreen() {
     })();
   }, [router]);
 
-  // ---------------------------------------------
-  // FUNÇÃO PRINCIPAL DE BUSCA COM FILTRO
-  // ---------------------------------------------
-  async function fetchAllMatches(): Promise<MatchData[]> {
-    try {
-      const storedUserId = await AsyncStorage.getItem("@userId");
-      const filterType = await AsyncStorage.getItem("@filterType"); // "all"|"city"|"league"
-      const cityStored = await AsyncStorage.getItem("@selectedCity");
-      const leagueStored = await AsyncStorage.getItem("@leagueId");
-
-      if (!storedUserId) {
-        console.warn("⚠️ Nenhum usuário logado.");
-        return [];
-      }
-
-      // Se for "all", buscamos TODAS as ligas.
-      // Se for "city", buscamos TODAS as ligas daquela cidade.
-      // Se for "league", buscamos APENAS a liga específica.
-
-      // 1) Coletamos a lista de ligas que atenderá o filtro
-      let leaguesToFetch: string[] = [];
-
-      if (filterType === "all" || !filterType) {
-        // TUDO: Pega todas as ligas
-        const leaguesSnap = await getDocs(collection(db, "leagues"));
-        leaguesSnap.forEach((docSnap) => {
-          leaguesToFetch.push(docSnap.id);
-        });
-      } else if (filterType === "city" && cityStored) {
-        // CIDADE: filtra todas as ligas que contenham "city = cityStored"
-        const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
-        const citySnapshot = await getDocs(qCity);
-        citySnapshot.forEach((docSnap) => {
-          leaguesToFetch.push(docSnap.id);
-        });
-      } else if (filterType === "league" && leagueStored) {
-        // LIGA: apenas essa
-        leaguesToFetch.push(leagueStored);
-      } else {
-        // Se nenhum caso se encaixa, retorna vazio
-        console.warn("⚠️ Filtro inválido ou não definido. Retornando vazio.");
-        return [];
-      }
-
-      if (leaguesToFetch.length === 0) {
-        console.log("Nenhuma liga encontrada para esse filtro.");
-        return [];
-      }
-
-      let allMatches: MatchData[] = [];
-
-      // 2) Para cada liga, pega torneios -> rounds -> matches do usuário
-      for (const leagueId of leaguesToFetch) {
-        const tournamentsRef = collection(db, `leagues/${leagueId}/tournaments`);
-        const tournamentsSnap = await getDocs(tournamentsRef);
-
-        if (tournamentsSnap.empty) continue;
-
-        for (const tournamentDoc of tournamentsSnap.docs) {
-          const tournamentId = tournamentDoc.id;
-          const roundsRef = collection(
-            db,
-            `leagues/${leagueId}/tournaments/${tournamentId}/rounds`
-          );
-          const roundsSnap = await getDocs(roundsRef);
-
-          if (roundsSnap.empty) continue;
-
-          for (const roundDoc of roundsSnap.docs) {
-            const roundId = roundDoc.id;
-            const matchesRef = collection(
-              db,
-              `leagues/${leagueId}/tournaments/${tournamentId}/rounds/${roundId}/matches`
-            );
-            const matchesSnap = await getDocs(matchesRef);
-
-            if (matchesSnap.empty) continue;
-
-            matchesSnap.forEach((docSnap) => {
-              const matchData = docSnap.data() as MatchData;
-              // Vamos trazer todas as partidas, mas o computeBasicStats vai filtrar as do usuário
-              allMatches.push({ ...matchData, id: docSnap.id });
-            });
-          }
-        }
-      }
-
-      console.log(`Total de partidas obtidas (filtro: ${filterType}):`, allMatches.length);
-      return allMatches;
-    } catch (error) {
-      console.error("🔥 Erro ao buscar partidas:", error);
-      return [];
+  // Quando Rival Modal fica VISÍVEL, toca a música em loop; quando fecha, para
+  useEffect(() => {
+    if (rivalModalVisible) {
+      loadBattleMusic();
+    } else {
+      stopBattleMusic();
     }
-  }
+  }, [rivalModalVisible]);
 
-  // ----------------- STATS --------------------
+  // Lógica original para stats
   function computeBasicStats(uId: string, userMatches: MatchData[]): PlayerStats {
     let wins = 0,
       losses = 0,
@@ -299,7 +200,6 @@ export default function HomeScreen() {
           draws++;
           break;
         case 10:
-          // WO é derrota de quem faltou, então se for user, conta como derrota
           isP1 ? losses++ : wins++;
           break;
       }
@@ -315,29 +215,24 @@ export default function HomeScreen() {
     };
   }
 
+  // Títulos (mantemos sem mudanças na lógica)
   async function computeTitlesProgress(st: PlayerStats) {
     setIsCalculating(true);
-
     const all = titles.map((t) => {
       const locked = !t.condition(st);
       const progress = calcProgress(t, st);
       return { ...t, locked, progress };
     });
-
-    // Filtra apenas os bloqueados, ordena por quem está mais próximo
     const lockedOnly = all.filter((tw) => tw.locked);
     lockedOnly.sort((a, b) => b.progress - a.progress);
-
     const top3 = lockedOnly.slice(0, 3);
     setClosestTitles(top3);
-
     setIsCalculating(false);
   }
 
   function calcProgress(title: TitleItem, stats: PlayerStats): number {
     if (title.condition(stats)) return 1;
     let progress = 0;
-
     switch (title.id) {
       case 101:
         progress = stats.wins / 20;
@@ -393,11 +288,8 @@ export default function HomeScreen() {
     return Math.min(progress, 1);
   }
 
-  // ----------------- RIVAL --------------------
-  async function computeBiggestRival(
-    uId: string,
-    userMatches: MatchData[]
-  ): Promise<RivalData | null> {
+  // Rival (não mexemos na lógica, só estilo)
+  async function computeBiggestRival(uId: string, userMatches: MatchData[]) {
     const rivalsMap: Record<
       string,
       {
@@ -407,14 +299,15 @@ export default function HomeScreen() {
         lastWinner: "user" | "rival" | "empate";
       }
     > = {};
-  
-    let leagueId = await AsyncStorage.getItem("@leagueId"); // Liga atual selecionada
-  
+
+    let topRivalId = "";
+    let topMatches = 0;
+
     userMatches.forEach((mm) => {
       const isP1 = mm.player1_id === uId;
       const rId = isP1 ? mm.player2_id : mm.player1_id;
       if (!rId || rId === "N/A") return;
-  
+
       if (!rivalsMap[rId]) {
         rivalsMap[rId] = {
           matches: 0,
@@ -424,40 +317,37 @@ export default function HomeScreen() {
         };
       }
       rivalsMap[rId].matches += 1;
-  
+
       const outcome = mm.outcomeNumber || 0;
       if (outcome === 1) {
         if (isP1) {
-          rivalsMap[rId].userWins += 1;
+          rivalsMap[rId].userWins++;
           rivalsMap[rId].lastWinner = "user";
         } else {
-          rivalsMap[rId].rivalWins += 1;
+          rivalsMap[rId].rivalWins++;
           rivalsMap[rId].lastWinner = "rival";
         }
       } else if (outcome === 2) {
         if (isP1) {
-          rivalsMap[rId].rivalWins += 1;
+          rivalsMap[rId].rivalWins++;
           rivalsMap[rId].lastWinner = "rival";
         } else {
-          rivalsMap[rId].userWins += 1;
+          rivalsMap[rId].userWins++;
           rivalsMap[rId].lastWinner = "user";
         }
       } else if (outcome === 3) {
         rivalsMap[rId].lastWinner = "empate";
       } else if (outcome === 10) {
         if (isP1) {
-          rivalsMap[rId].rivalWins += 1;
+          rivalsMap[rId].rivalWins++;
           rivalsMap[rId].lastWinner = "rival";
         } else {
-          rivalsMap[rId].userWins += 1;
+          rivalsMap[rId].userWins++;
           rivalsMap[rId].lastWinner = "user";
         }
       }
     });
-  
-    let topRivalId = "";
-    let topMatches = 0;
-  
+
     for (const rid of Object.keys(rivalsMap)) {
       if (rivalsMap[rid].matches > topMatches) {
         topMatches = rivalsMap[rid].matches;
@@ -465,18 +355,18 @@ export default function HomeScreen() {
       }
     }
     if (!topRivalId) return null;
-  
+
     const data = rivalsMap[topRivalId];
-    const userWins = data.userWins;
     const totalMatches = data.matches;
+    const userWins = data.userWins;
     const wr = totalMatches > 0 ? (userWins / totalMatches) * 100 : 0;
-  
-    // ⚠️ Agora buscamos o nome do rival corretamente dentro da liga correta!
+
+    const leagueId = await AsyncStorage.getItem("@leagueId");
     const rivalName = await getPlayerName(leagueId || "", topRivalId);
-  
+
     return {
       rivalId: topRivalId,
-      rivalName: rivalName,
+      rivalName,
       matches: totalMatches,
       userWins,
       rivalWins: data.rivalWins,
@@ -485,40 +375,31 @@ export default function HomeScreen() {
     };
   }
 
-
-  async function getPlayerName(leagueId: string, playerId: string): Promise<string> {
-  if (!playerId) return `User ${playerId}`;
-
-  try {
-    if (leagueId && leagueId !== "all") {
-      // 🔹 Caso normal: buscar nome dentro da liga especificada
-      const playerRef = doc(db, `leagues/${leagueId}/players/${playerId}`);
-      const playerSnap = await getDoc(playerRef);
-      if (playerSnap.exists()) {
-        const data = playerSnap.data();
-        return data?.fullname || `User ${playerId}`;
-      }
-    } else {
-      // 🔹 Caso especial: Filtro "all" → buscar jogador em TODAS as ligas
-      const leaguesSnap = await getDocs(collection(db, "leagues"));
-      for (const leagueDoc of leaguesSnap.docs) {
-        const leagueId = leagueDoc.id;
+  async function getPlayerName(leagueId: string, playerId: string) {
+    if (!playerId) return `User ${playerId}`;
+    try {
+      if (leagueId && leagueId !== "all") {
         const playerRef = doc(db, `leagues/${leagueId}/players/${playerId}`);
         const playerSnap = await getDoc(playerRef);
         if (playerSnap.exists()) {
           const data = playerSnap.data();
           return data?.fullname || `User ${playerId}`;
         }
+      } else {
+        const leaguesSnap = await getDocs(collection(db, "leagues"));
+        for (const leagueDoc of leaguesSnap.docs) {
+          const lgId = leagueDoc.id;
+          const playerRef = doc(db, `leagues/${lgId}/players/${playerId}`);
+          const playerSnap = await getDoc(playerRef);
+          if (playerSnap.exists()) {
+            const data = playerSnap.data();
+            return data?.fullname || `User ${playerId}`;
+          }
+        }
       }
-    }
-  } catch (error) {
-    console.error(`Erro ao buscar nome do jogador ${playerId}:`, error);
+    } catch {}
+    return `User ${playerId}`;
   }
-
-  return `User ${playerId}`;
-}
-
-  
 
   async function handleRivalDetection(newRival: RivalData | null) {
     if (!newRival) {
@@ -527,59 +408,67 @@ export default function HomeScreen() {
     }
     const oldRivalId = await AsyncStorage.getItem("@lastRivalId");
     setRivalInfo(newRival);
-
     if (oldRivalId !== newRival.rivalId) {
       setRivalModalVisible(true);
       await AsyncStorage.setItem("@lastRivalId", newRival.rivalId);
     }
   }
 
+  // Música de fundo (loop) pro Rival
+  async function loadBattleMusic() {
+    if (battleMusicRef.current) {
+      return;
+    }
+    const { sound } = await Audio.Sound.createAsync(
+      require("../../assets/images/sounds/battle_music.mp3"), // 14s
+      { isLooping: true, volume: 1.0 }
+    );
+    battleMusicRef.current = sound;
+    await battleMusicRef.current.playAsync();
+  }
+
+  async function stopBattleMusic() {
+    if (battleMusicRef.current) {
+      await battleMusicRef.current.stopAsync();
+      await battleMusicRef.current.unloadAsync();
+      battleMusicRef.current = null;
+    }
+  }
+
   function getRandomRivalPhrase(result: "user" | "rival" | "empate") {
     const phrases = {
       user: [
-        "Tá voando, hein?! Venceu com estilo! 🚀🔥",
-        "Foi um massacre! O rival nem viu de onde veio. 🎯😎",
-        "Deu aula! O rival ainda tá tentando entender o que aconteceu. 📚😂",
-        "Vitória confirmada! Dá até pra soltar aquele 'EZ'. 😏",
-        "Boa! O rival já tá procurando tutorial no YouTube. 🎥😂",
+        "Você demoliu o rival!",
+        "Vitória Explosiva!",
+        "Rival sem chances!",
       ],
       rival: [
-        "Eita... levou aquela coça! Tenta de novo! 😂",
-        "O rival mandou um 'GG EZ'... não vai deixar barato, né? 😡🔥",
-        "Bom... pelo menos agora você sabe como perder com estilo. 😆",
-        "Essa foi feia, hein... Mas é errando que se aprende! Ou não. 🤷‍♂️",
-        "A derrota veio, mas o drama é opcional. Levanta e luta de novo! 🥋🔥",
+        "O rival dominou a partida!",
+        "Derrota amarga...",
+        "Batalha dura, mas o rival levou!",
       ],
       empate: [
-        "Dois titãs colidiram... e ninguém venceu! ⚡🤜🤛",
-        "Empate... Que tal um desempate pra ver quem é o verdadeiro campeão? 🏆",
-        "Nada definido ainda! Próxima batalha decide tudo. 🔥",
-        "Empate?! Dá pra aceitar isso? Bora revanche AGORA! 🤨",
-        "Equilíbrio total! Um verdadeiro duelo de gigantes. 💥",
+        "Ninguém venceu!",
+        "Equilíbrio total!",
+        "Empate dramático!",
       ],
     };
-    const chosenPhrases = phrases[result] || [];
-    return chosenPhrases[Math.floor(Math.random() * chosenPhrases.length)];
+    const chosen = phrases[result] || [];
+    return chosen[Math.floor(Math.random() * chosen.length)];
   }
 
-  // ----------------- BOTÕES --------------------
-  async function handleLogout() {
-    try {
-      await auth.signOut();
-      await AsyncStorage.removeItem("@userId");
-      await AsyncStorage.removeItem("@userName");
+  // Botões no fundo
+  function handleLogout() {
+    auth.signOut().then(() => {
+      AsyncStorage.removeItem("@userId");
+      AsyncStorage.removeItem("@userName");
       router.replace("/(auth)/login");
-    } catch (err) {
-      Alert.alert("Erro", "Falha ao sair da conta");
-      console.log(err);
-    }
+    });
   }
 
   function handleDonate() {
     const link = "https://picpay.me/marco.macedo10/0.5";
-    Alert.alert("Doar", "Abrindo link de doação...", [
-      { text: "OK", onPress: () => Linking.openURL(link) },
-    ]);
+    Linking.openURL(link).catch(() => {});
   }
 
   function handleOpenCollections() {
@@ -598,165 +487,106 @@ export default function HomeScreen() {
         );
         setValidCollections(validSets);
       }
-    } catch (error) {
-      console.error("Erro ao carregar coleções:", error);
-    } finally {
-      setLoadingCollections(false);
-    }
+    } catch (error) {}
+    setLoadingCollections(false);
   }
 
   function closeCollectionsModal() {
     setCollectionsModalVisible(false);
   }
 
-  // -------------- MODAL DE FILTRO --------------
-  const openFilterModal = () => {
+  // Modal de Filtro (visual)
+  function openFilterModal() {
     setFilterModalVisible(true);
     fetchCities();
-  };
+  }
 
-  const closeFilterModal = () => {
+  function closeFilterModal() {
     setFilterModalVisible(false);
-    setShowCities(false);
-    setShowLeagues(false);
-  };
+    setShowMosaicCities(false);
+    setShowMosaicLeagues(false);
+  }
 
   async function fetchCities() {
     try {
-      setLoading(true);
+      setFetchingLeagues(true);
       const snapshot = await getDocs(collection(db, "leagues"));
       const citySet = new Set<string>();
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.city) {
-          citySet.add(data.city);
-        }
+        if (data.city) citySet.add(data.city);
       });
       setCities(Array.from(citySet));
-    } catch (error) {
-      console.error("Erro ao buscar cidades:", error);
-    } finally {
-      setLoading(false);
-    }
+    } catch {}
+    setFetchingLeagues(false);
   }
 
   async function fetchLeaguesByCity(cityName: string) {
     try {
-      setLoading(true);
       setSelectedCity(cityName);
-      setShowLeagues(false);
-
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-
+      setFetchingLeagues(true);
       const qCity = query(collection(db, "leagues"), where("city", "==", cityName));
       const citySnapshot = await getDocs(qCity);
-
       const leaguesList: any[] = [];
-      citySnapshot.forEach((doc) => {
-        leaguesList.push({
-          id: doc.id,
-          ...doc.data(),
-        });
+      citySnapshot.forEach((docSnap) => {
+        leaguesList.push({ id: docSnap.id, ...docSnap.data() });
       });
       setLeagues(leaguesList);
-    } catch (error) {
-      console.error("Erro ao buscar ligas por cidade:", error);
-    } finally {
-      setLoading(false);
-    }
+    } catch {}
+    setFetchingLeagues(false);
   }
 
-  async function handleSelectLeague(leagueId: string) {
-    setSelectedLeagueId(leagueId);
+  function handleSelectLeague(leagueId: string) {
+    setSelectedLeagueId((prev) => (prev === leagueId ? "" : leagueId));
   }
 
-  // -------------- SALVAR FILTRO ---------------
   async function handleSaveFilter() {
     try {
-      // 3 modos: "all", "city", "league"
-      if (!selectedCity && !selectedLeagueId) {
-        // Se não escolheu nada, assumimos "All"
+      if (showAllLeagues) {
         await AsyncStorage.setItem("@filterType", "all");
         await AsyncStorage.removeItem("@selectedCity");
         await AsyncStorage.removeItem("@leagueId");
       } else if (selectedCity && !selectedLeagueId) {
-        // Filtro por CIDADE
         await AsyncStorage.setItem("@filterType", "city");
         await AsyncStorage.setItem("@selectedCity", selectedCity);
         await AsyncStorage.removeItem("@leagueId");
       } else if (selectedLeagueId) {
-        // Filtro por LIGA
         await AsyncStorage.setItem("@filterType", "league");
         await AsyncStorage.setItem("@leagueId", selectedLeagueId);
-        // city pode ou não estar definido, mas nesse caso,
-        // iremos ignorar city. Então limpamos pra evitar confusão:
         await AsyncStorage.removeItem("@selectedCity");
+      } else {
+        await AsyncStorage.setItem("@filterType", "all");
+        await AsyncStorage.removeItem("@selectedCity");
+        await AsyncStorage.removeItem("@leagueId");
       }
 
-      // Fecha modal
       setFilterModalVisible(false);
 
-      // Recarrega partidas:
       setLoading(true);
       const newMatches = await fetchAllMatches();
-
-      // Filtra partidas do usuário
       const userMatches = newMatches.filter(
         (m) => m.player1_id === userId || m.player2_id === userId
       );
       const newStats = computeBasicStats(userId, userMatches);
       setStats(newStats);
       computeTitlesProgress(newStats);
-
       const newRival = await computeBiggestRival(userId, userMatches);
       await handleRivalDetection(newRival);
-
       setMatches(newMatches);
-    } catch (error) {
-      console.error("Erro ao salvar filtro:", error);
-      Alert.alert("Erro", "Falha ao salvar filtro.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // -------------- BOTÃO "TUDO" --------------
-  async function handleSelectAllFilter() {
-    // Limpa tudo e seta filterType = "all"
-    setSelectedCity("");
-    setSelectedLeagueId("");
-    setShowCities(false);
-    setShowLeagues(false);
-    await AsyncStorage.setItem("@filterType", "all");
-    await AsyncStorage.removeItem("@selectedCity");
-    await AsyncStorage.removeItem("@leagueId");
-
-    setFilterModalVisible(false);
-
-    // Recarrega
-    setLoading(true);
-    const newMatches = await fetchAllMatches();
-
-    const userMatches = newMatches.filter(
-      (m) => m.player1_id === userId || m.player2_id === userId
-    );
-    const newStats = computeBasicStats(userId, userMatches);
-    setStats(newStats);
-    computeTitlesProgress(newStats);
-
-    const newRival = await computeBiggestRival(userId, userMatches);
-    await handleRivalDetection(newRival);
-
-    setMatches(newMatches);
+    } catch {}
     setLoading(false);
   }
 
-  // ============= RENDER PRINCIPAL =============
+  const total = stats.matchesTotal;
+  const wr = total > 0 ? ((stats.wins / total) * 100).toFixed(1) : "0";
+  const defaultAvatar = require("../../assets/images/avatar/image.jpg");
+  const avatarSource = avatarUri || defaultAvatar;
+
   if (loading) {
     return (
       <View style={styles.loaderContainer}>
         <Animatable.Text
-          style={{ color: "#E3350D", fontSize: 24, fontWeight: "bold" }}
+          style={styles.loadingText}
           animation="pulse"
           easing="ease-out"
           iterationCount="infinite"
@@ -767,23 +597,52 @@ export default function HomeScreen() {
     );
   }
 
-  const total = stats.matchesTotal;
-  const wr = total > 0 ? ((stats.wins / total) * 100).toFixed(1) : "0";
-  const defaultAvatar = require("../../assets/images/avatar/image.jpg");
-  const avatarSource = avatarUri || defaultAvatar;
-
   return (
     <View style={{ flex: 1, backgroundColor: "#1E1E1E" }}>
-      {/* HEADER */}
+      {/* Modal de Boas-Vindas */}
+      <Modal
+        visible={welcomeModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setWelcomeModalVisible(false)}
+      >
+        <View style={styles.welcomeOverlay}>
+          <Animatable.View
+            style={styles.welcomeContainer}
+            animation="fadeInUp"
+            duration={700}
+          >
+            <Image
+              source={require("../../assets/images/fundos/welcome_bg.jpg")}
+              style={styles.welcomeImage}
+              resizeMode="contain"
+            />
+            <Text style={styles.welcomeText}>
+              Bem-vindo, {userName}!
+            </Text>
+            <TouchableOpacity
+              style={styles.closeWelcomeButton}
+              onPress={() => setWelcomeModalVisible(false)}
+            >
+              <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                Fechar
+              </Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </View>
+      </Modal>
+
+      {/* Cabeçalho */}
       <View style={styles.header}>
         <View style={styles.userInfo}>
           <Image source={avatarSource} style={styles.avatar} />
           <Text style={styles.userName}>{userName}</Text>
         </View>
 
-        {/* Ícone de Filtro no canto direito */}
-        <TouchableOpacity style={styles.gearButton} onPress={openFilterModal}>
-          <Ionicons name="settings" size={28} color="#E3350D" />
+        {/* Botão LIGAS em vez da engrenagem */}
+        <TouchableOpacity style={styles.ligasButton} onPress={openFilterModal}>
+          <MaterialCommunityIcons name="earth" size={20} color="#FFF" />
+          <Text style={styles.ligasButtonText}>Ligas</Text>
         </TouchableOpacity>
       </View>
 
@@ -792,7 +651,7 @@ export default function HomeScreen() {
         style={styles.backgroundImage}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* STATS */}
+          {/* Stats */}
           <View style={styles.statsContainer}>
             {renderStatCard("Vitórias", stats.wins, "trophy", "#E3350D", 100)}
             {renderStatCard("Derrotas", stats.losses, "skull", "#fff", 150)}
@@ -808,45 +667,43 @@ export default function HomeScreen() {
             )}
           </View>
 
-          {/* RIVAL CARD */}
+          {/* Rival Card */}
           {rivalInfo && (
             <Animatable.View
               style={styles.rivalCard}
               animation="fadeInDown"
-              delay={350}
+              delay={400}
             >
-              <MaterialCommunityIcons
-                name="sword-cross"
-                size={30}
-                color="#E3350D"
-              />
-              <Animatable.Text
-                animation="pulse"
-                iterationCount="infinite"
-                style={styles.rivalTitle}
-              >
-                Rival Atual
-              </Animatable.Text>
-
+              <View style={styles.rivalCardHeader}>
+                <MaterialCommunityIcons name="sword-cross" size={26} color="#E3350D" />
+                <Text style={styles.rivalTitle}>Rival Atual</Text>
+              </View>
+              <View style={styles.vsRow}>
+                <Animatable.Image
+                  source={require("../../assets/images/lotties/versus.jpg")}
+                  style={styles.vsIcon}
+                  animation="pulse"
+                  easing="ease-in-out"
+                  iterationCount="infinite"
+                />
+              </View>
               <View style={styles.rivalBody}>
                 <Text style={styles.rivalName}>{rivalInfo.rivalName}</Text>
                 <Text style={styles.rivalStats}>
-                  Partidas: {rivalInfo.matches} | WR:{" "}
-                  {rivalInfo.wrPercentage.toFixed(1)}%
+                  Partidas: {rivalInfo.matches} | WR: {rivalInfo.wrPercentage.toFixed(1)}%
                 </Text>
                 <Text style={[styles.rivalStats, { textAlign: "center" }]}>
-                  Última Partida:{" "}
-                  {getRandomRivalPhrase(rivalInfo.lastWinner || "empate")}
+                  Última Batalha: {getRandomRivalPhrase(rivalInfo.lastWinner || "empate")}
                 </Text>
               </View>
             </Animatable.View>
           )}
 
-          {/* TÍTULOS + PROGRESS */}
+          {/* Títulos */}
           <Animatable.View
             animation="fadeInUp"
             style={styles.titlesContainer}
-            delay={400}
+            delay={450}
           >
             <Text style={styles.titlesHeader}>Títulos Próximos</Text>
             {isCalculating ? (
@@ -867,31 +724,73 @@ export default function HomeScreen() {
           </Animatable.View>
         </ScrollView>
 
-        {/* BOTÕES NO FUNDO */}
+        {/* Botões no rodapé */}
         <View style={styles.bottomButtons}>
-          <TouchableOpacity
-            style={styles.validCollectionsButton}
-            onPress={handleOpenCollections}
-          >
-            <MaterialCommunityIcons name={"book"} size={20} color="#FFF" />
+          <TouchableOpacity style={styles.validCollectionsButton} onPress={handleOpenCollections}>
+            <MaterialCommunityIcons name="book" size={20} color="#FFF" />
             <Text style={[styles.bottomButtonText, { color: "#FFF", marginLeft: 6 }]}>
               Coleções Válidas
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.donateButton} onPress={handleDonate}>
-            <MaterialCommunityIcons name={"hand-coin"} size={20} color="#E3350D" />
-            <Text style={[styles.bottomButtonText, { color: "#E3350D" }]}>Doar</Text>
+            <MaterialCommunityIcons name="hand-coin" size={20} color="#E3350D" />
+            <Text style={[styles.bottomButtonText, { color: "#E3350D" }]}>
+              Doar
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <MaterialCommunityIcons name={"logout"} size={20} color="#FFF" />
-            <Text style={[styles.bottomButtonText, { color: "#FFF" }]}>Sair</Text>
+            <MaterialCommunityIcons name="logout" size={20} color="#FFF" />
+            <Text style={[styles.bottomButtonText, { color: "#FFF", marginLeft: 6 }]}>
+              Sair
+            </Text>
           </TouchableOpacity>
         </View>
-      </ImageBackground>
+        </ImageBackground>
 
-      {/* MODAL DE COLEÇÕES VÁLIDAS */}
+
+      {/* Modal de Rival Aprimorado */}
+      <Modal
+        visible={rivalModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setRivalModalVisible(false)}
+      >
+        <View style={styles.rivalModalOverlay}>
+          <Animatable.View
+            style={styles.rivalModalContainer}
+            animation="zoomIn"
+            duration={700}
+          >
+            <View style={styles.rivalModalHeader}>
+              <MaterialCommunityIcons name="sword-cross" size={32} color="#E3350D" />
+              <Text style={styles.rivalModalTitle}>NOVO RIVAL!</Text>
+              <MaterialCommunityIcons name="sword-cross" size={32} color="#E3350D" />
+            </View>
+            <Image
+              source={require("../../assets/images/avatar//avatar.jpg")}
+              style={styles.modalVSimage}
+              resizeMode="contain"
+            />
+            {rivalInfo && (
+              <Text style={styles.rivalModalText}>
+                {rivalInfo.rivalName} chegou para desafiar você!
+              </Text>
+            )}
+            <TouchableOpacity
+              style={styles.closeRivalModalBtn}
+              onPress={() => setRivalModalVisible(false)}
+            >
+              <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                Fechar Confronto
+              </Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </View>
+      </Modal>
+
+      {/* Modal de Coleções Válidas */}
       <Modal
         visible={collectionsModalVisible}
         animationType="slide"
@@ -902,7 +801,7 @@ export default function HomeScreen() {
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={closeCollectionsModal} style={{ marginRight: 10 }}>
-                <MaterialCommunityIcons name={"arrow-left"} size={24} color="#FFF" />
+                <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
               </TouchableOpacity>
               <Text style={styles.modalTitle}>Coleções Válidas</Text>
             </View>
@@ -918,7 +817,7 @@ export default function HomeScreen() {
                   {validCollections.map((set: any) => (
                     <View key={set.id} style={styles.collectionCard}>
                       <MaterialCommunityIcons
-                        name={"star-four-points-outline"}
+                        name="star-four-points-outline"
                         size={30}
                         color="#E3350D"
                         style={{ marginRight: 10 }}
@@ -936,45 +835,7 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* MODAL DE RIVAL (quando muda) */}
-      <Modal
-        visible={rivalModalVisible}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setRivalModalVisible(false)}
-      >
-        <View style={styles.rivalModalOverlay}>
-          <Animatable.View
-            style={styles.rivalModalContainer}
-            animation="shake"
-            duration={1200}
-          >
-            <Text style={styles.rivalModalTitle}>Novo Rival Detectado!</Text>
-            {rivalInfo && (
-              <>
-                <MaterialCommunityIcons
-                  name="alert-decagram"
-                  size={46}
-                  color="#E3350D"
-                />
-                <Text style={styles.rivalModalText}>
-                  {rivalInfo.rivalName} chegou para desafiar você!
-                </Text>
-              </>
-            )}
-            <TouchableOpacity
-              style={styles.closeRivalModalBtn}
-              onPress={() => setRivalModalVisible(false)}
-            >
-              <Text style={{ color: "#FFF", fontWeight: "bold" }}>
-                Conferir seu Rival
-              </Text>
-            </TouchableOpacity>
-          </Animatable.View>
-        </View>
-      </Modal>
-
-      {/* MODAL DE FILTRO (Cidade/Liga/Tudo) */}
+      {/* Modal de Filtro (mosaico) */}
       <Modal
         visible={filterModalVisible}
         transparent
@@ -982,128 +843,117 @@ export default function HomeScreen() {
         onRequestClose={closeFilterModal}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalFilterContainer}>
+          <View style={styles.filterModalContainer}>
             <Text style={styles.filterModalTitle}>Selecionar Filtro</Text>
 
-            {/* Botão TUDO */}
             <TouchableOpacity
-              style={styles.allButton}
-              onPress={handleSelectAllFilter}
-            >
-              <MaterialCommunityIcons
-                name="earth"
-                size={20}
-                color="#FFF"
-                style={{ marginRight: 8 }}
-              />
-              <Text style={styles.allButtonText}>Mostrar Tudo</Text>
-            </TouchableOpacity>
-
-            {/* Botão expandir cidades */}
-            <TouchableOpacity
-              style={styles.expandButton}
+              style={styles.showAllRow}
               onPress={() => {
                 LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-                setShowCities(!showCities);
+                setShowAllLeagues(!showAllLeagues);
               }}
             >
-              <Text style={styles.expandButtonText}>Selecionar Cidade</Text>
-              <Ionicons
-                name={showCities ? "chevron-up" : "chevron-down"}
+              <MaterialCommunityIcons
+                name={showAllLeagues ? "checkbox-marked-outline" : "checkbox-blank-outline"}
                 size={24}
-                color="#FF6F61"
+                color="#E3350D"
+                style={{ marginRight: 10 }}
               />
+              <Text style={styles.showAllText}>Mostrar todas as Ligas</Text>
             </TouchableOpacity>
 
-            {showCities && (
-              <FlatList
-                style={styles.flatList}
-                data={cities}
-                keyExtractor={(item) => item}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.cityItem}
-                    onPress={() => {
-                      fetchLeaguesByCity(item);
-                      setShowLeagues(true);
+            {!showAllLeagues && (
+              <>
+                <TouchableOpacity
+                  style={styles.cityButton}
+                  onPress={() => {
+                    setShowMosaicCities(!showMosaicCities);
+                    setShowMosaicLeagues(false);
+                  }}
+                >
+                  <Ionicons
+                    name="map-outline"
+                    size={22}
+                    color="#FFF"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.cityButtonText}>
+                    Cidades
+                  </Text>
+                </TouchableOpacity>
+
+                {showMosaicCities && (
+                  <FlatList
+                    data={cities}
+                    keyExtractor={(item) => item}
+                    numColumns={2}
+                    style={styles.mosaicList}
+                    columnWrapperStyle={styles.mosaicRow}
+                    renderItem={({ item }) => {
+                      const selected = item === selectedCity;
+                      return (
+                        <TouchableOpacity
+                          style={[
+                            styles.mosaicItem,
+                            selected && { borderColor: "#E3350D" },
+                          ]}
+                          onPress={() => {
+                            setSelectedCity(item);
+                            setShowMosaicLeagues(true);
+                            fetchLeaguesByCity(item);
+                          }}
+                        >
+                          <MaterialCommunityIcons
+                            name="map-marker"
+                            size={24}
+                            color={selected ? "#E3350D" : "#FFF"}
+                          />
+                          <Text style={styles.mosaicItemText}>{item}</Text>
+                        </TouchableOpacity>
+                      );
                     }}
-                  >
-                    <MaterialCommunityIcons
-                      name="map-marker"
-                      size={20}
-                      color="#FF6F61"
-                      style={{ marginRight: 8 }}
-                    />
-                    <Text style={styles.cityItemText}>{item}</Text>
-                  </TouchableOpacity>
+                  />
                 )}
-              />
+
+                {showMosaicLeagues && (
+                  <FlatList
+                    data={leagues}
+                    keyExtractor={(item) => item.id}
+                    numColumns={2}
+                    style={styles.mosaicList}
+                    columnWrapperStyle={styles.mosaicRow}
+                    renderItem={({ item }) => {
+                      const isSelected = item.id === selectedLeagueId;
+                      return (
+                        <TouchableOpacity
+                          style={[
+                            styles.mosaicItem,
+                            isSelected && { borderColor: "#E3350D" },
+                          ]}
+                          onPress={() => handleSelectLeague(item.id)}
+                        >
+                          <Ionicons
+                            name="trophy-outline"
+                            size={24}
+                            color={isSelected ? "#E3350D" : "#FFF"}
+                          />
+                          <Text style={styles.mosaicItemText}>
+                            {item.leagueName || "Liga Sem Nome"}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    }}
+                  />
+                )}
+              </>
             )}
 
-            {/* Botão expandir ligas (se cidade selecionada) */}
-            {selectedCity !== "" && (
-              <TouchableOpacity
-                style={styles.expandButton}
-                onPress={() => {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-                  setShowLeagues(!showLeagues);
-                }}
-              >
-                <Text style={styles.expandButtonText}>
-                  {selectedCity
-                    ? `Selecionar Liga (${selectedCity})`
-                    : "Selecionar Liga"}
-                </Text>
-                <Ionicons
-                  name={showLeagues ? "chevron-up" : "chevron-down"}
-                  size={24}
-                  color="#FF6F61"
-                />
-              </TouchableOpacity>
-            )}
-
-            {showLeagues && (
-              <FlatList
-                style={styles.flatList}
-                data={leagues}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => {
-                  const isSelected = selectedLeagueId === item.id;
-                  return (
-                    <TouchableOpacity
-                      style={[
-                        styles.leagueItem,
-                        {
-                          backgroundColor: isSelected
-                            ? "#FF6F61"
-                            : darkerColor("#292929"),
-                        },
-                      ]}
-                      onPress={() => handleSelectLeague(item.id)}
-                    >
-                      <Ionicons
-                        name="ribbon"
-                        size={20}
-                        color="#FFF"
-                        style={{ marginRight: 8 }}
-                      />
-                      <Text style={styles.cityItemText}>
-                        {item.leagueName || "Sem Nome"}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            )}
-
-            {/* Botão SALVAR */}
-            <TouchableOpacity style={styles.saveButton} onPress={handleSaveFilter}>
-              <Text style={styles.saveButtonText}>Salvar</Text>
+            <TouchableOpacity style={styles.saveFilterButton} onPress={handleSaveFilter}>
+              <Text style={styles.saveFilterText}>Salvar</Text>
             </TouchableOpacity>
 
-            {/* Botão FECHAR */}
-            <TouchableOpacity style={styles.closeModalButton} onPress={closeFilterModal}>
-              <Text style={styles.closeModalButtonText}>Voltar</Text>
+            <TouchableOpacity style={styles.closeFilterButton} onPress={closeFilterModal}>
+              <Text style={styles.closeFilterText}>Voltar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1111,7 +961,7 @@ export default function HomeScreen() {
     </View>
   );
 
-  // ----------------- RENDERIZAÇÃO DE UM STAT CARD -----------------
+  // Card de Stat
   function renderStatCard(
     label: string,
     value: string | number,
@@ -1134,7 +984,7 @@ export default function HomeScreen() {
   }
 }
 
-// ----------------- COMPONENTE DE TÍTULO + PROGRESSO -----------------
+// Títulos (sem alterar lógica)
 function TitleProgressCard({ item, delay }: { item: any; delay: number }) {
   const progressAnim = useRef(new Animated.Value(0)).current;
 
@@ -1185,7 +1035,7 @@ function TitleProgressCard({ item, delay }: { item: any; delay: number }) {
   );
 }
 
-// ----------------- ESTILOS -----------------
+// Estilos Visuais
 const styles = StyleSheet.create({
   loaderContainer: {
     flex: 1,
@@ -1193,11 +1043,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  backgroundImage: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 80,
+  loadingText: {
+    color: "#E3350D",
+    fontSize: 24,
+    fontWeight: "bold",
   },
   header: {
     backgroundColor: "#000",
@@ -1210,9 +1059,6 @@ const styles = StyleSheet.create({
   userInfo: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  gearButton: {
-    padding: 6,
   },
   avatar: {
     width: 46,
@@ -1227,8 +1073,27 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 20,
   },
+  ligasButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#E3350D",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  ligasButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginLeft: 6,
+  },
 
-  // Stats
+  backgroundImage: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 80,
+  },
   statsContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1260,7 +1125,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // Rival Card
   rivalCard: {
     backgroundColor: "#2A2A2A",
     borderRadius: 10,
@@ -1269,16 +1133,28 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: "#444",
+  },
+  rivalCardHeader: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
   },
   rivalTitle: {
     color: "#E3350D",
     fontWeight: "bold",
     fontSize: 16,
-    marginVertical: 8,
+    marginHorizontal: 8,
+  },
+  vsRow: {
+    alignItems: "center",
+    marginVertical: 6,
+  },
+  vsIcon: {
+    width: 30,
+    height: 35,
   },
   rivalBody: {
-    marginTop: 5,
+    marginTop: 8,
     alignItems: "center",
   },
   rivalName: {
@@ -1292,7 +1168,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // Títulos
   titlesContainer: {
     backgroundColor: "#2A2A2A",
     marginHorizontal: 12,
@@ -1350,7 +1225,6 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
-  // Bottom Buttons
   bottomButtons: {
     position: "absolute",
     bottom: 0,
@@ -1394,11 +1268,9 @@ const styles = StyleSheet.create({
   },
   bottomButtonText: {
     fontWeight: "bold",
-    marginLeft: 6,
     fontSize: 16,
   },
 
-  // Modal Coleções
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",
@@ -1452,14 +1324,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#555",
     alignItems: "center",
-    width: "80%",
+    width: "85%",
+  },
+  rivalModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    width: "100%",
+    marginBottom: 10,
   },
   rivalModalTitle: {
     color: "#E3350D",
     fontWeight: "bold",
     fontSize: 20,
-    marginBottom: 12,
     textAlign: "center",
+    marginHorizontal: 10,
+  },
+  modalVSimage: {
+    width: 100,
+    height: 60,
+    marginVertical: 8,
   },
   rivalModalText: {
     color: "#FFF",
@@ -1476,12 +1360,11 @@ const styles = StyleSheet.create({
   },
 
   // Modal de Filtro
-  modalFilterContainer: {
+  filterModalContainer: {
     width: "90%",
     backgroundColor: "#292929",
     padding: 16,
     borderRadius: 12,
-    alignItems: "center",
     alignSelf: "center",
     marginTop: 60,
   },
@@ -1492,105 +1375,113 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: "center",
   },
-  expandButton: {
+  showAllRow: {
     flexDirection: "row",
-    backgroundColor: "#444444",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-    marginTop: 10,
-    width: "100%",
+    marginVertical: 10,
   },
-  expandButtonText: {
-    color: "#FF6F61",
-    fontWeight: "600",
+  showAllText: {
+    color: "#FFF",
     fontSize: 16,
   },
-  flatList: {
-    width: "100%",
-    maxHeight: 150,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  cityItem: {
+  cityButton: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: darkerColor("#292929"),
-    padding: 10,
-    marginVertical: 4,
-    borderRadius: 6,
-  },
-  cityItemText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-  },
-  leagueItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    marginVertical: 4,
-    borderRadius: 6,
-  },
-  allButton: {
-    flexDirection: "row",
-    alignItems: "center",
     backgroundColor: "#E3350D",
-    paddingHorizontal: 16,
+    alignItems: "center",
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
     marginBottom: 8,
+    marginTop: 4,
   },
-  allButtonText: {
+  cityButtonText: {
     color: "#FFF",
     fontWeight: "600",
     fontSize: 16,
   },
-  saveButton: {
+  mosaicList: {
+    width: "100%",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  mosaicRow: {
+    justifyContent: "space-around",
+  },
+  mosaicItem: {
+    width: "45%",
+    backgroundColor: "#333",
+    borderRadius: 8,
+    marginBottom: 10,
+    paddingVertical: 14,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#333",
+  },
+  mosaicItemText: {
+    color: "#FFF",
+    marginTop: 4,
+    fontSize: 14,
+    textAlign: "center",
+  },
+  saveFilterButton: {
     backgroundColor: "#E3350D",
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 8,
+    marginTop: 16,
     alignItems: "center",
-    marginTop: 10,
   },
-  saveButtonText: {
-    color: "#FFFFFF",
+  saveFilterText: {
+    color: "#FFF",
     fontSize: 16,
     fontWeight: "bold",
   },
-  closeModalButton: {
+  closeFilterButton: {
     backgroundColor: "#999",
-    marginTop: 16,
+    marginTop: 14,
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 8,
+    alignItems: "center",
   },
-  closeModalButtonText: {
+  closeFilterText: {
     color: "#FFFFFF",
     fontWeight: "bold",
     fontSize: 16,
   },
+
+  // Welcome Modal
+  welcomeOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.8)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  welcomeContainer: {
+    backgroundColor: "#2A2A2A",
+    borderRadius: 10,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#444",
+    width: "85%",
+    alignItems: "center",
+  },
+  welcomeImage: {
+    width: "90%",
+    height: 120,
+    marginBottom: 20,
+  },
+  welcomeText: {
+    color: "#FFF",
+    fontSize: 18,
+    textAlign: "center",
+    marginBottom: 20,
+    fontWeight: "bold",
+  },
+  closeWelcomeButton: {
+    backgroundColor: "#E3350D",
+    borderRadius: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
 });
-
-// Helper para escurecer cor
-function darkerColor(hexColor: string) {
-  const amt = -20;
-  let num = parseInt(hexColor.replace("#", ""), 16);
-  let r = (num >> 16) + amt;
-  let g = ((num >> 8) & 0x00ff) + amt;
-  let b = (num & 0x0000ff) + amt;
-
-  return (
-    "#" +
-    (
-      0x1000000 +
-      (r < 255 ? (r < 0 ? 0 : r) : 255) * 0x10000 +
-      (g < 255 ? (g < 0 ? 0 : g) : 255) * 0x100 +
-      (b < 255 ? (b < 0 ? 0 : b) : 255)
-    )
-      .toString(16)
-      .slice(1)
-  );
-}

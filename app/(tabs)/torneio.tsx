@@ -1,4 +1,3 @@
-// TorneioScreen.tsx
 import React, { useEffect, useState, useRef } from "react";
 import {
   View,
@@ -9,32 +8,32 @@ import {
   Alert,
   Linking,
   Image,
-  TextInput,
-  Keyboard,
   Platform,
-  Modal
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import * as Notifications from "expo-notifications";
 import { useTranslation } from "react-i18next";
-
 import {
   Appbar,
   Card,
   Button,
   ActivityIndicator as PaperActivityIndicator,
 } from "react-native-paper";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
 
-// Função para buscar membros do role host
-import { fetchRoleMembers } from "../hosts"; // ajuste o caminho conforme necessário
+import { db } from "../../lib/firebaseConfig";
+import { collection, getDocs } from "firebase/firestore";
 
-// Importa os modais (JudgeScreen e VoteScreen) já criados
+// Importação do fallback e das funções
+import { HOST_PLAYER_IDS, fetchRoleMembers } from "../hosts";
+
 import JudgeScreen from "../../components/TorneioReportsScreen";
 import VoteScreen from "../../components/TorneioVoteScreen";
 
+// Configurações de notificação
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -52,9 +51,11 @@ export default function TorneioScreen() {
   const router = useRouter();
   const { t } = useTranslation();
 
-  // Estados principais
   const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState<string>(t("torneio.info.none"));
+  const [noTournament, setNoTournament] = useState(false);
+  const [userNotInRound, setUserNotInRound] = useState(false);
+
+  const [userName, setUserName] = useState(t("torneio.info.none"));
   const [mesaNumber, setMesaNumber] = useState<string | null>(null);
   const [currentRound, setCurrentRound] = useState<number | null>(null);
   const [opponentName, setOpponentName] = useState<string | null>(null);
@@ -62,16 +63,10 @@ export default function TorneioScreen() {
   const [isHost, setIsHost] = useState(false);
   const [leagueName, setLeagueName] = useState("Torneio");
 
-  // Modal de erro
   const [errorModalVisible, setErrorModalVisible] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState("");
 
-  // Modal de voto via app
   const [voteModalVisible, setVoteModalVisible] = useState(false);
-  const [userPin, setUserPin] = useState("");
-  const [voting, setVoting] = useState(false);
-
-  // Modal de resultados (JudgeScreen)
   const [reportsModalVisible, setReportsModalVisible] = useState(false);
 
   const intervalRef = useRef<any>(null);
@@ -80,8 +75,6 @@ export default function TorneioScreen() {
   useEffect(() => {
     requestNotificationPermission();
     fetchTournamentData();
-
-    // Atualiza a cada 10 segundos
     intervalRef.current = setInterval(() => {
       setFetchCount((prev) => prev + 1);
     }, 60000);
@@ -91,7 +84,6 @@ export default function TorneioScreen() {
     };
   }, []);
 
-  // Sempre que fetchCount mudar, refaz a busca
   useEffect(() => {
     fetchTournamentData();
   }, [fetchCount]);
@@ -126,19 +118,20 @@ export default function TorneioScreen() {
 
       if (!storedId) {
         showErrorModal(t("torneio.alerts.not_logged_in"));
+        setLoading(false);
         return;
       }
       setUserName(storedName ?? t("torneio.info.none"));
 
       if (!leagueId) {
         showErrorModal("Nenhuma liga selecionada. Vá em configurações.");
+        setLoading(false);
         return;
       }
 
-      // Verifica se o usuário é host
-      await checkIfHost(leagueId);
+      // 🔥 Verifica se o usuário é host (SEM varrer TODAS as ligas)
+      await checkIfHostOnlyThisLeague(leagueId, storedId);
 
-      // Consulta ao backend para obter os dados do torneio
       const url = `https://Doprado.pythonanywhere.com/get-data/${leagueId}`;
       const res = await fetch(url, {
         method: "GET",
@@ -151,59 +144,55 @@ export default function TorneioScreen() {
       }
 
       const jsonTorneio = await res.json();
-      const storedUserId = await AsyncStorage.getItem("@userId"); // ID do usuário logado
-      const allRounds = jsonTorneio.round ?? {}; // Pega todas as rodadas
-
-      // 🔹 Obtém todas as rodadas disponíveis
-      const availableRoundKeys = Object.keys(allRounds).map((rk) => parseInt(rk, 10)).sort((a, b) => b - a);
-
-      if (availableRoundKeys.length === 0) {
-        console.log("⚠️ Nenhuma rodada encontrada.");
+      if (!jsonTorneio.round || Object.keys(jsonTorneio.round).length === 0) {
+        setNoTournament(true);
+        setLoading(false);
         return;
       }
 
-      const latestRoundKey = availableRoundKeys[0]; // 🔥 Pega a rodada mais recente
-      const latestRoundTables = allRounds[latestRoundKey]?.None?.table ?? {}; // Pega apenas as mesas da última rodada
+      const storedUserId = storedId;
+      const allRounds = jsonTorneio.round ?? {};
+      const availableRoundKeys = Object.keys(allRounds)
+        .map((rk) => parseInt(rk, 10))
+        .sort((a, b) => b - a);
 
+      if (availableRoundKeys.length === 0) {
+        setNoTournament(true);
+        setLoading(false);
+        return;
+      }
+
+      const latestRoundKey = availableRoundKeys[0];
+      const latestRoundTables = allRounds[latestRoundKey]?.None?.table ?? {};
+
+      let userMesaId = null;
       let player1Name = "Jogador 1";
       let player2Name = "Jogador 2";
-      let userMesaId = null;
 
-      // 🔹 Percorre apenas as mesas da última rodada
       for (const mesaId in latestRoundTables) {
         const mesa = latestRoundTables[mesaId];
-
-        // 🔹 Verifica se o usuário está nessa mesa
         if (mesa.player1_id === storedUserId || mesa.player2_id === storedUserId) {
           player1Name = jsonTorneio.players[mesa.player1_id]?.fullname || "Jogador 1";
           player2Name = jsonTorneio.players[mesa.player2_id]?.fullname || "Jogador 2";
           userMesaId = mesaId;
-
-          console.log(`🎯 Mesa encontrada na RODADA ${latestRoundKey} (Mesa ${mesaId}):`);
-          console.log(`   ✅ Jogador 1: ${player1Name} (ID: ${mesa.player1_id})`);
-          console.log(`   ✅ Jogador 2: ${player2Name} (ID: ${mesa.player2_id})`);
-
-          // 🔹 Salva no AsyncStorage para ser usado no modal
           await AsyncStorage.setItem("@player1Name", player1Name);
           await AsyncStorage.setItem("@player2Name", player2Name);
-          await AsyncStorage.setItem("@mesaId", mesaId); // Opcional, caso precise no modal
-
-          break; // 🔥 Sai do loop após encontrar a mesa do usuário
+          await AsyncStorage.setItem("@mesaId", mesaId);
+          break;
         }
       }
 
       if (!userMesaId) {
-        console.log(`⚠️ Usuário não está jogando na rodada ${latestRoundKey}.`);
+        setUserNotInRound(true);
+        setCurrentRound(latestRoundKey);
+        setLoading(false);
+        return;
       }
-
 
       const roundObj = jsonTorneio.round ?? {};
       const roundKeys = Object.keys(roundObj).map((rk) => parseInt(rk, 10));
+
       if (roundKeys.length === 0) {
-        setMesaNumber(null);
-        setOpponentName(null);
-        setCurrentRound(null);
-        setLinkReport(null);
         setLoading(false);
         return;
       }
@@ -224,13 +213,13 @@ export default function TorneioScreen() {
         const p1_id = matchInfo.player1_id;
         const p2_id = matchInfo.player2_id;
 
-        if (p1_id === storedId) {
+        if (p1_id === storedUserId) {
           foundMesa = tableId;
-          foundOpponent = matchInfo.player2;
+          foundOpponent = jsonTorneio.players[p2_id]?.fullname || "";
           break;
-        } else if (p2_id === storedId) {
+        } else if (p2_id === storedUserId) {
           foundMesa = tableId;
-          foundOpponent = matchInfo.player1;
+          foundOpponent = jsonTorneio.players[p1_id]?.fullname || "";
           break;
         }
       }
@@ -239,7 +228,6 @@ export default function TorneioScreen() {
       setOpponentName(foundOpponent || null);
 
       if (foundMesa) {
-        // Cria link para a mesa (caso seja necessário abrir em web)
         const link = `https://Doprado.pythonanywhere.com/${leagueId}/mesa/${foundMesa}`;
         setLinkReport(link);
         await checkRoundAndNotify(maxRound, foundMesa, foundOpponent || "");
@@ -247,7 +235,7 @@ export default function TorneioScreen() {
         setLinkReport(null);
       }
 
-      // Opcional: busca informações adicionais da liga para o título
+      // Lê nome da liga
       const infoRes = await fetch(`https://Doprado.pythonanywhere.com/get-league-info`, {
         method: "GET",
         headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
@@ -292,15 +280,32 @@ export default function TorneioScreen() {
     }
   }
 
-  async function checkIfHost(leagueId: string) {
+  /**
+   * Verifica se o usuário é host olhando SOMENTE a liga obtida do AsyncStorage
+   * e, se não achar no Firebase, faz fallback na lista estática.
+   */
+  async function checkIfHostOnlyThisLeague(leagueId: string, userId: string) {
     try {
-      const userId = await AsyncStorage.getItem("@userId");
-      if (!userId) return setIsHost(false);
-      const hostMembers = await fetchRoleMembers(leagueId, "host");
-      const found = hostMembers.find((h) => h.userId === userId);
-      setIsHost(!!found);
-    } catch (err) {
-      console.log("Erro ao verificar se é host:", err);
+      // 1) Busca no Firebase (subcoleção /roles/host/members)
+      const hostSnap = await getDocs(collection(db, `leagues/${leagueId}/roles/host/members`));
+      const foundFirebase = hostSnap.docs.some((doc) => doc.id === userId);
+
+      if (foundFirebase) {
+        console.log(`✅ Encontrado como host no Firebase (Liga: ${leagueId}).`);
+        setIsHost(true);
+        return;
+      }
+
+      // 2) Se não achou no Firebase, tenta fallback
+      if (HOST_PLAYER_IDS.includes(userId)) {
+        console.log("🟡 Não encontrado no Firebase. Usando fallback da lista estática (HOST_PLAYER_IDS).");
+        setIsHost(true);
+      } else {
+        console.log("🚫 Usuário não é host nem no Firebase nem no fallback.");
+        setIsHost(false);
+      }
+    } catch (error) {
+      console.log("Erro ao verificar host na liga específica:", error);
       setIsHost(false);
     }
   }
@@ -315,89 +320,55 @@ export default function TorneioScreen() {
     router.replace("/(tabs)/home");
   }
 
-  function handleOpenReport() {
-    if (!linkReport) {
-      Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.no_table"));
-      return;
-    }
-    try {
-      if (Platform.OS === "web") {
-        window.open(linkReport, "_blank");
-      } else {
-        Linking.openURL(linkReport);
-      }
-    } catch (err) {
-      console.log("Erro ao abrir link:", err);
-      Alert.alert(t("common.error"), "Não foi possível abrir a página de report.");
-    }
-  }
-
-  // Abre o modal de voto (VoteScreen)
   function openVoteModal() {
     setVoteModalVisible(true);
-    setUserPin("");
   }
 
-  async function sendVote(result: string) {
-    try {
-      setVoting(true);
-
-      const leagueId = await AsyncStorage.getItem("@leagueId");
-      const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
-
-      if (!leagueId || !mesaNumber || !firebaseToken) {
-        Alert.alert("Erro", "Dados incompletos para votar.");
-        setVoting(false);
-        return;
-      }
-
-      if (!userPin.trim()) {
-        Alert.alert("Erro", "Digite seu PIN para votar.");
-        setVoting(false);
-        return;
-      }
-
-      const response = await fetch("https://Doprado.pythonanywhere.com/report", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${firebaseToken}`,
-        },
-        body: JSON.stringify({
-          league_id: leagueId,
-          mesa_id: mesaNumber,
-          resultado: result,
-          pin: userPin.trim(),
-        }),
-      });
-
-      const json = await response.json();
-      if (response.ok) {
-        Alert.alert("Sucesso", json.message || "Voto registrado com sucesso!");
-        setVoteModalVisible(false);
-      } else {
-        Alert.alert("Erro", json.message || "Falha ao registrar voto.");
-      }
-    } catch (error) {
-      console.error("Erro ao votar:", error);
-      Alert.alert("Erro", "Falha ao conectar ao servidor.");
-    } finally {
-      setVoting(false);
-    }
-  }
-
-  // ====================== Render ======================
   if (loading) {
     return (
       <View style={styles.loader}>
-        <PaperActivityIndicator animating={true} size="large" color={RED} />
+        <PaperActivityIndicator animating size="large" color={RED} />
       </View>
+    );
+  }
+
+  if (noTournament) {
+    return (
+      <View style={styles.noTournamentContainer}>
+        <MaterialCommunityIcons name="alert" size={50} color={RED} style={{ marginBottom: 8 }} />
+        <Text style={styles.noTournamentText}>Nenhum torneio em andamento nesta liga.</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.replace("/(tabs)/home")}>
+          <Text style={styles.backButtonText}>Voltar</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (userNotInRound) {
+    return (
+      <>
+        <Appbar.Header style={{ backgroundColor: BLACK }}>
+          <Image source={require("../../assets/images/logo.jpg")} style={styles.logo} resizeMode="contain" />
+          <Appbar.Content
+            title={userName}
+            titleStyle={{ color: RED, fontWeight: "bold", fontSize: 20 }}
+          />
+        </Appbar.Header>
+        <View style={styles.notInRoundContainer}>
+          <MaterialCommunityIcons name="account-cancel" size={60} color={RED} style={{ marginBottom: 12 }} />
+          <Text style={styles.notInRoundText}>
+            Você não está jogando nesta rodada{currentRound ? ` (#${currentRound})` : ""}.
+          </Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.replace("/(tabs)/home")}>
+            <Text style={styles.backButtonText}>Voltar</Text>
+          </TouchableOpacity>
+        </View>
+      </>
     );
   }
 
   return (
     <>
-      {/* Modal de Erro */}
       <Modal
         animationType="fade"
         transparent
@@ -406,7 +377,12 @@ export default function TorneioScreen() {
       >
         <Animatable.View style={styles.errorOverlay} animation="fadeIn" duration={300} easing="ease-in-out">
           <Animatable.View style={styles.errorModalContent} animation="zoomIn" duration={300} easing="ease-in-out">
-            <MaterialCommunityIcons name="alert-circle-outline" size={48} color="#FFF" style={{ marginBottom: 10 }} />
+            <MaterialCommunityIcons
+              name="alert-circle-outline"
+              size={48}
+              color="#FFF"
+              style={{ marginBottom: 10 }}
+            />
             <Text style={styles.errorTitle}>Ops!</Text>
             <Text style={styles.errorMessage}>{errorModalMessage}</Text>
             <TouchableOpacity style={styles.errorButton} onPress={handleCloseErrorModal}>
@@ -416,22 +392,19 @@ export default function TorneioScreen() {
         </Animatable.View>
       </Modal>
 
-      {/* Modal de Voto via App */}
       <VoteScreen
         visible={voteModalVisible}
         onClose={() => setVoteModalVisible(false)}
         mesaId={mesaNumber}
-        leagueId={""}  // Opcional: se você já tiver salvo no AsyncStorage, pode pegar aqui
+        leagueId={""}
         opponentName={opponentName || ""}
       />
 
-      {/* Modal de Resultados (JudgeScreen) */}
       <JudgeScreen
         visible={reportsModalVisible}
         onClose={() => setReportsModalVisible(false)}
       />
 
-      {/* AppBar */}
       <Appbar.Header style={{ backgroundColor: BLACK }}>
         <Image source={require("../../assets/images/logo.jpg")} style={styles.logo} resizeMode="contain" />
         <Appbar.Content
@@ -440,11 +413,11 @@ export default function TorneioScreen() {
         />
       </Appbar.Header>
 
-      {/* Conteúdo Principal */}
       <ScrollView style={styles.container}>
-        <Text style={styles.mainTitle}>{t("torneio.info.ongoing_title").toUpperCase()}</Text>
+        <Text style={styles.mainTitle}>
+          {t("torneio.info.ongoing_title").toUpperCase()} - {leagueName}
+        </Text>
 
-        {/* Card do Jogador */}
         <Card style={styles.card}>
           <Card.Title
             title={userName}
@@ -457,7 +430,6 @@ export default function TorneioScreen() {
           />
         </Card>
 
-        {/* Card do Oponente */}
         <Card style={styles.card}>
           <Card.Title
             title={opponentName ?? t("torneio.alerts.no_opponent")}
@@ -470,7 +442,6 @@ export default function TorneioScreen() {
           />
         </Card>
 
-        {/* Card da Rodada Atual */}
         <Card style={styles.card}>
           <Card.Title
             title={currentRound ? String(currentRound) : t("torneio.alerts.no_round")}
@@ -483,7 +454,6 @@ export default function TorneioScreen() {
           />
         </Card>
 
-        {/* Card da Mesa */}
         <Card style={styles.card}>
           <Card.Title
             title={mesaNumber ?? t("torneio.info.not_found")}
@@ -496,7 +466,6 @@ export default function TorneioScreen() {
           />
         </Card>
 
-        {/* Botões de Reportar e Ver Resultados */}
         <View style={styles.btnContainer}>
           <Button
             mode="contained"
@@ -530,6 +499,43 @@ const styles = StyleSheet.create({
     backgroundColor: BLACK,
     justifyContent: "center",
     alignItems: "center",
+  },
+  noTournamentContainer: {
+    flex: 1,
+    backgroundColor: BLACK,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  noTournamentText: {
+    color: WHITE,
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  notInRoundContainer: {
+    flex: 1,
+    backgroundColor: BLACK,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  notInRoundText: {
+    color: WHITE,
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  backButton: {
+    backgroundColor: RED,
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  backButtonText: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 16,
   },
   container: {
     flex: 1,
@@ -571,7 +577,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     width: "70%",
   },
-  // Modal de Erro
   errorOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.7)",
@@ -609,5 +614,3 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 });
-
-export { }; 
