@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -14,20 +14,16 @@ import {
   SafeAreaView,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  collection,
-  doc,
-  getDocs,
-  setDoc,
-} from "firebase/firestore";
+import { collection, doc, getDocs, setDoc } from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
 
 import { useTranslation } from "react-i18next";
 import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native"; // <-- Importamos para focar a tela
 
-// -------------------- Tipagens Originais --------------------
+/**
+ * Tipagens Originais
+ */
 interface CardData {
   id: string;
   name: string;
@@ -48,6 +44,12 @@ interface CardData {
       };
     };
   };
+  set?: {
+    id: string;
+    name: string;
+    series: string;
+  };
+  number?: string;
 }
 
 interface CollectionData {
@@ -69,31 +71,73 @@ interface CreatingState {
   obs: string;
 }
 
-// -------------------- Componente Principal --------------------
+/**
+ * Componente Principal
+ */
 export default function CardsSearchScreen() {
   const { t } = useTranslation();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredCards, setFilteredCards] = useState<CardData[]>([]);
   const [collections, setCollections] = useState<CollectionData[]>([]);
-  const [cachedCollections, setCachedCollections] = useState<CollectionData[] | null>(null); // <-- Cache
-  const [updateCount, setUpdateCount] = useState(0); // <-- Contador de atualizações iguais
 
   const [selectedCard, setSelectedCard] = useState<CardData | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // user info
-  const [playerId, setPlayerId] = useState("");
+  const [playerId, setPlayerId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState("Jogador");
 
-  // Filtro (para salvamento)
-  const [leagueId, setLeagueId] = useState<string>("");    // se "league", então salvamos
-  const [filterType, setFilterType] = useState<string>(""); // "all"|"city"|"league"
+  /**
+   * Carrega coleções (sets) e dados do AsyncStorage (playerId, playerName)
+   */
+  useEffect(() => {
+    console.log("🔄 [Cartas] Iniciando carregamento de dados...");
 
-  // Modal de detalhes
+    (async () => {
+      try {
+        const storedId = await AsyncStorage.getItem("@userId");
+        const storedName = (await AsyncStorage.getItem("@playerName")) || "Jogador";
+        console.log("📢 [Cartas] AsyncStorage retornou playerId:", storedId);
+
+        setPlayerId(storedId);
+        setPlayerName(storedName);
+
+        console.log("🎯 [Cartas] Estados atualizados:", { storedId, storedName });
+      } catch (err) {
+        console.error("❌ [Cartas] Erro ao buscar playerId:", err);
+      }
+    })();
+
+    (async () => {
+      try {
+        setLoading(true);
+        const resp = await fetch("https://api.pokemontcg.io/v2/sets");
+        const data = await resp.json();
+        if (data && data.data) {
+          setCollections(data.data);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar coleções:", error);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  /**
+   * Filtro (para salvamento)
+   */
+  const [leagueId, setLeagueId] = useState<string>("");
+  const [filterType, setFilterType] = useState<string>("");
+
+  /**
+   * Modal de detalhes
+   */
   const [detailModalVisible, setDetailModalVisible] = useState(false);
 
-  // Modal de criação/edição
+  /**
+   * Modal de criação/edição
+   */
   const [createState, setCreateState] = useState<CreatingState>({
     visible: false,
     card: null,
@@ -105,89 +149,22 @@ export default function CardsSearchScreen() {
     obs: "",
   });
 
-  // -------------------- useFocusEffect para carregar user/filtro/coleções --------------------
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-  
-      (async () => {
-        try {
-          // Carrega filtro
-          const fType = (await AsyncStorage.getItem("@filterType")) || "all";
-          const lId = (await AsyncStorage.getItem("@leagueId")) || "";
-          
-          // Carrega dados do usuário
-          const id = await AsyncStorage.getItem("@playerId");
-          const name = await AsyncStorage.getItem("@playerName") || "Jogador";
-          
-          if (isActive) {
-            setFilterType(fType);
-            setLeagueId(lId);
-            setPlayerId(id || "");
-            setPlayerName(name);
-          }
-  
-          // Carrega coleções TCG (com cache)
-          fetchCollections(isActive, cachedCollections);
-        } catch (err) {
-          console.error("Erro ao buscar coleções:", err);
-        }
-      })();
-  
-      return () => {
-        isActive = false;
-      };
-    }, [])
-  );
-
-  /** Função para buscar as coleções da API Pokémon TCG */
-  async function fetchCollections(isActive: boolean, cache: CollectionData[] | null) {
-    try {
-      setLoading(true);
-      const resp = await fetch("https://api.pokemontcg.io/v2/sets");
-      const data = await resp.json();
-
-      if (isActive && data && data.data) {
-        const newCollections: CollectionData[] = data.data;
-
-        // Verifica se os dados mudaram em relação ao cache
-        if (cache && JSON.stringify(newCollections) === JSON.stringify(cache)) {
-          if (updateCount >= 5) {
-            console.log("Dados inalterados 5 vezes, atualizando cache mesmo assim...");
-            setCachedCollections(newCollections);
-            setUpdateCount(0);
-            setCollections(newCollections);
-          } else {
-            console.log("Usando cache de coleções...");
-            setUpdateCount((prev) => prev + 1);
-          }
-        } else {
-          console.log("Coleções atualizadas, salvando no cache...");
-          setCachedCollections(newCollections);
-          setUpdateCount(0);
-          setCollections(newCollections);
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao buscar coleções:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // -------------------- Função de busca de Cartas --------------------
+  /**
+   * Busca de Cartas - aceita nome, setCode, ou "setCode numero"
+   */
   async function searchCard(query: string) {
     setLoading(true);
     try {
       const text = query.trim();
       if (/^\d+$/.test(text)) {
-        // se for só número, não buscar (ou buscar de outro jeito)
         setFilteredCards([]);
         setLoading(false);
         return;
       }
 
-      // Tenta separação setCode + cardNumber (Ex: "PGO 68")
+      /**
+       * Verifica se o usuário digitou algo como "PGO 68"
+       */
       const parts = text.split(/\s+/);
       if (parts.length === 2) {
         const setCode = parts[0].toUpperCase();
@@ -206,7 +183,9 @@ export default function CardsSearchScreen() {
         }
       }
 
-      // Tenta achar setCode sozinho
+      /**
+       * Se digitou somente o setCode
+       */
       const up = text.toUpperCase();
       const matchedSet2 = collections.find(
         (c) => (c.ptcgoCode || "").toUpperCase() === up
@@ -221,8 +200,12 @@ export default function CardsSearchScreen() {
         return;
       }
 
-      // Assume que o usuário digitou nome (busca por Name)
-      const nameUrl = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
+      /**
+       * Caso contrário, busca por nome
+       */
+      const nameUrl = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(
+        text
+      )}"`;
       const resp2 = await fetch(nameUrl);
       const data2 = await resp2.json();
       if (data2 && data2.data) setFilteredCards(data2.data);
@@ -240,7 +223,9 @@ export default function CardsSearchScreen() {
     searchCard(txt);
   }
 
-  // -------------------- Modal de Detalhes --------------------
+  /**
+   * Modal de Detalhes
+   */
   function openCardModal(card: CardData) {
     setSelectedCard(card);
     setDetailModalVisible(true);
@@ -250,7 +235,9 @@ export default function CardsSearchScreen() {
     setDetailModalVisible(false);
   }
 
-  // -------------------- Criar Post: Tenho/Quero --------------------
+  /**
+   * Criar Post: Tenho / Quero
+   */
   function handleHaveOrWant(card: CardData, action: "have" | "want") {
     setCreateState({
       visible: true,
@@ -268,39 +255,63 @@ export default function CardsSearchScreen() {
     setCreateState((prev) => ({ ...prev, visible: false, card: null }));
   }
 
-  // -------------------- Salvar Post (agora no caminho da liga) --------------------
+  /**
+   * Salvar Post
+   */
   async function handleSavePost() {
+    console.log("🚀 Iniciando handleSavePost...");
+    console.log("🔍 playerId:", playerId);
+    console.log("🔍 createState.card:", createState.card);
+    console.log("🔍 filterType:", filterType);
+    console.log("🔍 leagueId:", leagueId);
+
     if (!playerId) {
+      console.error("❌ ERRO: playerId está vazio!");
       Alert.alert("Erro", "Você não está logado.");
       return;
     }
+
     if (!createState.card) {
+      console.error("❌ ERRO: Nenhuma carta foi selecionada!");
       Alert.alert("Erro", "Nenhuma carta selecionada.");
       return;
     }
 
     if (filterType !== "league" || !leagueId) {
+      console.error(
+        "❌ ERRO: Filtro inválido! filterType:",
+        filterType,
+        "leagueId:",
+        leagueId
+      );
       Alert.alert("Filtro inválido", "Para criar um post, selecione uma liga.");
       closeCreateModal();
       return;
     }
 
-    // Caminho atualizado: /leagues/{leagueId}/trades/{tradeId}
     const collRef = collection(db, `leagues/${leagueId}/trades`);
 
-    // Checa limite de 5 posts do mesmo usuário
-    const snap = await getDocs(collRef);
-    const userPosts = snap.docs.filter((d) => d.data().ownerId === playerId);
-    if (userPosts.length >= 5) {
-      Alert.alert("Limite Atingido", "Você já tem 5 posts criados.");
-      closeCreateModal();
-      return;
+    try {
+      console.log("📥 Buscando posts existentes do usuário...");
+      const snap = await getDocs(collRef);
+      const userPosts = snap.docs.filter((d) => d.data().ownerId === playerId);
+      console.log("✅ Posts existentes:", userPosts.length);
+
+      if (userPosts.length >= 5) {
+        console.error("❌ ERRO: Limite de 5 posts atingido!");
+        Alert.alert("Limite Atingido", "Você já tem 5 posts criados.");
+        closeCreateModal();
+        return;
+      }
+    } catch (error) {
+      console.error("❌ Erro ao buscar posts do usuário:", error);
     }
 
     let finalPrice = "";
     if (createState.type === "sale") {
       if (createState.priceMode === "manual") {
         if (!createState.priceValue.trim()) {
+          console.error("❌ ERRO: Preço manual não informado!");
           Alert.alert("Erro", "Informe o preço manualmente.");
           return;
         }
@@ -315,8 +326,8 @@ export default function CardsSearchScreen() {
     }
 
     try {
-      // Criando trade no novo caminho centralizado
-      const docRef = doc(collRef); // ID automático
+      console.log("📤 Criando post no Firebase...");
+      const docRef = doc(collRef);
       await setDoc(docRef, {
         cardName: createState.card.name,
         cardImage: createState.card.images.small,
@@ -329,20 +340,22 @@ export default function CardsSearchScreen() {
         createdAt: Date.now(),
       });
 
+      console.log("✅ Post criado com sucesso!");
       Alert.alert("Sucesso", "Post criado com sucesso!");
       closeCreateModal();
     } catch (err) {
-      console.log("Erro ao criar post:", err);
+      console.error("❌ ERRO ao criar post:", err);
       Alert.alert("Erro", "Falha ao criar o post de troca/venda.");
     }
   }
 
-  // -------------------- RENDER --------------------
+  /**
+   * Render
+   */
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>Cartas Pokémon TCG</Text>
 
-      {/* Barra de busca */}
       <Animatable.View animation="fadeInDown" style={styles.searchContainer}>
         <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
         <TextInput
@@ -360,14 +373,9 @@ export default function CardsSearchScreen() {
         </View>
       )}
 
-      {/* Lista de Resultados */}
       <ScrollView contentContainerStyle={styles.cardList}>
         {!loading && filteredCards.length === 0 && searchQuery.length > 0 && (
-          <Animatable.Text
-            style={styles.noResultsText}
-            animation="fadeIn"
-            duration={500}
-          >
+          <Animatable.Text style={styles.noResultsText} animation="fadeIn" duration={500}>
             Nenhuma carta encontrada.
           </Animatable.Text>
         )}
@@ -390,12 +398,14 @@ export default function CardsSearchScreen() {
                 resizeMode="contain"
               />
               <Text style={styles.cardName}>{card.name}</Text>
+              <Text style={styles.cardSetInfo}>
+                {card.set?.name} - {card.number}
+              </Text>
             </TouchableOpacity>
           </Animatable.View>
         ))}
       </ScrollView>
 
-      {/* Modal de Detalhes */}
       <Modal
         visible={detailModalVisible}
         animationType="slide"
@@ -449,21 +459,17 @@ export default function CardsSearchScreen() {
                     <TouchableOpacity
                       style={styles.linkButton}
                       onPress={() =>
-                        selectedCard.tcgplayer?.url &&
-                        Linking.openURL(selectedCard.tcgplayer.url)
+                        selectedCard.tcgplayer?.url && Linking.openURL(selectedCard.tcgplayer.url)
                       }
                     >
                       <Ionicons name="open-outline" size={18} color="#FFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.linkButtonText}>
-                        Abrir TCGPlayer
-                      </Text>
+                      <Text style={styles.linkButtonText}>Abrir TCGPlayer</Text>
                     </TouchableOpacity>
                   </>
                 ) : (
                   <Text style={styles.modalText}>(Sem info de preço)</Text>
                 )}
 
-                {/* Botões TENHO / QUERO */}
                 <View style={styles.actionButtonsContainer}>
                   <Animatable.View animation="bounceIn" delay={200}>
                     <TouchableOpacity
@@ -471,9 +477,7 @@ export default function CardsSearchScreen() {
                       onPress={() => handleHaveOrWant(selectedCard, "have")}
                     >
                       <Ionicons name="checkmark-done" size={18} color="#FFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.actionButtonText}>
-                        Tenho
-                      </Text>
+                      <Text style={styles.actionButtonText}>Tenho</Text>
                     </TouchableOpacity>
                   </Animatable.View>
 
@@ -483,21 +487,14 @@ export default function CardsSearchScreen() {
                       onPress={() => handleHaveOrWant(selectedCard, "want")}
                     >
                       <Ionicons name="heart" size={18} color="#FFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.actionButtonText}>
-                        Quero
-                      </Text>
+                      <Text style={styles.actionButtonText}>Quero</Text>
                     </TouchableOpacity>
                   </Animatable.View>
                 </View>
 
-                <TouchableOpacity
-                  style={styles.closeButton}
-                  onPress={closeCardModal}
-                >
+                <TouchableOpacity style={styles.closeButton} onPress={closeCardModal}>
                   <Ionicons name="close" size={20} color="#FFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.closeButtonText}>
-                    Fechar
-                  </Text>
+                  <Text style={styles.closeButtonText}>Fechar</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -505,7 +502,6 @@ export default function CardsSearchScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* Modal de Criação/Edição de Card */}
       <Modal
         visible={createState.visible}
         animationType="slide"
@@ -517,9 +513,7 @@ export default function CardsSearchScreen() {
             {createState.card && (
               <>
                 <Text style={styles.modalTitle}>
-                  {createState.action === "have"
-                    ? `Tenho esta Carta`
-                    : `Quero esta Carta`}
+                  {createState.action === "have" ? `Tenho esta Carta` : `Quero esta Carta`}
                 </Text>
 
                 <Image
@@ -527,9 +521,9 @@ export default function CardsSearchScreen() {
                   style={styles.modalImage}
                   resizeMode="contain"
                 />
+
                 <Text style={styles.modalText}>{createState.card.name}</Text>
 
-                {/* Se for TENHO -> Define sale ou trade */}
                 {createState.action === "have" && (
                   <>
                     <Text style={styles.modalLabel}>Tipo</Text>
@@ -543,7 +537,7 @@ export default function CardsSearchScreen() {
                           setCreateState((prev) => ({ ...prev, type: "sale" }))
                         }
                       >
-                        <Ionicons name="cash-outline" size={16} color="#FFF" style={{ marginRight:4 }}/>
+                        <Ionicons name="cash-outline" size={16} color="#FFF" style={{ marginRight: 4 }} />
                         <Text style={styles.switchTypeText}>Venda</Text>
                       </TouchableOpacity>
 
@@ -556,7 +550,7 @@ export default function CardsSearchScreen() {
                           setCreateState((prev) => ({ ...prev, type: "trade" }))
                         }
                       >
-                        <Ionicons name="swap-horizontal" size={16} color="#FFF" style={{ marginRight:4 }}/>
+                        <Ionicons name="swap-horizontal" size={16} color="#FFF" style={{ marginRight: 4 }} />
                         <Text style={styles.switchTypeText}>Troca</Text>
                       </TouchableOpacity>
                     </View>
@@ -574,7 +568,7 @@ export default function CardsSearchScreen() {
                               setCreateState((prev) => ({ ...prev, priceMode: "manual" }))
                             }
                           >
-                            <Ionicons name="create-outline" size={16} color="#FFF" style={{ marginRight:4 }}/>
+                            <Ionicons name="create-outline" size={16} color="#FFF" style={{ marginRight: 4 }} />
                             <Text style={styles.switchTypeText}>Manual</Text>
                           </TouchableOpacity>
 
@@ -587,7 +581,7 @@ export default function CardsSearchScreen() {
                               setCreateState((prev) => ({ ...prev, priceMode: "liga" }))
                             }
                           >
-                            <Ionicons name="stats-chart" size={16} color="#FFF" style={{ marginRight:4 }}/>
+                            <Ionicons name="stats-chart" size={16} color="#FFF" style={{ marginRight: 4 }} />
                             <Text style={styles.switchTypeText}>Liga-%</Text>
                           </TouchableOpacity>
                         </View>
@@ -648,17 +642,13 @@ export default function CardsSearchScreen() {
                     style={[styles.button, { backgroundColor: "#999" }]}
                     onPress={closeCreateModal}
                   >
-                    <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight:4 }}/>
-                    <Text style={styles.buttonText}>
-                      Cancelar
-                    </Text>
+                    <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+                    <Text style={styles.buttonText}>Cancelar</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={[styles.button, { marginLeft: 8 }]} onPress={handleSavePost}>
-                    <Ionicons name="send" size={16} color="#FFF" style={{ marginRight:4 }}/>
-                    <Text style={styles.buttonText}>
-                      Enviar
-                    </Text>
+                    <Ionicons name="send" size={16} color="#FFF" style={{ marginRight: 4 }} />
+                    <Text style={styles.buttonText}>Enviar</Text>
                   </TouchableOpacity>
                 </View>
               </>
@@ -670,7 +660,9 @@ export default function CardsSearchScreen() {
   );
 }
 
-// -------------------- ESTILOS VISUAIS MELHORADOS --------------------
+/**
+ * Estilos Visuais
+ */
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
@@ -735,8 +727,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "600",
   },
+  cardSetInfo: {
+    color: "#CCC",
+    fontSize: 14,
+    marginTop: 4,
+  },
 
-  // ------------------ Modais ------------------
   modalContainer: {
     flex: 1,
     backgroundColor: DARK,
@@ -756,6 +752,7 @@ const styles = StyleSheet.create({
     width: 160,
     height: 220,
     marginBottom: 20,
+    alignSelf: "center",
   },
   modalText: {
     color: SECONDARY,
@@ -837,7 +834,6 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 
-  // ------------------ Modal Create ------------------
   modalCreateContainer: {
     flex: 1,
     backgroundColor: DARK,

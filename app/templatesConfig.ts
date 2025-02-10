@@ -320,9 +320,9 @@ const templates: TemplateItem[] = [
     backgroundPattern: "legendary-pattern.png",
   },
   {
-    id: 404,
+    id: 411,
     name: "Sombras",
-    description: "Desbloqueado com Mestre das Sombras.",
+    description: "Desbloqueado com o Titulo Elite dos 4.",
     isFree: false,
     requiredTitleId: 404,
     containerStyle: {
@@ -402,7 +402,7 @@ const templates: TemplateItem[] = [
     backgroundPattern: "epic-pattern.png",
   },
   {
-    id: 405,
+    id: 309,
     name: "Glória Eterna",
     description: "Tema supremo: esplendor máximo!",
     isFree: false,
