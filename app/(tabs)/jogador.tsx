@@ -151,10 +151,11 @@ export default function PlayerScreen() {
   const [rivalModalVisible, setRivalModalVisible] = useState(false);
   const [rivalData, setRivalData] = useState<RivalryData | null>(null);
 
-  // Cache de dados para o filtro atual
-  const [cachedFilter, setCachedFilter] = useState<string>("");
-  const [cachedMatches, setCachedMatches] = useState<MatchData[]>([]);
-  const [cachedStats, setCachedStats] = useState<PlayerStats | null>(null);
+
+   // Cria refs para cache
+   const cachedFilterRef = useRef<string>("");
+   const cachedMatchesRef = useRef<MatchData[]>([]);
+   const cachedStatsRef = useRef<PlayerStats | null>(null);
 
   // =============== EFEITOS (TEMPLATE ANIMAÇÃO) ===============
   useEffect(() => {
@@ -207,12 +208,15 @@ export default function PlayerScreen() {
       const leagueStored = (await AsyncStorage.getItem("@leagueId")) || "";
       const currentFilter = `${filterType}:${cityStored}:${leagueStored}`;
 
-      // Se o filtro não mudou e temos dados cacheados, usa-os
-      if (currentFilter === cachedFilter && cachedMatches.length > 0 && cachedStats) {
-        setStats(cachedStats);
-        // (Opcional) Atualiza streak e recomendação com os dados cacheados
+      // Usa os dados cacheados se o filtro não mudou
+      if (
+        currentFilter === cachedFilterRef.current &&
+        cachedMatchesRef.current.length > 0 &&
+        cachedStatsRef.current
+      ) {
+        setStats(cachedStatsRef.current);
       } else {
-        // 1) Busca partidas FILTRADAS (respeitando o filtro)
+        // Busca partidas filtradas
         const filteredMatches = await fetchAllMatches();
         const userMatches = filteredMatches.filter(
           (m) => m.player1_id === storedId || m.player2_id === storedId
@@ -220,14 +224,14 @@ export default function PlayerScreen() {
         const computedStats = computeBasicStats(storedId, userMatches);
         setStats(computedStats);
 
-        // Cacheia os resultados para o filtro atual
-        setCachedFilter(currentFilter);
-        setCachedMatches(userMatches);
-        setCachedStats(computedStats);
+        // Atualiza as refs de cache
+        cachedFilterRef.current = currentFilter;
+        cachedMatchesRef.current = userMatches;
+        cachedStatsRef.current = computedStats;
       }
 
       // Streak (calculado com os dados filtrados)
-      const { streakString, streakT } = computeCurrentStreak(storedId, cachedMatches.length > 0 ? cachedMatches : []);
+      const { streakString, streakT } = computeCurrentStreak(storedId, cachedMatchesRef.current.length > 0 ? cachedMatchesRef.current : []);
       setCurrentStreak(streakString);
       setStreakType(streakT);
 
@@ -254,7 +258,7 @@ export default function PlayerScreen() {
     } finally {
       setLoading(false);
     }
-  }, [cachedFilter, cachedMatches, cachedStats, router]);
+  }, [cachedFilterRef, cachedMatchesRef, cachedStatsRef, router]);
 
   // Recarrega os dados sempre que a tela ganhar foco
   useFocusEffect(

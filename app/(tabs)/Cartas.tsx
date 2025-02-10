@@ -109,28 +109,35 @@ export default function CardsSearchScreen() {
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
-
+  
       (async () => {
         try {
           // Carrega filtro
           const fType = (await AsyncStorage.getItem("@filterType")) || "all";
           const lId = (await AsyncStorage.getItem("@leagueId")) || "";
+          
+          // Carrega dados do usuário
+          const id = await AsyncStorage.getItem("@playerId");
+          const name = await AsyncStorage.getItem("@playerName") || "Jogador";
+          
           if (isActive) {
             setFilterType(fType);
             setLeagueId(lId);
+            setPlayerId(id || "");
+            setPlayerName(name);
           }
-
+  
           // Carrega coleções TCG (com cache)
           fetchCollections(isActive, cachedCollections);
         } catch (err) {
           console.error("Erro ao buscar coleções:", err);
         }
       })();
-
+  
       return () => {
         isActive = false;
       };
-    }, []) // <-- Remove dependências para evitar loops infinitos
+    }, [])
   );
 
   /** Função para buscar as coleções da API Pokémon TCG */

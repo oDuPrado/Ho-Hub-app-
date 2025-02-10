@@ -153,11 +153,6 @@ Below is the presentation including screenshots of the system! 🎨📲
 ✔️ **Direct registration and display of available slots**.  
 ![Calendar Screen](https://i.imgur.com/F574nnH.png)
 
-### 🃏 **Card Search Screen**  
-✔️ **Search for valid cards and check prices**.  
-✔️ **Trading system and marketplace** for players.  
-![Card Search Screen](https://i.imgur.com/dgcF9fU.png)
-
 ### 💱 **Trade Market Screen**  
 ✔️ Displays cards available for trading.  
 ✔️ Ability to mark **interest in other players' cards**.  

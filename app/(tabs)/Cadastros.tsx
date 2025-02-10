@@ -36,6 +36,7 @@ import {
   fetchRoleMembers,
   addRoleMember,
   removeRoleMember,
+  HOST_PLAYER_IDS
 } from "../hosts";
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -151,6 +152,10 @@ export default function CadastrosScreen() {
   // Qual role estamos adicionando?
   const [addingRole, setAddingRole] = useState<"host"|"judge"|"head"|"ban"|"vip">("host");
 
+  //Acessos negados
+  
+  const [accessDenied, setAccessDenied] = useState(false);
+
   // ================ useEffect inicial =================
   useEffect(() => {
     (async () => {
@@ -158,22 +163,70 @@ export default function CadastrosScreen() {
         setLoading(true);
         const storedId = await AsyncStorage.getItem("@userId");
         if (!storedId) {
+          console.log("🚫 Nenhum userId encontrado no AsyncStorage. Redirecionando para login.");
           router.replace("/(auth)/login");
           return;
         }
+  
+        let isHost = false;
+        let isAuthuser = false;
+  
+        console.log(`🔍 Verificando permissões do usuário: ${storedId}`);
+  
+        // ==== 1. Busca no Firebase quem é host ====
+        try {
+          const leaguesSnap = await getDocs(collection(db, "leagues"));
+          for (const leagueDoc of leaguesSnap.docs) {
+            const hostSnap = await getDocs(collection(db, `leagues/${leagueDoc.id}/roles/host/members`));
+            if (hostSnap.docs.some((doc) => doc.id === storedId)) {
+              isHost = true;
+              console.log(`✅ Encontrado como host no Firebase (Liga: ${leagueDoc.id})`);
+              break;
+            }
+          }
+        } catch (error) {
+          console.log("⚠️ Erro ao buscar hosts no Firebase, tentando fallback.", error);
+        }
+  
+        // ==== 2. Se não achou no Firebase, usa o fallback da lista estática ====
+        if (!isHost) {
+          isHost = HOST_PLAYER_IDS.includes(storedId);
+          if (isHost) {
+            console.log("🟡 Não encontrado no Firebase. Usando fallback da lista estática.");
+          } else {
+            console.log("🚫 Usuário não é host nem no Firebase nem na lista estática.");
+          }
+        }
+  
+        // ==== 3. Verifica se é Authuser ====
+        isAuthuser = Authuser.includes(storedId);
+        if (isAuthuser) {
+          console.log("✅ Usuário é um Authuser (Acesso total liberado).");
+        }
+  
+        // ==== 4. Define permissões ====
+        if (!isHost && !isAuthuser) {
+          console.log("🚫 Acesso negado. Usuário não tem permissões.");
+          setAccessDenied(true);
+          return;
+        }
+  
         setUserId(storedId);
-        const canLogins = Authuser.includes(storedId);
-        setCanSeeLogins(canLogins);
-
+  
+        // Somente Authusers podem ver logins e roles
+        setCanSeeLogins(isAuthuser);
+  
+        console.log(`🎯 Permissões definidas: isHost=${isHost}, isAuthuser=${isAuthuser}`);
         await loadTabData();
       } catch (error) {
+        console.log("❌ Erro inesperado ao verificar permissões:", error);
         Alert.alert("Erro", "Falha ao carregar cadastros.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [currentTab, router]);
-
+  }, [currentTab, router]);  
+  
   // ================ Carregar ao trocar de aba =================
   async function loadTabData() {
     if (currentTab === "players") {
@@ -612,6 +665,16 @@ export default function CadastrosScreen() {
   }
 
   // ============ RENDER ==============
+  if (accessDenied) {
+    return (
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <Text style={{ color: RED, fontSize: 18 }}>
+          Você não tem permissão para acessar esta página.
+        </Text>
+      </View>
+    );
+  }
+  
   if (loading) {
     return (
       <View style={[styles.container, { justifyContent: "center" }]}>
@@ -657,46 +720,45 @@ export default function CadastrosScreen() {
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[
-                styles.tabButton,
-                currentTab === "logins" && styles.tabButtonActive,
-                !canSeeLogins && { opacity: 0.3 },
-              ]}
-              onPress={() => {
-                if (canSeeLogins) switchTab("logins");
-              }}
-            >
-              <Text
-                style={[
-                  styles.tabButtonText,
-                  currentTab === "logins" && { color: RED },
-                ]}
-              >
-                Logins
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.tabButton,
-                currentTab === "roles" && styles.tabButtonActive,
-                !canSeeLogins && { opacity: 0.3 },
-              ]}
-              onPress={() => {
-                if (canSeeLogins) switchTab("roles");
-              }}
-            >
-              <Text
-                style={[
-                  styles.tabButtonText,
-                  currentTab === "roles" && { color: RED },
-                ]}
-              >
-                Roles
-              </Text>
-            </TouchableOpacity>
+            {canSeeLogins && (
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.tabButton,
+                    currentTab === "logins" && styles.tabButtonActive,
+                  ]}
+                  onPress={() => switchTab("logins")}
+                >
+                  <Text
+                    style={[
+                      styles.tabButtonText,
+                      currentTab === "logins" && { color: RED },
+                    ]}
+                  >
+                    Logins
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.tabButton,
+                    currentTab === "roles" && styles.tabButtonActive,
+                  ]}
+                  onPress={() => switchTab("roles")}
+                >
+                  <Text
+                    style={[
+                      styles.tabButtonText,
+                      currentTab === "roles" && { color: RED },
+                    ]}
+                  >
+                    Roles
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
+
 
           {/* CONTENT */}
           {currentTab === "players" && renderPlayersTab()}

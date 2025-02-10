@@ -160,12 +160,6 @@ Aqui está a apresentação com os prints das telas incluídos! 🎨📲
 
 ![Tela Calendário](https://i.imgur.com/F574nnH.png)  
 
-### 🃏 **Tela Cartas**  
-✔️ **Busca de cartas válidas e consulta de preços**.  
-✔️ **Sistema de trocas e vendas entre jogadores**.  
-
-![Tela Cartas](https://i.imgur.com/dgcF9fU.png)  
-
 ### 💱 **Tela Trade**  
 ✔️ Exibição de cartas disponíveis para troca.  
 ✔️ Possibilidade de marcar **interesse em cartas de outros jogadores**.  

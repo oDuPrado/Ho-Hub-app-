@@ -153,11 +153,6 @@ Aquí se presenta la documentación con capturas de pantalla del sistema incluid
 ✔️ **Registro directo y visualización de vacantes disponibles**.  
 ![Pantalla de Calendario](https://i.imgur.com/F574nnH.png)
 
-### 🃏 **Pantalla de Cartas**  
-✔️ **Búsqueda de cartas válidas y consulta de precios**.  
-✔️ **Sistema de intercambio y mercado entre jugadores**.  
-![Pantalla de Cartas](https://i.imgur.com/dgcF9fU.png)
-
 ### 💱 **Pantalla de Intercambio**  
 ✔️ Visualización de cartas disponibles para intercambio.  
 ✔️ Posibilidad de marcar **interés en las cartas de otros jugadores**.  
