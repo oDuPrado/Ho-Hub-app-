@@ -20,6 +20,8 @@
       "link_to_login": "Já tem conta? Entre Aqui",
       "link_to_signup": "Não tem conta? Criar Conta",
       "loading": "Carregando...",
+      "select_language": "Selecionar Idioma",
+      "cancel": "Cancelar",
       "alerts": {
         "welcome": "Bem-vindo",
         "empty_fields": "Preencha todos os campos (Nome, E-mail, Senha, ID e PIN).",
@@ -33,6 +35,7 @@
         "password_reset_sent": "Um link de redefinição foi enviado para seu e-mail.",
         "password_reset_error": "Erro ao enviar redefinição de senha: {{error}}",
         "incomplete_account": "Seu login não possui dados de playerId/pin. Conta incompleta.",
+        "ban_message": "Você foi banido por violar os Termos de Uso.",
         "missing_data": "Documento sem playerId/pin. Contate o suporte."
       }
     },
