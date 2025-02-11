@@ -20,9 +20,18 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter, useFocusEffect } from "expo-router";
-import { doc, getDoc, setDoc, getDocs, collection, query, where } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  getDocs,
+  collection,
+  query,
+  where
+} from "firebase/firestore";
 
 import { db } from "../../lib/firebaseConfig";
+
 import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 import templates, { TemplateItem } from "../templatesConfig";
 
@@ -34,9 +43,11 @@ import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
 import { FontAwesome5 } from "@expo/vector-icons";
 
+// Importamos do matchService
 import {
   fetchAllMatches,
-  fetchAllMatchesGlobal,
+  fetchAllStatsByFilter,
+  PlayerStatsData,
   MatchData,
 } from "../../lib/matchService";
 
@@ -46,17 +57,12 @@ interface PlayerInfo {
   fullname: string;
 }
 
-/** Estrutura p/ rivalidade. */
-interface RivalryData {
-  matchesCount: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  rivalryFactor: number;
-  rivalName: string;
-  rivalId: string;       // vamos guardar o ID
-  rivalAvatarId: number; // avatar do rival
-  rivalTemplateId: number; // template do rival
+/** Estrutura p/ exibir stats de confronto contra outro jogador. */
+interface ConfrontoStats {
+  matches: number;
+  userWins: number;
+  userLosses: number;
+  userDraws: number;
 }
 
 /** Lista de avatares exemplo */
@@ -71,7 +77,7 @@ const avatarList = [
   { id: 8, uri: require("../../assets/images/avatar/avatar8.jpg") },
 ];
 
-/** Mensagens de recomendação (balão) conforme stats */
+/** Mensagens de recomendação conforme stats */
 const recommendationMessages = {
   wins: [
     "Você está batendo mais que Machamp na academia!",
@@ -90,13 +96,6 @@ const recommendationMessages = {
   ],
 };
 
-/** Streak icons */
-const streakIcons = {
-  empty: "help-circle",  // Ionicons
-  win: "flame",
-  loss: "rainy",
-};
-
 export default function PlayerScreen() {
   const router = useRouter();
   
@@ -104,7 +103,7 @@ export default function PlayerScreen() {
   const [userName, setUserName] = useState("Jogador");
   const [loading, setLoading] = useState(true);
 
-  // Stats (filtradas)
+  // Stats
   const [stats, setStats] = useState<PlayerStats>({
     wins: 0,
     losses: 0,
@@ -114,11 +113,7 @@ export default function PlayerScreen() {
     tournamentPlacements: [],
   });
 
-  // Streak
-  const [currentStreak, setCurrentStreak] = useState<string>("Sem Streak");
-  const [streakType, setStreakType] = useState<"win"|"loss"|"empty">("empty");
-
-  // TÍTULOS (globais, baseados em estatísticas gerais)
+  // TÍTULOS
   const [unlockedTitles, setUnlockedTitles] = useState<TitleItem[]>([]);
   const [titlesModalVisible, setTitlesModalVisible] = useState(false);
   const [newTitleIndicator, setNewTitleIndicator] = useState(false);
@@ -147,36 +142,27 @@ export default function PlayerScreen() {
   const [showRecommendation, setShowRecommendation] = useState(true);
   const [recommendationText, setRecommendationText] = useState("");
 
-  // RIVAL MODAL (perfil do rival)
-  const [rivalModalVisible, setRivalModalVisible] = useState(false);
-  const [rivalData, setRivalData] = useState<RivalryData | null>(null);
+  // Filtro (all, city, league)
+  const [currentFilter, setCurrentFilter] = useState<string>("all");
 
+  // MODAL de Confronto com outro jogador
+  const [confrontModalVisible, setConfrontModalVisible] = useState(false);
+  const [confrontStats, setConfrontStats] = useState<ConfrontoStats | null>(null);
+  const [confrontName, setConfrontName] = useState("");
+  const [confrontAvatar, setConfrontAvatar] = useState<any>(null);
+  const [confrontTemplate, setConfrontTemplate] = useState<TemplateItem | null>(null);
 
-   // Cria refs para cache
-   const cachedFilterRef = useRef<string>("");
-   const cachedMatchesRef = useRef<MatchData[]>([]);
-   const cachedStatsRef = useRef<PlayerStats | null>(null);
+  // Carrega dados ao focar tela
+  useFocusEffect(
+    useCallback(() => {
+      loadPlayerData();
+    }, [])
+  );
 
-  // =============== EFEITOS (TEMPLATE ANIMAÇÃO) ===============
-  useEffect(() => {
-    const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
-    if (activeTemplate?.hasEpicAnimation) {
-      Animated.loop(
-        Animated.timing(epicIconSpin, {
-          toValue: 1,
-          duration: 4000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      ).start();
-    } else {
-      epicIconSpin.stopAnimation();
-      epicIconSpin.setValue(0);
-    }
-  }, [selectedTemplateId]);
-
-  // Função que carrega os dados do jogador (estatísticas, títulos, etc.)
-  const loadPlayerData = useCallback(async () => {
+  // =======================
+  // Carrega dados do jogador
+  // =======================
+  const loadPlayerData = async () => {
     try {
       setLoading(true);
       const storedId = await AsyncStorage.getItem("@userId");
@@ -188,7 +174,7 @@ export default function PlayerScreen() {
       setUserId(storedId);
       setUserName(storedName ?? "Jogador");
 
-      // Carrega avatar
+      // Avatar
       const storedAvatar = await AsyncStorage.getItem("@userAvatar");
       if (storedAvatar) {
         const avId = parseInt(storedAvatar, 10);
@@ -196,186 +182,63 @@ export default function PlayerScreen() {
         if (found) setSelectedAvatar(found.uri);
       }
 
-      // Carrega template
+      // Template
       const storedTemplateId = await AsyncStorage.getItem("@userTemplateId");
       if (storedTemplateId) {
         setSelectedTemplateId(parseInt(storedTemplateId, 10));
       }
 
-      // Obtém o filtro atual do AsyncStorage
-      const filterType = (await AsyncStorage.getItem("@filterType")) || "all";
-      const cityStored = (await AsyncStorage.getItem("@selectedCity")) || "";
-      const leagueStored = (await AsyncStorage.getItem("@leagueId")) || "";
-      const currentFilter = `${filterType}:${cityStored}:${leagueStored}`;
+      // Filtro
+      const fType = (await AsyncStorage.getItem("@filterType")) || "all";
+      setCurrentFilter(fType);
 
-      // Usa os dados cacheados se o filtro não mudou
-      if (
-        currentFilter === cachedFilterRef.current &&
-        cachedMatchesRef.current.length > 0 &&
-        cachedStatsRef.current
-      ) {
-        setStats(cachedStatsRef.current);
+      // Stats do backend
+      const aggregated = await fetchAllStatsByFilter(storedId);
+      const adaptedStats: PlayerStats = {
+        wins: aggregated.wins,
+        losses: aggregated.losses,
+        draws: aggregated.draws,
+        matchesTotal: aggregated.matchesTotal,
+        uniqueOpponents: aggregated.opponentsList.length,
+        tournamentPlacements: [],
+      };
+      setStats(adaptedStats);
+
+      // Se for league, computa títulos
+      if (fType === "league") {
+        const userTitles = computeLocalTitles(adaptedStats);
+        setUnlockedTitles(userTitles);
+        if (userTitles.some((t) => t.unlocked)) {
+          setNewTitleIndicator(true);
+        }
       } else {
-        // Busca partidas filtradas
-        const filteredMatches = await fetchAllMatches();
-        const userMatches = filteredMatches.filter(
-          (m) => m.player1_id === storedId || m.player2_id === storedId
-        );
-        const computedStats = computeBasicStats(storedId, userMatches);
-        setStats(computedStats);
-
-        // Atualiza as refs de cache
-        cachedFilterRef.current = currentFilter;
-        cachedMatchesRef.current = userMatches;
-        cachedStatsRef.current = computedStats;
+        // city ou all => sem títulos
+        setUnlockedTitles([]);
+        setNewTitleIndicator(false);
       }
 
-      // Streak (calculado com os dados filtrados)
-      const { streakString, streakT } = computeCurrentStreak(storedId, cachedMatchesRef.current.length > 0 ? cachedMatchesRef.current : []);
-      setCurrentStreak(streakString);
-      setStreakType(streakT);
-
-      // Títulos: calculados com estatísticas GLOBAIS (ignora filtro)
-      const globalMatches = await fetchAllMatchesGlobal();
-      const globalUserMatches = globalMatches.filter(
-        (m) => m.player1_id === storedId || m.player2_id === storedId
-      );
-      const globalStats = computeBasicStats(storedId, globalUserMatches);
-      const unlocked = computeTitles(globalStats);
-      const enriched = titles.map((t) => ({
-        ...t,
-        unlocked: unlocked.some((tt) => tt.id === t.id),
-      }));
-      setUnlockedTitles(enriched);
-      if (unlocked.length > 0) {
-        setNewTitleIndicator(true);
-      }
-
-      // Recomendação baseada nas estatísticas filtradas
-      defineRecommendation(stats);
+      defineRecommendation(adaptedStats);
     } catch (err) {
       console.log("Erro init Player:", err);
+      Alert.alert("Erro", "Não foi possível carregar seus dados.");
     } finally {
       setLoading(false);
     }
-  }, [cachedFilterRef, cachedMatchesRef, cachedStatsRef, router]);
+  };
 
-  // Recarrega os dados sempre que a tela ganhar foco
-  useFocusEffect(
-    useCallback(() => {
-      loadPlayerData();
-    }, [loadPlayerData])
-  );
-
-  // =============== SALVAR NO FIRESTORE ===============
-  async function updatePlayerAvatar(userId: string, avatarId: number) {
-    try {
-      await setDoc(doc(db, "players", userId), { avatarId }, { merge: true });
-    } catch (error) {
-      console.error("Erro ao salvar avatar:", error);
-    }
-  }
-
-  async function updatePlayerTemplate(userId: string, templateId: number) {
-    try {
-      await setDoc(doc(db, "players", userId), { templateId }, { merge: true });
-    } catch (error) {
-      console.error("Erro ao salvar template:", error);
-    }
-  }
-
-  // ============ FUNÇÕES DE STATS ============
-  function computeBasicStats(uId: string, userMatches: MatchData[]): PlayerStats {
-    let w = 0, l = 0, d = 0;
-    const oppSet = new Set<string>();
-
-    userMatches.forEach((mm) => {
-      if (!mm.outcomeNumber) return;
-      const isP1 = mm.player1_id === uId;
-      const rivalId = isP1 ? mm.player2_id : mm.player1_id;
-      if (rivalId && rivalId !== "N/A") oppSet.add(rivalId);
-
-      switch (mm.outcomeNumber) {
-        case 1:
-          isP1 ? w++ : l++;
-          break;
-        case 2:
-          isP1 ? l++ : w++;
-          break;
-        case 3:
-          d++;
-          break;
-        case 10:
-          l++;
-          break;
-      }
+  // =======================
+  // Títulos
+  // =======================
+  function computeLocalTitles(ps: PlayerStats): TitleItem[] {
+    return titles.map((t) => {
+      const unlocked = t.condition(ps);
+      return { ...t, unlocked };
     });
-
-    return {
-      wins: w,
-      losses: l,
-      draws: d,
-      matchesTotal: userMatches.length,
-      uniqueOpponents: oppSet.size,
-      tournamentPlacements: [],
-    };
   }
 
-  function computeCurrentStreak(uId: string, userMatches: MatchData[]): { streakString: string, streakT: "win"|"loss"|"empty" } {
-    if (userMatches.length === 0) {
-      return { streakString: "Sem Streak", streakT: "empty" };
-    }
-    userMatches.sort((a, b) => (a.id < b.id ? -1 : 1));
-    let streakCount = 0;
-    let sType: "win" | "loss" | null = null;
-    for (let i = userMatches.length - 1; i >= 0; i--) {
-      const mm = userMatches[i];
-      if (!mm.outcomeNumber) break;
-      const isP1 = mm.player1_id === uId;
-      let matchResult: "win" | "loss" | "draw" = "draw";
-      if (mm.outcomeNumber === 1) {
-        matchResult = isP1 ? "win" : "loss";
-      } else if (mm.outcomeNumber === 2) {
-        matchResult = isP1 ? "loss" : "win";
-      } else if (mm.outcomeNumber === 10) {
-        matchResult = "loss";
-      }
-      if (i === userMatches.length - 1) {
-        if (matchResult === "win") {
-          sType = "win";
-          streakCount = 1;
-        } else if (matchResult === "loss") {
-          sType = "loss";
-          streakCount = 1;
-        } else {
-          return { streakString: "Sem Streak", streakT: "empty" };
-        }
-      } else {
-        if (matchResult === sType) {
-          streakCount++;
-        } else {
-          break;
-        }
-      }
-    }
-    if (!sType) return { streakString: "Sem Streak", streakT: "empty" };
-    if (sType === "win" && streakCount >= 2) {
-      return { streakString: `${streakCount} Vitórias`, streakT: "win" };
-    } else if (sType === "loss" && streakCount >= 2) {
-      return { streakString: `${streakCount} Derrotas`, streakT: "loss" };
-    } else {
-      return { streakString: "Sem Streak", streakT: "empty" };
-    }
-  }
-
-  function computeTitles(ps: PlayerStats): TitleItem[] {
-    const result: TitleItem[] = [];
-    for (const t of titles) {
-      if (t.condition(ps)) result.push(t);
-    }
-    return result;
-  }
-
+  // =======================
+  // Recomendação
+  // =======================
   function defineRecommendation(ps: PlayerStats) {
     let best = "wins";
     let maxValue = ps.wins;
@@ -396,7 +259,77 @@ export default function PlayerScreen() {
     }
   }
 
-  // ============ PESQUISA RIVAL + PERFIL ============
+  // =======================
+  // Animação pro Template Épico
+  // =======================
+  useEffect(() => {
+    const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
+    if (activeTemplate?.hasEpicAnimation) {
+      Animated.loop(
+        Animated.timing(epicIconSpin, {
+          toValue: 1,
+          duration: 4000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      epicIconSpin.stopAnimation();
+      epicIconSpin.setValue(0);
+    }
+  }, [selectedTemplateId]);
+
+  // =======================
+  // Salvar avatar/template
+  // =======================
+  async function updatePlayerAvatar(uId: string, avatarId: number) {
+    try {
+      await setDoc(doc(db, "players", uId), { avatarId }, { merge: true });
+    } catch (error) {
+      console.error("Erro ao salvar avatar:", error);
+    }
+  }
+
+  async function updatePlayerTemplate(uId: string, templateId: number) {
+    try {
+      await setDoc(doc(db, "players", uId), { templateId }, { merge: true });
+    } catch (error) {
+      console.error("Erro ao salvar template:", error);
+    }
+  }
+
+  // =======================
+  // Barra de Pesquisa
+  // =======================
+  const closeSearchOverlay = () => {
+    Animated.timing(searchBarWidth, {
+      toValue: 0,
+      duration: 400,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: false,
+    }).start(() => {
+      setSearchOpen(false);
+      setSearchIconVisible(true);
+      setSearchText("");
+      setPlayersResult([]);
+    });
+  };
+
+  const handleToggleSearch = () => {
+    if (!searchOpen) {
+      setSearchOpen(true);
+      setSearchIconVisible(false);
+      Animated.timing(searchBarWidth, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    } else {
+      closeSearchOverlay();
+    }
+  };
+
   const handleSearchPlayers = async () => {
     if (!searchText.trim()) {
       Alert.alert("Busca", "Digite algo para buscar.");
@@ -423,7 +356,9 @@ export default function PlayerScreen() {
       const cityStored = await AsyncStorage.getItem("@selectedCity");
       const leagueStored = await AsyncStorage.getItem("@leagueId");
       const arr: PlayerInfo[] = [];
+
       if (!filterType || filterType === "all") {
+        // Buscar em /players
         const allSnap = await getDocs(collection(db, "players"));
         allSnap.forEach((docSnap) => {
           const d = docSnap.data();
@@ -465,86 +400,98 @@ export default function PlayerScreen() {
     }
   }
 
-  const handleCheckRival = async (userid: string, fullname: string) => {
+  // =======================
+  // Confronto: Exibir stats vs outro jogador
+  // =======================
+  async function handleCheckConfronto(opponentId: string, opponentName: string) {
     try {
-      setRivalModalVisible(true);
-      setRivalData(null);
-      const docRef = doc(db, "players", userid);
+      setConfrontModalVisible(true);
+      setConfrontName(opponentName);
+      setConfrontStats(null);
+      setConfrontAvatar(null);
+      setConfrontTemplate(null);
+
+      // 1) Pega avatar/template do oponente
+      // Observação: se você guarda em doc(db, "players", oppId), consulte lá
+      // Se guarda em doc(db, "leagues/{id}/players"), precisa de outra lógica
+      // Abaixo, supondo doc(db, "players", oppId):
+      const docRef = doc(db, "players", opponentId);
       const docSnap = await getDoc(docRef);
-      let rivalAvatarId = 1;
-      let rivalTemplateId = 1;
+      let oppAvId = 1;
+      let oppTempId = 1;
       if (docSnap.exists()) {
         const dd = docSnap.data();
-        if (dd.avatarId) rivalAvatarId = dd.avatarId;
-        if (dd.templateId) rivalTemplateId = dd.templateId;
+        if (dd.avatarId) oppAvId = dd.avatarId;
+        if (dd.templateId) oppTempId = dd.templateId;
       }
-      const filteredMatches = await fetchAllMatches();
-      const userMatches = filteredMatches.filter(
-        (m) => m.player1_id === userId || m.player2_id === userId
-      );
-      const directMatches = userMatches.filter(
-        (m) =>
-          (m.player1_id === userId && m.player2_id === userid) ||
-          (m.player2_id === userId && m.player1_id === userid)
-      );
-      let w = 0, l = 0, d = 0;
-      directMatches.forEach((mm) => {
-        if (!mm.outcomeNumber) return;
-        const isP1 = mm.player1_id === userId;
-        switch (mm.outcomeNumber) {
-          case 1:
-            isP1 ? w++ : l++;
-            break;
-          case 2:
-            isP1 ? l++ : w++;
-            break;
-          case 3:
-            d++;
-            break;
-          case 10:
-            l++;
-            break;
+      const foundAv = avatarList.find((x) => x.id === oppAvId);
+      setConfrontAvatar(foundAv ? foundAv.uri : null);
+
+      const foundT = templates.find((x) => x.id === oppTempId);
+      setConfrontTemplate(foundT || null);
+
+      // 2) Pega todas as partidas do FILTRO
+      const allMatches = await fetchAllMatches();
+      // 3) Filtra as do user com esse oponente
+      const direct = allMatches.filter((mm) => {
+        if (!mm.outcomeNumber) return false;
+        const isUser1 = mm.player1_id === userId && mm.player2_id === opponentId;
+        const isUser2 = mm.player2_id === userId && mm.player1_id === opponentId;
+        return isUser1 || isUser2;
+      });
+
+      // 4) Calcula vitórias/derrotas/empates
+      let userW = 0,
+        userL = 0,
+        userD = 0;
+      direct.forEach((mm) => {
+        const isUserP1 = mm.player1_id === userId;
+        if (mm.outcomeNumber === 1) {
+          // P1 vence
+          if (isUserP1) userW++;
+          else userL++;
+        } else if (mm.outcomeNumber === 2) {
+          // P2 vence
+          if (isUserP1) userL++;
+          else userW++;
+        } else if (mm.outcomeNumber === 3) {
+          userD++;
+        } else if (mm.outcomeNumber === 10) {
+          // Derrota dupla
+          userL++;
         }
       });
-      const matchesEntreEles = directMatches.length;
-      const totalMatchesUser = userMatches.length;
-      const rivalryFactor = 100 * (matchesEntreEles / (totalMatchesUser + 1));
-      setRivalData({
-        matchesCount: matchesEntreEles,
-        wins: w,
-        losses: l,
-        draws: d,
-        rivalryFactor,
-        rivalName: fullname,
-        rivalId: userid,
-        rivalAvatarId,
-        rivalTemplateId,
-      });
-      closeSearchOverlay();
-    } catch (err) {
-      console.log("Erro handleCheckRival:", err);
-      Alert.alert("Erro", "Falha ao calcular rivalidade.");
+      const conf: ConfrontoStats = {
+        matches: direct.length,
+        userWins: userW,
+        userLosses: userL,
+        userDraws: userD,
+      };
+      setConfrontStats(conf);
+    } catch (error) {
+      console.error("Erro ao calcular confronto:", error);
+      Alert.alert("Erro", "Não foi possível calcular o confronto.");
     }
+  }
+
+  // =======================
+  // TÍTULOS
+  // =======================
+  const handleOpenTitles = () => {
+    setTitlesModalVisible(true);
+    setNewTitleIndicator(false);
   };
 
-  const closeSearchOverlay = () => {
-    Animated.timing(searchBarWidth, {
-      toValue: 0,
-      duration: 400,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: false,
-    }).start(() => {
-      setSearchOpen(false);
-      setSearchIconVisible(true);
-      setSearchText("");
-      setPlayersResult([]);
-    });
+  // =======================
+  // HISTÓRICO
+  // =======================
+  const handleOpenHistory = () => {
+    setHistoryModalVisible(true);
   };
 
-  // ============ AVATAR + TEMPLATE ============
-  const defaultAvatar = require("../../assets/images/avatar/image.jpg");
-  const currentAvatar = selectedAvatar || defaultAvatar;
-
+  // =======================
+  // AVATAR / TEMPLATE
+  // =======================
   const handleSelectAvatar = async (avatarUri: any, avId: number) => {
     setSelectedAvatar(avatarUri);
     setAvatarModalVisible(false);
@@ -558,41 +505,25 @@ export default function PlayerScreen() {
     await updatePlayerTemplate(userId, templateId);
   };
 
+  // =======================
+  // Layout final
+  // =======================
   const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
   const fallbackTemplate = templates[0];
   const usedTemplate = activeTemplate || fallbackTemplate;
   const templateStyle = usedTemplate.containerStyle || {};
   const textStyle = usedTemplate.textStyle || { color: "#FFFFFF" };
 
+  const defaultAvatar = require("../../assets/images/avatar/image.jpg");
+  const currentAvatar = selectedAvatar || defaultAvatar;
+
   const spin = epicIconSpin.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
 
-  // ============ MODAIS ============
-  const handleOpenTitles = () => {
-    setTitlesModalVisible(true);
-    setNewTitleIndicator(false);
-  };
-
-  const handleOpenHistory = () => {
-    setHistoryModalVisible(true);
-  };
-
-  const handleToggleSearch = () => {
-    if (!searchOpen) {
-      setSearchOpen(true);
-      setSearchIconVisible(false);
-      Animated.timing(searchBarWidth, {
-        toValue: 1,
-        duration: 400,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start();
-    } else {
-      closeSearchOverlay();
-    }
-  };
+  const totalMatches = stats.matchesTotal;
+  const wrValue = totalMatches > 0 ? ((stats.wins / totalMatches) * 100).toFixed(1) : "0";
 
   if (loading) {
     return (
@@ -601,10 +532,6 @@ export default function PlayerScreen() {
       </View>
     );
   }
-
-  const totalMatches = stats.matchesTotal;
-  const wrValue = totalMatches > 0 ? ((stats.wins / totalMatches) * 100).toFixed(1) : "0";
-  const streakIconName = streakIcons[streakType];
 
   return (
     <View style={styles.mainContainer}>
@@ -618,23 +545,7 @@ export default function PlayerScreen() {
         onClose={() => setHistoryModalVisible(false)}
         userId={userId}
       />
-      <Modal
-        visible={rivalModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setRivalModalVisible(false)}
-      >
-        <View style={styles.rivalModalOverlay}>
-          {rivalData ? (
-            <RivalProfileCard
-              rivalData={rivalData}
-              onClose={() => setRivalModalVisible(false)}
-            />
-          ) : (
-            <ActivityIndicator size="large" color={RED} />
-          )}
-        </View>
-      </Modal>
+      {/* Modal do Avatar */}
       <Modal
         visible={avatarModalVisible}
         transparent
@@ -663,6 +574,8 @@ export default function PlayerScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal Template */}
       <TemplateModal
         visible={templateModalVisible}
         onClose={() => setTemplateModalVisible(false)}
@@ -670,6 +583,67 @@ export default function PlayerScreen() {
         onSelectTemplate={handleSelectTemplate}
         currentTemplateId={selectedTemplateId}
       />
+
+      {/* Modal de Confronto com outro jogador */}
+      <Modal
+        visible={confrontModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setConfrontModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confrontModalContainer}>
+            {confrontStats ? (
+              <>
+                {confrontTemplate && (
+                  <View style={[styles.confrontTemplate, confrontTemplate.containerStyle || {}]}>
+                    <FontAwesome5
+                      name={confrontTemplate.iconName}
+                      size={32}
+                      color={confrontTemplate.iconColor}
+                    />
+                  </View>
+                )}
+                <Text style={styles.confrontName}>{confrontName}</Text>
+                <Image
+                  source={confrontAvatar || defaultAvatar}
+                  style={[styles.confrontAvatar, { borderColor: RED }]}
+                />
+                <View style={styles.confrontStatsRow}>
+                  <View style={styles.confrontStatBox}>
+                    <Ionicons name="trophy" size={20} color="#E3350D" />
+                    <Text style={styles.confrontLabel}>Vitórias (Você)</Text>
+                    <Text style={styles.confrontValue}>{confrontStats.userWins}</Text>
+                  </View>
+                  <View style={styles.confrontStatBox}>
+                    <Ionicons name="sad" size={20} color="#FFF" />
+                    <Text style={styles.confrontLabel}>Derrotas (Você)</Text>
+                    <Text style={styles.confrontValue}>{confrontStats.userLosses}</Text>
+                  </View>
+                  <View style={styles.confrontStatBox}>
+                    <Ionicons name="hand-left" size={20} color="#f5a623" />
+                    <Text style={styles.confrontLabel}>Empates</Text>
+                    <Text style={styles.confrontValue}>{confrontStats.userDraws}</Text>
+                  </View>
+                </View>
+                <Text style={styles.confrontMatches}>
+                  Partidas Totais: {confrontStats.matches}
+                </Text>
+              </>
+            ) : (
+              <ActivityIndicator size="large" color={RED} />
+            )}
+            <TouchableOpacity
+              style={styles.confrontCloseBtn}
+              onPress={() => setConfrontModalVisible(false)}
+            >
+              <Text style={{ color: "#FFF", fontWeight: "bold" }}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Header (Barra de Pesquisa) */}
       <View style={styles.header}>
         {searchIconVisible && (
           <TouchableOpacity style={{ marginRight: 12 }} onPress={handleToggleSearch}>
@@ -709,7 +683,11 @@ export default function PlayerScreen() {
                   <TouchableOpacity
                     key={pl.userid}
                     style={styles.searchItem}
-                    onPress={() => handleCheckRival(pl.userid, pl.fullname)}
+                    onPress={() => {
+                      // Ao clicar, mostra modal de confronto
+                      handleCheckConfronto(pl.userid, pl.fullname);
+                      closeSearchOverlay();
+                    }}
                   >
                     <Text style={{ color: WHITE }}>{pl.fullname}</Text>
                   </TouchableOpacity>
@@ -718,6 +696,7 @@ export default function PlayerScreen() {
           </View>
         </TouchableWithoutFeedback>
       )}
+
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         <View style={[styles.playerCard, templateStyle]}>
           <View style={styles.templateIconContainer}>
@@ -729,8 +708,11 @@ export default function PlayerScreen() {
               <FontAwesome5 name={usedTemplate.iconName} size={32} color={usedTemplate.iconColor} />
             )}
           </View>
-          <TouchableOpacity style={styles.gearIconContainer} onPress={() => setTemplateModalVisible(true)}>
-            <Ionicons name="settings-sharp" size={24} color="#000000" />
+          <TouchableOpacity
+            style={styles.gearIconContainer}
+            onPress={() => setTemplateModalVisible(true)}
+          >
+            <Ionicons name="settings-sharp" size={24} color="#000" />
           </TouchableOpacity>
           <Text style={[styles.playerName, textStyle]}>{userName}</Text>
           {usedTemplate.emblemImage && (
@@ -741,14 +723,8 @@ export default function PlayerScreen() {
           <TouchableOpacity onPress={() => setAvatarModalVisible(true)}>
             <Image source={currentAvatar} style={[styles.avatar, { borderColor: RED }]} />
           </TouchableOpacity>
-          <Animatable.View style={styles.streakContainer} animation="pulse" iterationCount="infinite" duration={2000}>
-            <Ionicons
-              name={streakIconName as keyof typeof Ionicons.glyphMap}
-              size={30}
-              color={streakType === "win" ? "#00D840" : streakType === "loss" ? "#F44336" : "#999"}
-            />
-            <Text style={[styles.streakText, textStyle]}>{currentStreak}</Text>
-          </Animatable.View>
+
+          {/* Stats */}
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
               <Text style={[styles.statLabel, textStyle]}>Vitórias</Text>
@@ -777,16 +753,24 @@ export default function PlayerScreen() {
               <Text style={[styles.statValue, textStyle]}>{stats.uniqueOpponents}</Text>
             </View>
           </View>
+
           {showRecommendation && (
             <Animatable.View animation="fadeInUp" style={styles.recommendationCard}>
               <Text style={styles.recommendationText}>{recommendationText}</Text>
-              <TouchableOpacity style={styles.closeRecommendation} onPress={() => setShowRecommendation(false)}>
+              <TouchableOpacity
+                style={styles.closeRecommendation}
+                onPress={() => setShowRecommendation(false)}
+              >
                 <Ionicons name="close-circle" size={24} color="#FFF" />
               </TouchableOpacity>
             </Animatable.View>
           )}
         </View>
-        <TouchableOpacity style={[styles.titlesButton, { backgroundColor: "#000000" }]} onPress={handleOpenTitles}>
+
+        <TouchableOpacity
+          style={[styles.titlesButton, { backgroundColor: "#000000" }]}
+          onPress={handleOpenTitles}
+        >
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <Text style={styles.titlesButtonText}>Ver Títulos</Text>
             {newTitleIndicator && (
@@ -796,7 +780,10 @@ export default function PlayerScreen() {
             )}
           </View>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.historyButton, { backgroundColor: "#000000" }]} onPress={handleOpenHistory}>
+        <TouchableOpacity
+          style={[styles.historyButton, { backgroundColor: "#000000" }]}
+          onPress={handleOpenHistory}
+        >
           <Text style={styles.historyButtonText}>Ver Histórico de Torneios</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -804,80 +791,7 @@ export default function PlayerScreen() {
   );
 }
 
-/** SUBCOMPONENTE: RivalProfileCard */
-function RivalProfileCard({
-  rivalData,
-  onClose,
-}: {
-  rivalData: RivalryData;
-  onClose: () => void;
-}) {
-  const rivalAvatar = avatarList.find((a) => a.id === rivalData.rivalAvatarId)?.uri;
-  const rivalTemplate: TemplateItem = templates.find((t) => t.id === rivalData.rivalTemplateId) || templates[0];
-  const containerStyle = rivalTemplate.containerStyle;
-  const textStyle = rivalTemplate.textStyle || { color: "#FFFFFF" };
-  return (
-    <View style={[stylesRival.profileContainer]}>
-      <View style={[stylesRival.rivalCard, containerStyle]}>
-        <Text style={[stylesRival.rivalName, textStyle]}>{rivalData.rivalName}</Text>
-        <Image source={rivalAvatar || require("../../assets/images/avatar/image.jpg")} style={[stylesRival.rivalAvatar, { borderColor: "#E3350D" }]} />
-        <View style={stylesRival.statsRow}>
-          <View style={stylesRival.statCard}>
-            <Ionicons name="trophy" size={20} color="#00D840" />
-            <Text style={[stylesRival.statLabel, textStyle]}>Vitórias</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>{rivalData.wins}</Text>
-          </View>
-          <View style={stylesRival.statCard}>
-            <Ionicons name="skull" size={20} color="#F44336" />
-            <Text style={[stylesRival.statLabel, textStyle]}>Derrotas</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>{rivalData.losses}</Text>
-          </View>
-          <View style={stylesRival.statCard}>
-            <Ionicons name="thumbs-up" size={20} color="#f5a623" />
-            <Text style={[stylesRival.statLabel, textStyle]}>Empates</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>{rivalData.draws}</Text>
-          </View>
-        </View>
-        <View style={stylesRival.statsRow}>
-          <View style={stylesRival.statCard}>
-            <Ionicons name="flash" size={20} color="#E3350D" />
-            <Text style={[stylesRival.statLabel, textStyle]}>Partidas</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>{rivalData.matchesCount}</Text>
-          </View>
-          <View style={stylesRival.statCard}>
-            <Ionicons name="stats-chart" size={20} color="#FFC312" />
-            <Text style={[stylesRival.statLabel, textStyle]}>WinRate</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>{((rivalData.wins / rivalData.matchesCount) * 100).toFixed(1)}%</Text>
-          </View>
-          <View style={stylesRival.statCard}>
-            <Ionicons name="alert-circle" size={20} color="#7f12ee" />
-            <Text style={[stylesRival.statLabel, textStyle]}>Fator Rival</Text>
-            <Text style={[stylesRival.statValue, textStyle]}>{rivalData.rivalryFactor.toFixed(1)}%</Text>
-          </View>
-        </View>
-        <TouchableOpacity style={stylesRival.closeBtn} onPress={onClose}>
-          <Text style={stylesRival.closeBtnText}>Fechar</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-
 // ---------------- ESTILOS RivalProfileCard ----------------
-const stylesRival = StyleSheet.create({
-  profileContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  rivalCard: { width: "90%", borderWidth: 2, borderColor: "#333", borderRadius: 12, padding: 16, alignItems: "center" },
-  rivalName: { fontSize: 20, fontWeight: "bold", marginBottom: 8, textAlign: "center" },
-  rivalAvatar: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, marginBottom: 16 },
-  statsRow: { flexDirection: "row", justifyContent: "space-around", width: "100%", marginVertical: 6 },
-  statCard: { backgroundColor: "rgba(0,0,0,0.3)", borderRadius: 8, padding: 8, alignItems: "center", width: 80 },
-  statLabel: { marginTop: 2, fontSize: 12 },
-  statValue: { fontSize: 14, fontWeight: "bold", marginTop: 2 },
-  closeBtn: { marginTop: 20, backgroundColor: "#E3350D", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
-  closeBtnText: { color: "#FFF", fontWeight: "bold" },
-});
-
-// ---------------- ESTILOS GERAIS PLAYER SCREEN ----------------
 const DARK_BG = "#1E1E1E";
 const CARD_BG = "#292929";
 const BORDER_COLOR = "#4D4D4D";
@@ -887,38 +801,274 @@ const WHITE = "#FFFFFF";
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: DARK_BG },
   loaderContainer: { flex: 1, backgroundColor: DARK_BG, justifyContent: "center", alignItems: "center" },
-  header: { marginTop: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: 16, marginBottom: 10 },
-  searchContainer: { backgroundColor: CARD_BG, borderRadius: 8, borderWidth: 1, borderColor: BORDER_COLOR, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, overflow: "hidden" },
-  searchInput: { color: WHITE, fontSize: 14, width: "100%", paddingVertical: 4 },
-  searchOverlay: { position: "absolute", top: 80, left: 0, right: 0, bottom: 0, zIndex: 999 },
-  searchResultBox: { marginHorizontal: 16, backgroundColor: CARD_BG, borderRadius: 8, padding: 8 },
-  searchItem: { backgroundColor: "#444", borderRadius: 6, padding: 8, marginVertical: 4 },
-  playerCard: { backgroundColor: CARD_BG, marginHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: BORDER_COLOR, padding: 16, alignItems: "center", position: "relative", marginTop: 10 },
-  templateIconContainer: { position: "absolute", top: 10, right: 10 },
-  gearIconContainer: { position: "absolute", top: 10, left: 10 },
-  playerName: { fontSize: 20, fontWeight: "bold", marginBottom: 6, textAlign: "center" },
-  avatar: { width: 100, height: 100, borderRadius: 50, marginVertical: 12, borderWidth: 2 },
-  streakContainer: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
-  streakText: { fontSize: 16, fontWeight: "bold", marginLeft: 5 },
-  statsRow: { flexDirection: "row", marginVertical: 6, justifyContent: "space-around", width: "100%" },
-  statBox: { alignItems: "center", flex: 1, marginVertical: 6 },
-  statLabel: { fontSize: 14, marginBottom: 4 },
-  statValue: { fontSize: 16, fontWeight: "bold" },
-  recommendationCard: { backgroundColor: "#444", borderRadius: 8, padding: 10, marginTop: 14, width: "100%", position: "relative" },
-  recommendationText: { color: "#fff", fontStyle: "italic", textAlign: "center" },
-  closeRecommendation: { position: "absolute", top: 6, right: 6 },
-  titlesButton: { borderWidth: 1, borderColor: "#FFFFFF", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginHorizontal: 16, marginTop: 20 },
-  titlesButtonText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 16 },
-  newTitleBadge: { backgroundColor: RED, borderRadius: 10, marginLeft: 6, paddingHorizontal: 5, paddingVertical: 2 },
-  newTitleBadgeText: { color: "#FFF", fontSize: 10, fontWeight: "bold" },
-  historyButton: { borderWidth: 1, borderColor: "#FFFFFF", borderRadius: 8, paddingVertical: 12, alignItems: "center", marginHorizontal: 16, marginTop: 10 },
-  historyButtonText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 16 },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center" },
-  modalContent: { backgroundColor: CARD_BG, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: BORDER_COLOR, maxHeight: "85%", alignItems: "center" },
-  modalTitle: { fontSize: 20, fontWeight: "bold", textAlign: "center", marginBottom: 10 },
-  closeModalBtn: { backgroundColor: RED, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 20, alignSelf: "center", marginTop: 10 },
-  closeModalText: { color: WHITE, fontWeight: "bold", fontSize: 14 },
-  rivalModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center" },
-  avatarChoice: { margin: 8, borderRadius: 8, overflow: "hidden", borderWidth: 2, borderColor: BORDER_COLOR },
-  avatarImage: { width: 80, height: 80 },
+  header: {
+    marginTop: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  searchContainer: {
+    backgroundColor: CARD_BG,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BORDER_COLOR,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    overflow: "hidden",
+  },
+  searchInput: {
+    color: WHITE,
+    fontSize: 14,
+    width: "100%",
+    paddingVertical: 4,
+  },
+  searchOverlay: {
+    position: "absolute",
+    top: 80,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
+  },
+  searchResultBox: {
+    marginHorizontal: 16,
+    backgroundColor: CARD_BG,
+    borderRadius: 8,
+    padding: 8,
+  },
+  searchItem: {
+    backgroundColor: "#444",
+    borderRadius: 6,
+    padding: 8,
+    marginVertical: 4,
+  },
+  playerCard: {
+    backgroundColor: CARD_BG,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_COLOR,
+    padding: 16,
+    alignItems: "center",
+    position: "relative",
+    marginTop: 10,
+  },
+  templateIconContainer: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+  },
+  gearIconContainer: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+  },
+  playerName: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginVertical: 12,
+    borderWidth: 2,
+  },
+  statsRow: {
+    flexDirection: "row",
+    marginVertical: 6,
+    justifyContent: "space-around",
+    width: "100%",
+  },
+  statBox: {
+    alignItems: "center",
+    flex: 1,
+    marginVertical: 6,
+  },
+  statLabel: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  recommendationCard: {
+    backgroundColor: "#444",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 14,
+    width: "100%",
+    position: "relative",
+  },
+  recommendationText: {
+    color: "#fff",
+    fontStyle: "italic",
+    textAlign: "center",
+  },
+  closeRecommendation: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+  },
+  titlesButton: {
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginTop: 20,
+  },
+  titlesButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  newTitleBadge: {
+    backgroundColor: RED,
+    borderRadius: 10,
+    marginLeft: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  newTitleBadgeText: {
+    color: "#FFF",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  historyButton: {
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginTop: 10,
+  },
+  historyButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: BORDER_COLOR,
+    maxHeight: "85%",
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  closeModalBtn: {
+    backgroundColor: RED,
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    alignSelf: "center",
+    marginTop: 10,
+  },
+  closeModalText: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  avatarChoice: {
+    margin: 8,
+    borderRadius: 8,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: BORDER_COLOR,
+  },
+  avatarImage: {
+    width: 80,
+    height: 80,
+  },
+
+  // Modal de Confronto
+  confrontModalContainer: {
+    backgroundColor: CARD_BG,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_COLOR,
+    padding: 16,
+    width: "90%",
+    alignItems: "center",
+  },
+  confrontTemplate: {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    padding: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#555",
+  },
+  confrontName: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+  confrontAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 2,
+    marginBottom: 16,
+  },
+  confrontStatsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    marginVertical: 6,
+  },
+  confrontStatBox: {
+    backgroundColor: "#444",
+    borderRadius: 8,
+    padding: 8,
+    alignItems: "center",
+    width: "30%",
+  },
+  confrontLabel: {
+    color: "#CCC",
+    fontSize: 12,
+    marginTop: 4,
+    textAlign: "center",
+  },
+  confrontValue: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginTop: 4,
+  },
+  confrontMatches: {
+    color: "#CCC",
+    fontSize: 14,
+    marginTop: 8,
+  },
+  confrontCloseBtn: {
+    backgroundColor: RED,
+    borderRadius: 6,
+    marginTop: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
 });

@@ -24,9 +24,6 @@ import { auth, db } from "../../lib/firebaseConfig";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
 import { Audio } from "expo-av";
-
-// Mantemos a importação e a lógica original de Titles e Stats (não alteramos)
-import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 import {
   collection,
   doc,
@@ -34,14 +31,21 @@ import {
   getDocs,
   query,
   where,
-  limit,
-  orderBy,
-  startAfter,
+  // As outras imports se mantêm se quiser
 } from "firebase/firestore";
 
-// Lógica de partidas sem mexer no core
-import { fetchAllMatches, MatchData } from "../../lib/matchService";
+// ===== Importamos Titles e Stats originais =====
+import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 
+// ===== Importamos as funções novas de estatísticas/rival =====
+import {
+  fetchAllStatsByFilter, // ✅ Busca stats agregadas por filtro (liga/cidade/todas)
+  fetchRivalByFilter,    // ✅ Busca rival do backend baseado no filtro
+  RivalData as RivalBackendData,
+  PlayerStatsData as PlayerStatsBackend,
+} from "../../lib/matchService";
+
+// Avatares e config UI
 const avatarList = [
   { id: 1, uri: require("../../assets/images/avatar/avatar1.jpg") },
   { id: 2, uri: require("../../assets/images/avatar/avatar2.jpg") },
@@ -53,11 +57,15 @@ const avatarList = [
   { id: 8, uri: require("../../assets/images/avatar/avatar8.jpg") },
 ];
 
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Interfaces originais
+// ======= INTERFACES =======
+// Aqui mantemos a interface RivalData usada no layout (só para o state)
 interface RivalData {
   rivalId: string;
   rivalName: string;
@@ -75,12 +83,13 @@ interface TitleWithProgress extends TitleItem {
 export default function HomeScreen() {
   const router = useRouter();
 
-  const [matches, setMatches] = useState<MatchData[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCalculating, setIsCalculating] = useState(false);
   const [userId, setUserId] = useState("");
   const [userName, setUserName] = useState("Jogador");
   const [avatarUri, setAvatarUri] = useState<any>(null);
+
+  // Stats do FRONT (mesmo shape que Titles e Stats pedem)
   const [stats, setStats] = useState<PlayerStats>({
     wins: 0,
     losses: 0,
@@ -90,22 +99,21 @@ export default function HomeScreen() {
     tournamentPlacements: [],
   });
 
-  // Títulos (não alterar lógica)
+  // Títulos
   const [closestTitles, setClosestTitles] = useState<TitleWithProgress[]>([]);
 
-  // Rival
+  // Rival (layout)
   const [rivalInfo, setRivalInfo] = useState<RivalData | null>(null);
   const [rivalModalVisible, setRivalModalVisible] = useState(false);
 
-  // Som de batalha para Rival Modal
   const battleMusicRef = useRef<Audio.Sound | null>(null);
 
-  // Modal de Coleções (sem mexer na lógica, apenas estilo)
+  // Modal Coleções
   const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
   const [validCollections, setValidCollections] = useState<any[]>([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
 
-  // Melhor Modal de Filtro
+  // Modal de Filtro
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [showMosaicCities, setShowMosaicCities] = useState(false);
   const [showMosaicLeagues, setShowMosaicLeagues] = useState(false);
@@ -116,14 +124,18 @@ export default function HomeScreen() {
   const [fetchingLeagues, setFetchingLeagues] = useState(false);
   const [showAllLeagues, setShowAllLeagues] = useState(false);
 
-  // Modal de Boas-Vindas (substitui o Alert)
+  // Modal de Boas-Vindas
   const [welcomeModalVisible, setWelcomeModalVisible] = useState(false);
 
+  // =============================
+  // useEffect Inicial
+  // =============================
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
 
+        // 1) Pega userId e nome
         const storedId = await AsyncStorage.getItem("@userId");
         const storedName = await AsyncStorage.getItem("@userName");
         if (!storedId) {
@@ -133,6 +145,7 @@ export default function HomeScreen() {
         setUserId(storedId);
         setUserName(storedName || "Jogador");
 
+        // Avatar
         const storedAvatar = await AsyncStorage.getItem("@userAvatar");
         if (storedAvatar) {
           const avId = parseInt(storedAvatar, 10);
@@ -140,25 +153,47 @@ export default function HomeScreen() {
           if (found) setAvatarUri(found.uri);
         }
 
-        // Lê se devemos mostrar modal de boas-vindas
+        // Boas-vindas
         const showWelcome = await AsyncStorage.getItem("@showWelcomeModal");
         if (showWelcome === "true") {
           setWelcomeModalVisible(true);
           await AsyncStorage.removeItem("@showWelcomeModal");
         }
 
-        const allMatches = await fetchAllMatches();
-        const userMatches = allMatches.filter(
-          (m) => m.player1_id === storedId || m.player2_id === storedId
-        );
-        setMatches(userMatches);
+        // 3) Lê STATs AGREGADAS do backend (já somadas conforme o filtro)
+        const aggregated = await fetchAllStatsByFilter(storedId);
 
-        const newStats = computeBasicStats(storedId, userMatches);
-        setStats(newStats);
-        computeTitlesProgress(newStats);
+        // Precisamos adaptar para o shape PlayerStats (usado no titles)
+        const adaptedStats: PlayerStats = {
+          wins: aggregated.wins,
+          losses: aggregated.losses,
+          draws: aggregated.draws,
+          matchesTotal: aggregated.matchesTotal,
+          uniqueOpponents: aggregated.opponentsList.length,
+          tournamentPlacements: [],
+        };
+        setStats(adaptedStats);
 
-        const newRival = await computeBiggestRival(storedId, userMatches);
-        await handleRivalDetection(newRival);
+        // Calcula títulos
+        computeTitlesProgress(adaptedStats);
+
+        // 4) Lê Rival do backend
+        const backendRival = await fetchRivalByFilter(storedId);
+        if (backendRival) {
+          // converte RivalBackendData em RivalData local
+          const newRival: RivalData = {
+            rivalId: backendRival.rivalId,
+            rivalName: backendRival.rivalName,
+            matches: backendRival.matches,
+            userWins: backendRival.userWins,
+            rivalWins: backendRival.rivalWins,
+            lastWinner: backendRival.lastWinner,
+            wrPercentage: backendRival.wrPercentage,
+          };
+          await handleRivalDetection(newRival);
+        } else {
+          setRivalInfo(null);
+        }
       } catch (err) {
         Alert.alert("Erro", "Não foi possível carregar dados.");
       } finally {
@@ -167,7 +202,7 @@ export default function HomeScreen() {
     })();
   }, [router]);
 
-  // Quando Rival Modal fica VISÍVEL, toca a música em loop; quando fecha, para
+  // Música do Rival
   useEffect(() => {
     if (rivalModalVisible) {
       loadBattleMusic();
@@ -176,46 +211,9 @@ export default function HomeScreen() {
     }
   }, [rivalModalVisible]);
 
-  // Lógica original para stats
-  function computeBasicStats(uId: string, userMatches: MatchData[]): PlayerStats {
-    let wins = 0,
-      losses = 0,
-      draws = 0;
-    const oppSet = new Set<string>();
-
-    for (let mm of userMatches) {
-      if (!mm.outcomeNumber) continue;
-      const isP1 = mm.player1_id === uId;
-      const rivalId = isP1 ? mm.player2_id : mm.player1_id;
-      if (rivalId && rivalId !== "N/A") oppSet.add(rivalId);
-
-      switch (mm.outcomeNumber) {
-        case 1:
-          isP1 ? wins++ : losses++;
-          break;
-        case 2:
-          isP1 ? losses++ : wins++;
-          break;
-        case 3:
-          draws++;
-          break;
-        case 10:
-          isP1 ? losses++ : wins++;
-          break;
-      }
-    }
-
-    return {
-      wins,
-      losses,
-      draws,
-      matchesTotal: userMatches.length,
-      uniqueOpponents: oppSet.size,
-      tournamentPlacements: [],
-    };
-  }
-
-  // Títulos (mantemos sem mudanças na lógica)
+  // =============================
+  // Funções para Títulos
+  // =============================
   async function computeTitlesProgress(st: PlayerStats) {
     setIsCalculating(true);
     const all = titles.map((t) => {
@@ -288,139 +286,53 @@ export default function HomeScreen() {
     return Math.min(progress, 1);
   }
 
-  // Rival (não mexemos na lógica, só estilo)
-  async function computeBiggestRival(uId: string, userMatches: MatchData[]) {
-    const rivalsMap: Record<
-      string,
-      {
-        matches: number;
-        userWins: number;
-        rivalWins: number;
-        lastWinner: "user" | "rival" | "empate";
-      }
-    > = {};
-
-    let topRivalId = "";
-    let topMatches = 0;
-
-    userMatches.forEach((mm) => {
-      const isP1 = mm.player1_id === uId;
-      const rId = isP1 ? mm.player2_id : mm.player1_id;
-      if (!rId || rId === "N/A") return;
-
-      if (!rivalsMap[rId]) {
-        rivalsMap[rId] = {
-          matches: 0,
-          userWins: 0,
-          rivalWins: 0,
-          lastWinner: "empate",
-        };
-      }
-      rivalsMap[rId].matches += 1;
-
-      const outcome = mm.outcomeNumber || 0;
-      if (outcome === 1) {
-        if (isP1) {
-          rivalsMap[rId].userWins++;
-          rivalsMap[rId].lastWinner = "user";
-        } else {
-          rivalsMap[rId].rivalWins++;
-          rivalsMap[rId].lastWinner = "rival";
-        }
-      } else if (outcome === 2) {
-        if (isP1) {
-          rivalsMap[rId].rivalWins++;
-          rivalsMap[rId].lastWinner = "rival";
-        } else {
-          rivalsMap[rId].userWins++;
-          rivalsMap[rId].lastWinner = "user";
-        }
-      } else if (outcome === 3) {
-        rivalsMap[rId].lastWinner = "empate";
-      } else if (outcome === 10) {
-        if (isP1) {
-          rivalsMap[rId].rivalWins++;
-          rivalsMap[rId].lastWinner = "rival";
-        } else {
-          rivalsMap[rId].userWins++;
-          rivalsMap[rId].lastWinner = "user";
-        }
-      }
-    });
-
-    for (const rid of Object.keys(rivalsMap)) {
-      if (rivalsMap[rid].matches > topMatches) {
-        topMatches = rivalsMap[rid].matches;
-        topRivalId = rid;
-      }
-    }
-    if (!topRivalId) return null;
-
-    const data = rivalsMap[topRivalId];
-    const totalMatches = data.matches;
-    const userWins = data.userWins;
-    const wr = totalMatches > 0 ? (userWins / totalMatches) * 100 : 0;
-
-    const leagueId = await AsyncStorage.getItem("@leagueId");
-    const rivalName = await getPlayerName(leagueId || "", topRivalId);
-
-    return {
-      rivalId: topRivalId,
-      rivalName,
-      matches: totalMatches,
-      userWins,
-      rivalWins: data.rivalWins,
-      lastWinner: data.lastWinner,
-      wrPercentage: wr,
-    };
-  }
-
-  async function getPlayerName(leagueId: string, playerId: string) {
-    if (!playerId) return `User ${playerId}`;
-    try {
-      if (leagueId && leagueId !== "all") {
-        const playerRef = doc(db, `leagues/${leagueId}/players/${playerId}`);
-        const playerSnap = await getDoc(playerRef);
-        if (playerSnap.exists()) {
-          const data = playerSnap.data();
-          return data?.fullname || `User ${playerId}`;
-        }
-      } else {
-        const leaguesSnap = await getDocs(collection(db, "leagues"));
-        for (const leagueDoc of leaguesSnap.docs) {
-          const lgId = leagueDoc.id;
-          const playerRef = doc(db, `leagues/${lgId}/players/${playerId}`);
-          const playerSnap = await getDoc(playerRef);
-          if (playerSnap.exists()) {
-            const data = playerSnap.data();
-            return data?.fullname || `User ${playerId}`;
-          }
-        }
-      }
-    } catch {}
-    return `User ${playerId}`;
-  }
-
-  async function handleRivalDetection(newRival: RivalData | null) {
-    if (!newRival) {
-      setRivalInfo(null);
-      return;
-    }
-    const oldRivalId = await AsyncStorage.getItem("@lastRivalId");
+  // =============================
+  // Funções para Rival (agora lendo do backend)
+  // =============================
+  async function handleRivalDetection(newRival: RivalData) {
     setRivalInfo(newRival);
+    const oldRivalId = await AsyncStorage.getItem("@lastRivalId");
     if (oldRivalId !== newRival.rivalId) {
       setRivalModalVisible(true);
       await AsyncStorage.setItem("@lastRivalId", newRival.rivalId);
     }
   }
 
-  // Música de fundo (loop) pro Rival
+  function getRandomRivalPhrase(result: "user" | "rival" | "empate") {
+    const phrases = {
+      user: [
+        "Tá voando, hein?! Venceu com estilo! 🚀🔥",
+        "Foi um massacre! O rival nem viu de onde veio. 🎯😎",
+        "Deu aula! O rival ainda tá tentando entender o que aconteceu. 📚😂",
+        "Vitória confirmada! Dá até pra soltar aquele 'EZ'. 😏",
+        "Boa! O rival já tá procurando tutorial no YouTube. 🎥😂",
+      ],
+      rival: [
+        "Eita... levou aquela coça! Tenta de novo! 😂",
+        "O rival mandou um 'GG EZ'... não vai deixar barato, né? 😡🔥",
+        "Bom... pelo menos agora você sabe como perder com estilo. 😆",
+        "Essa foi feia, hein... Mas é errando que se aprende! Ou não. 🤷‍♂️",
+        "A derrota veio, mas o drama é opcional. Levanta e luta de novo! 🥋🔥",
+      ],
+      empate: [
+        "Dois titãs colidiram... e ninguém venceu! ⚡🤜🤛",
+        "Empate... Que tal um desempate pra ver quem é o verdadeiro campeão? 🏆",
+        "Nada definido ainda! Próxima batalha decide tudo. 🔥",
+        "Empate?! Dá pra aceitar isso? Bora revanche AGORA! 🤨",
+        "Equilíbrio total! Um verdadeiro duelo de gigantes. 💥",
+      ],
+    };
+    const chosen = phrases[result] || [];
+    if (!chosen.length) return "Empate dramático!";
+    return chosen[Math.floor(Math.random() * chosen.length)];
+  }
+
   async function loadBattleMusic() {
     if (battleMusicRef.current) {
       return;
     }
     const { sound } = await Audio.Sound.createAsync(
-      require("../../assets/images/sounds/battle_music.mp3"), // 14s
+      require("../../assets/images/sounds/battle_music.mp3"),
       { isLooping: true, volume: 1.0 }
     );
     battleMusicRef.current = sound;
@@ -435,29 +347,9 @@ export default function HomeScreen() {
     }
   }
 
-  function getRandomRivalPhrase(result: "user" | "rival" | "empate") {
-    const phrases = {
-      user: [
-        "Você demoliu o rival!",
-        "Vitória Explosiva!",
-        "Rival sem chances!",
-      ],
-      rival: [
-        "O rival dominou a partida!",
-        "Derrota amarga...",
-        "Batalha dura, mas o rival levou!",
-      ],
-      empate: [
-        "Ninguém venceu!",
-        "Equilíbrio total!",
-        "Empate dramático!",
-      ],
-    };
-    const chosen = phrases[result] || [];
-    return chosen[Math.floor(Math.random() * chosen.length)];
-  }
-
-  // Botões no fundo
+  // =============================
+  // Botões no rodapé
+  // =============================
   function handleLogout() {
     auth.signOut().then(() => {
       AsyncStorage.removeItem("@userId");
@@ -471,6 +363,9 @@ export default function HomeScreen() {
     Linking.openURL(link).catch(() => {});
   }
 
+  // =============================
+  // Modal de Coleções
+  // =============================
   function handleOpenCollections() {
     setCollectionsModalVisible(true);
     fetchValidCollections();
@@ -487,7 +382,9 @@ export default function HomeScreen() {
         );
         setValidCollections(validSets);
       }
-    } catch (error) {}
+    } catch (error) {
+      console.log("Erro ao buscar coleções:", error);
+    }
     setLoadingCollections(false);
   }
 
@@ -495,7 +392,9 @@ export default function HomeScreen() {
     setCollectionsModalVisible(false);
   }
 
-  // Modal de Filtro (visual)
+  // =============================
+  // Modal de Filtro
+  // =============================
   function openFilterModal() {
     setFilterModalVisible(true);
     fetchCities();
@@ -517,7 +416,9 @@ export default function HomeScreen() {
         if (data.city) citySet.add(data.city);
       });
       setCities(Array.from(citySet));
-    } catch {}
+    } catch (err) {
+      console.log("Erro ao buscar cidades:", err);
+    }
     setFetchingLeagues(false);
   }
 
@@ -532,7 +433,9 @@ export default function HomeScreen() {
         leaguesList.push({ id: docSnap.id, ...docSnap.data() });
       });
       setLeagues(leaguesList);
-    } catch {}
+    } catch (err) {
+      console.log("Erro ao buscar ligas da cidade:", err);
+    }
     setFetchingLeagues(false);
   }
 
@@ -540,6 +443,8 @@ export default function HomeScreen() {
     setSelectedLeagueId((prev) => (prev === leagueId ? "" : leagueId));
   }
 
+  // Quando o usuário clica em SALVAR, refazemos a leitura das stats do backend,
+  // e recalculamos Títulos, Rival etc.
   async function handleSaveFilter() {
     try {
       if (showAllLeagues) {
@@ -561,22 +466,52 @@ export default function HomeScreen() {
       }
 
       setFilterModalVisible(false);
-
       setLoading(true);
-      const newMatches = await fetchAllMatches();
-      const userMatches = newMatches.filter(
-        (m) => m.player1_id === userId || m.player2_id === userId
-      );
-      const newStats = computeBasicStats(userId, userMatches);
-      setStats(newStats);
-      computeTitlesProgress(newStats);
-      const newRival = await computeBiggestRival(userId, userMatches);
-      await handleRivalDetection(newRival);
-      setMatches(newMatches);
-    } catch {}
+
+      // =========== Lê stats agregadas de novo ===========
+      const aggregated = await fetchAllStatsByFilter(userId);
+      const adaptedStats: PlayerStats = {
+        wins: aggregated.wins,
+        losses: aggregated.losses,
+        draws: aggregated.draws,
+        matchesTotal: aggregated.matchesTotal,
+        uniqueOpponents: aggregated.opponentsList.length,
+        tournamentPlacements: [],
+      };
+      setStats(adaptedStats);
+      computeTitlesProgress(adaptedStats);
+
+      // =========== Rival de novo ===========
+      const newRival = await fetchRivalByFilter(userId);
+      if (newRival) {
+        const r: RivalData = {
+          rivalId: newRival.rivalId,
+          rivalName: newRival.rivalName,
+          matches: newRival.matches,
+          userWins: newRival.userWins,
+          rivalWins: newRival.rivalWins,
+          lastWinner: newRival.lastWinner,
+          wrPercentage: newRival.wrPercentage,
+        };
+        setRivalInfo(r);
+        const oldRivalId = await AsyncStorage.getItem("@lastRivalId");
+        if (oldRivalId !== r.rivalId) {
+          setRivalModalVisible(true);
+          await AsyncStorage.setItem("@lastRivalId", r.rivalId);
+        }
+      } else {
+        setRivalInfo(null);
+      }
+
+    } catch {
+      Alert.alert("Erro", "Não foi possível salvar o filtro.");
+    }
     setLoading(false);
   }
 
+  // =============================
+  // Render
+  // =============================
   const total = stats.matchesTotal;
   const wr = total > 0 ? ((stats.wins / total) * 100).toFixed(1) : "0";
   const defaultAvatar = require("../../assets/images/avatar/image.jpg");
@@ -639,7 +574,7 @@ export default function HomeScreen() {
           <Text style={styles.userName}>{userName}</Text>
         </View>
 
-        {/* Botão LIGAS em vez da engrenagem */}
+        {/* Botão LIGAS */}
         <TouchableOpacity style={styles.ligasButton} onPress={openFilterModal}>
           <MaterialCommunityIcons name="earth" size={20} color="#FFF" />
           <Text style={styles.ligasButtonText}>Ligas</Text>
@@ -690,10 +625,12 @@ export default function HomeScreen() {
               <View style={styles.rivalBody}>
                 <Text style={styles.rivalName}>{rivalInfo.rivalName}</Text>
                 <Text style={styles.rivalStats}>
-                  Partidas: {rivalInfo.matches} | WR: {rivalInfo.wrPercentage.toFixed(1)}%
+                  Partidas: {rivalInfo.matches} | WR:{" "}
+                  {rivalInfo.wrPercentage.toFixed(1)}%
                 </Text>
                 <Text style={[styles.rivalStats, { textAlign: "center" }]}>
-                  Última Batalha: {getRandomRivalPhrase(rivalInfo.lastWinner || "empate")}
+                  Última Batalha:{" "}
+                  {getRandomRivalPhrase(rivalInfo.lastWinner || "empate")}
                 </Text>
               </View>
             </Animatable.View>
@@ -726,7 +663,10 @@ export default function HomeScreen() {
 
         {/* Botões no rodapé */}
         <View style={styles.bottomButtons}>
-          <TouchableOpacity style={styles.validCollectionsButton} onPress={handleOpenCollections}>
+          <TouchableOpacity
+            style={styles.validCollectionsButton}
+            onPress={handleOpenCollections}
+          >
             <MaterialCommunityIcons name="book" size={20} color="#FFF" />
             <Text style={[styles.bottomButtonText, { color: "#FFF", marginLeft: 6 }]}>
               Coleções Válidas
@@ -747,8 +687,7 @@ export default function HomeScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-        </ImageBackground>
-
+      </ImageBackground>
 
       {/* Modal de Rival Aprimorado */}
       <Modal
@@ -769,7 +708,7 @@ export default function HomeScreen() {
               <MaterialCommunityIcons name="sword-cross" size={32} color="#E3350D" />
             </View>
             <Image
-              source={require("../../assets/images/avatar//avatar.jpg")}
+              source={require("../../assets/images/avatar/avatar.jpg")}
               style={styles.modalVSimage}
               resizeMode="contain"
             />
@@ -854,7 +793,11 @@ export default function HomeScreen() {
               }}
             >
               <MaterialCommunityIcons
-                name={showAllLeagues ? "checkbox-marked-outline" : "checkbox-blank-outline"}
+                name={
+                  showAllLeagues
+                    ? "checkbox-marked-outline"
+                    : "checkbox-blank-outline"
+                }
                 size={24}
                 color="#E3350D"
                 style={{ marginRight: 10 }}
@@ -877,9 +820,7 @@ export default function HomeScreen() {
                     color="#FFF"
                     style={{ marginRight: 8 }}
                   />
-                  <Text style={styles.cityButtonText}>
-                    Cidades
-                  </Text>
+                  <Text style={styles.cityButtonText}>Cidades</Text>
                 </TouchableOpacity>
 
                 {showMosaicCities && (
@@ -948,11 +889,17 @@ export default function HomeScreen() {
               </>
             )}
 
-            <TouchableOpacity style={styles.saveFilterButton} onPress={handleSaveFilter}>
+            <TouchableOpacity
+              style={styles.saveFilterButton}
+              onPress={handleSaveFilter}
+            >
               <Text style={styles.saveFilterText}>Salvar</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.closeFilterButton} onPress={closeFilterModal}>
+            <TouchableOpacity
+              style={styles.closeFilterButton}
+              onPress={closeFilterModal}
+            >
               <Text style={styles.closeFilterText}>Voltar</Text>
             </TouchableOpacity>
           </View>
@@ -961,7 +908,9 @@ export default function HomeScreen() {
     </View>
   );
 
-  // Card de Stat
+  // ==================================
+  // Função de render de cada "Card de Stat"
+  // ==================================
   function renderStatCard(
     label: string,
     value: string | number,
@@ -984,8 +933,16 @@ export default function HomeScreen() {
   }
 }
 
-// Títulos (sem alterar lógica)
-function TitleProgressCard({ item, delay }: { item: any; delay: number }) {
+// ==================================
+// Card de progresso de Título
+// ==================================
+function TitleProgressCard({
+  item,
+  delay,
+}: {
+  item: any;
+  delay: number;
+}) {
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -1035,7 +992,9 @@ function TitleProgressCard({ item, delay }: { item: any; delay: number }) {
   );
 }
 
-// Estilos Visuais
+// ==================================
+// Estilos (idênticos ao original)
+// ==================================
 const styles = StyleSheet.create({
   loaderContainer: {
     flex: 1,
