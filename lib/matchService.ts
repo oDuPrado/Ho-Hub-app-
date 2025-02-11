@@ -43,49 +43,70 @@ export interface RivalData {
 }
 
 /** 
- * Lê stats/aggregated de uma liga para um player.
- * Aqui, usamos um índice (por exemplo, ordenando por updatedAt) se configurado no Firebase.
+ * Novíssima interface de Clássicos
  */
+export interface ClassicsData {
+  opponents: {
+    [oppId: string]: {
+      matches: number;
+      wins: number;
+      losses: number;
+      draws: number;
+    }
+  };
+  updatedAt?: any;
+}
+
+/** 
+ * Lê /stats/classics de um jogador.
+ * Se não existir, retorna null.
+ */
+export async function fetchPlayerClassicsStats(
+  leagueId: string, 
+  playerId: string
+): Promise<ClassicsData | null> {
+  try {
+    const classicsRef = doc(db, `leagues/${leagueId}/players/${playerId}/stats`, "classics");
+    const snap = await getDoc(classicsRef);
+    if (!snap.exists()) return null;
+    return snap.data() as ClassicsData;
+  } catch (error) {
+    console.error("Erro ao ler classics:", error);
+    return null;
+  }
+}
+
+
+/** Lê stats/aggregated */
 export async function fetchPlayerStatsAggregated(
   leagueId: string,
   playerId: string
 ): Promise<PlayerStatsData | null> {
   try {
-    const statsRef = doc(
-      db,
-      `leagues/${leagueId}/players/${playerId}/stats/aggregated`
-    );
+    const statsRef = doc(db, `leagues/${leagueId}/players/${playerId}/stats/aggregated`);
     const snap = await getDoc(statsRef);
     if (!snap.exists()) {
       return null;
     }
-    const data = snap.data() as PlayerStatsData;
-    return data;
+    return snap.data() as PlayerStatsData;
   } catch (error) {
     console.error("Erro ao ler stats agregadas:", error);
     return null;
   }
 }
 
-/** 
- * Lê stats/rival de uma liga para um player.
- * Utiliza o índice configurado para a coleção stats.
- */
+/** Lê stats/rival */
 export async function fetchPlayerRival(
   leagueId: string,
   playerId: string
 ): Promise<RivalData | null> {
   try {
-    const rivalRef = doc(
-      db,
-      `leagues/${leagueId}/players/${playerId}/stats/rival`
-    );
+    const rivalRef = doc(db, `leagues/${leagueId}/players/${playerId}/stats/rival`);
     const snap = await getDoc(rivalRef);
     if (!snap.exists()) {
       return null;
     }
-    const data = snap.data() as RivalData;
-    return data;
+    return snap.data() as RivalData;
   } catch (error) {
     console.error("Erro ao ler rival:", error);
     return null;
@@ -97,9 +118,6 @@ export async function fetchPlayerRival(
  *  - all   => todas as ligas
  *  - city  => todas as ligas de determinada cidade
  *  - league=> liga específica
- *
- * Se você criar índices nos campos "city" (na coleção "leagues") e, se necessário,
- * incluir um orderBy, o Firestore usará os índices configurados.
  */
 export async function fetchAllMatches(): Promise<MatchData[]> {
   const filterType = await AsyncStorage.getItem("@filterType");
@@ -115,11 +133,7 @@ export async function fetchAllMatches(): Promise<MatchData[]> {
         leaguesToFetch.push(docSnap.id);
       });
     } else if (filterType === "city" && cityStored) {
-      // Crie um índice composto no Firebase para "city"
-      const qCity = query(
-        collection(db, "leagues"),
-        where("city", "==", cityStored)
-      );
+      const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
       const citySnapshot = await getDocs(qCity);
       citySnapshot.forEach((docSnap) => {
         leaguesToFetch.push(docSnap.id);
@@ -138,27 +152,21 @@ export async function fetchAllMatches(): Promise<MatchData[]> {
 
     let allMatches: MatchData[] = [];
 
-    // Para cada liga, buscar os torneios, rounds e matches.
-    // Se você configurar índices para as subcoleções (por exemplo, em matches, orderBy player1_id, etc.)
-    // eles serão usados automaticamente.
-    for (const leagueId of leaguesToFetch) {
-      const tournamentsRef = collection(db, `leagues/${leagueId}/tournaments`);
+    for (const lid of leaguesToFetch) {
+      const tournamentsRef = collection(db, `leagues/${lid}/tournaments`);
       const tournamentsSnap = await getDocs(tournamentsRef);
 
       if (tournamentsSnap.empty) continue;
 
       for (const tDoc of tournamentsSnap.docs) {
         const tId = tDoc.id;
-        const roundsRef = collection(db, `leagues/${leagueId}/tournaments/${tId}/rounds`);
+        const roundsRef = collection(db, `leagues/${lid}/tournaments/${tId}/rounds`);
         const roundsSnap = await getDocs(roundsRef);
 
         if (roundsSnap.empty) continue;
 
         for (const rDoc of roundsSnap.docs) {
-          const matchesRef = collection(
-            db,
-            `leagues/${leagueId}/tournaments/${tId}/rounds/${rDoc.id}/matches`
-          );
+          const matchesRef = collection(db, `leagues/${lid}/tournaments/${tId}/rounds/${rDoc.id}/matches`);
           const matchesSnap = await getDocs(matchesRef);
 
           if (matchesSnap.empty) continue;
@@ -178,10 +186,7 @@ export async function fetchAllMatches(): Promise<MatchData[]> {
   }
 }
 
-/** 
- * Busca todas as partidas ignorando o filtro, ou seja, de TODAS as ligas.
- * Essa função pode ser usada para casos onde é necessário o conjunto completo.
- */
+/** Igual ao anterior, mas ignora o filtro e pega TODAS as ligas. */
 export async function fetchAllMatchesGlobal(): Promise<MatchData[]> {
   try {
     let allMatches: MatchData[] = [];
@@ -202,10 +207,7 @@ export async function fetchAllMatchesGlobal(): Promise<MatchData[]> {
         if (roundsSnap.empty) continue;
 
         for (const rDoc of roundsSnap.docs) {
-          const matchesRef = collection(
-            db,
-            `leagues/${leagueId}/tournaments/${tId}/rounds/${rDoc.id}/matches`
-          );
+          const matchesRef = collection(db, `leagues/${leagueId}/tournaments/${tId}/rounds/${rDoc.id}/matches`);
           const matchesSnap = await getDocs(matchesRef);
 
           if (matchesSnap.empty) continue;
@@ -226,11 +228,8 @@ export async function fetchAllMatchesGlobal(): Promise<MatchData[]> {
 
 /** 
  * Soma as estatísticas agregadas do usuário de acordo com o filtro (all, city ou league).
- * Essa função é utilizada para obter dados prontos do backend.
  */
-export async function fetchAllStatsByFilter(
-  userId: string
-): Promise<PlayerStatsData> {
+export async function fetchAllStatsByFilter(userId: string): Promise<PlayerStatsData> {
   const defaultStats: PlayerStatsData = {
     wins: 0,
     losses: 0,
@@ -240,7 +239,7 @@ export async function fetchAllStatsByFilter(
   };
 
   try {
-    const filterType = await AsyncStorage.getItem("@filterType"); // "all"|"city"|"league"
+    const filterType = await AsyncStorage.getItem("@filterType");
     const cityStored = await AsyncStorage.getItem("@selectedCity");
     const leagueStored = await AsyncStorage.getItem("@leagueId");
 
@@ -271,8 +270,8 @@ export async function fetchAllStatsByFilter(
 
     let finalStats = { ...defaultStats };
 
-    for (const leagueId of leaguesToFetch) {
-      const aggregated = await fetchPlayerStatsAggregated(leagueId, userId);
+    for (const lid of leaguesToFetch) {
+      const aggregated = await fetchPlayerStatsAggregated(lid, userId);
       if (aggregated) {
         finalStats.wins += aggregated.wins;
         finalStats.losses += aggregated.losses;
@@ -295,20 +294,15 @@ export async function fetchAllStatsByFilter(
 }
 
 /**
- * Busca o Rival do usuário conforme filtro:
- * - Se filterType for "league", tenta ler o documento /stats/rival
- * - Se for "city" ou "all", retorna null
+ * Busca Rival do usuário de acordo com o filtro:
  */
-export async function fetchRivalByFilter(
-  userId: string
-): Promise<RivalData | null> {
+export async function fetchRivalByFilter(userId: string): Promise<RivalData | null> {
   try {
     const filterType = await AsyncStorage.getItem("@filterType");
     const leagueStored = await AsyncStorage.getItem("@leagueId");
 
     if (filterType === "league" && leagueStored) {
-      const rivalDoc = await fetchPlayerRival(leagueStored, userId);
-      return rivalDoc;
+      return await fetchPlayerRival(leagueStored, userId);
     } else {
       console.log("Rival não disponível para city/all. Retornando null.");
       return null;
