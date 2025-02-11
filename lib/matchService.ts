@@ -57,6 +57,16 @@ export interface ClassicsData {
   updatedAt?: any;
 }
 
+/** Tipo de item de histórico */
+export interface TournamentHistoryItem {
+  tournamentId: string;
+  tournamentName: string;
+  place: number;
+  totalPlayers: number;
+  roundCount: number;
+  date: string; // ISO string
+}
+
 /** 
  * Lê /stats/classics de um jogador.
  * Se não existir, retorna null.
@@ -310,5 +320,32 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
   } catch (err) {
     console.error("Erro ao buscar rival:", err);
     return null;
+  }
+}
+
+// =============== NOVA FUNÇÃO: fetchPlayerHistory ===============
+
+/**
+ * Retorna os últimos torneios do jogador (até 15),
+ * salvos em /leagues/<leagueId>/players/<playerId>/stats/history
+ */
+export async function fetchPlayerHistory(
+  leagueId: string,
+  playerId: string
+): Promise<TournamentHistoryItem[]> {
+  try {
+    const docRef = doc(db, `leagues/${leagueId}/players/${playerId}/stats`, "history");
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      return [];
+    }
+    const data = snap.data();
+    if (!data || !data.latestTournaments) {
+      return [];
+    }
+    return data.latestTournaments as TournamentHistoryItem[];
+  } catch (err) {
+    console.error("Erro ao buscar histórico:", err);
+    return [];
   }
 }
