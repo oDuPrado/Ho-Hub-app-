@@ -1,3 +1,4 @@
+// ARQUIVO: Analise.tsx
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -10,11 +11,13 @@ import {
   Alert,
   Modal,
 } from "react-native";
-
-import { getDocs, collectionGroup, doc, getDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getDocs, collectionGroup, doc, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
 import * as Animatable from "react-native-animatable";
+
+// Importa as funções otimizadas do matchService
+import { fetchAllMatches, fetchAllStatsByFilter } from "../../lib/matchService";
 
 interface PlayerStats {
   wins: number;
@@ -30,256 +33,28 @@ interface RivalData {
   matches: number;
 }
 
-export default function PikachuIA() {
+export default function Analise() {
   const [loading, setLoading] = useState(false);
   const [errorLog, setErrorLog] = useState("");
 
+  // Estatísticas agregadas do jogador
   const [stats, setStats] = useState<PlayerStats | null>(null);
+
+  // Mensagens de análise
   const [aiMessageGeneric, setAiMessageGeneric] = useState("");
   const [aiMessageTip, setAiMessageTip] = useState("");
   const [aiMessageSpecific, setAiMessageSpecific] = useState("");
-  
-  // Bloqueio de geração
+
+  // Controle de geração (para evitar spam)
   const [generationCount, setGenerationCount] = useState(0);
   const [lastGenerationTime, setLastGenerationTime] = useState<Date | null>(null);
   const [blockGeneration, setBlockGeneration] = useState(false);
 
-  // Rival
-  const [rivalName, setRivalName] = useState<string>("nenhum");
-  // Títulos e Clássicos
-  const [titlesUnlocked, setTitlesUnlocked] = useState<number>(0);
-  const [classicsCount, setClassicsCount] = useState<number>(0);
-
-  // Modal Bloqueio
+  // Modal de bloqueio de geração
   const [blockModalVisible, setBlockModalVisible] = useState(false);
 
+  // Mensagens de boas-vindas (aleatórias)
   const welcomeMessages = [
-    "E aí, treinador! Pronto pra uma análise que vai te fazer repensar todas as suas escolhas de vida... digo, de deck?",
-    "Opa, chegou o momento de dissecar esse seu baralho! Prometo ser gentil... mais ou menos.",
-    "Fala, mestre Pokémon! Ou seria aprendiz? Deixa eu dar uma olhada nesse deck pra gente descobrir.",
-    "Eita, olha quem voltou! Vamos ver se esse deck evoluiu ou se ainda tá no nível de um Magikarp.",
-    "Salve, treinador! Pronto pra uma dose de realidade com um toque de carinho Campo-grandense?",
-    "Ah, você de novo! Vamos ver se esse deck tá mais apimentado que um churrasco de domingo.",
-    "Opa, opa! Chegou a hora da verdade. Seu deck tá mais organizado que a sua vida ou vice-versa?",
-    "E aí, parceiro! Bora dar aquela analisada marota no seu deck? Prometo só 10% de zoeira.",
-    "Fala, treinador! Pronto pra uma análise mais sincera que conversa de bar depois da terceira rodada?",
-    "Opa, chegou a hora do 'sincericídio'! Seu deck tá precisando de uns conselhos à la Marco.",
-    "E aí, meu chapa! Vamos ver se esse seu deck tá mais afiado que faca de churrasco ou se tá mais pra colher de plástico?",
-    "Salve, salve! Pronto pra uma análise mais detalhada que cardápio de rodízio?",
-    "Fala, treinador! Vamos desvendar os mistérios do seu deck ou prefere continuar na ilusão?",
-    "Opa, voltou pra mais? Teu deck deve tá mais desesperado que eu procurando sombra no Parque das Nações Indígenas!",
-    "E aí, meu consagrado! Bora dar aquela analisada básica no seu deck? Prometo ser mais leve que torta de maçã da vovó... ou não."
-  ];
-  
-  const [welcomeIndex] = useState(
-    Math.floor(Math.random() * welcomeMessages.length)
-  );
-
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        
-        const storedUserId = await AsyncStorage.getItem("@userId");
-        if (!storedUserId) {
-          Alert.alert("Erro", "Não foi possível obter ID do jogador.");
-          setLoading(false);
-          return;
-        }
-
-        // Buscar todas as partidas
-        const allMatches = await fetchAllMatches();
-        const userMatches = allMatches.filter(
-          (m) => m.player1_id === storedUserId || m.player2_id === storedUserId
-        );
-
-        // Calcular stats
-        const computedStats = computeBasicStats(storedUserId, userMatches);
-        setStats(computedStats);
-
-        // Buscar maior Rival
-        const biggestRival = await fetchBiggestRival(storedUserId, userMatches);
-        if (biggestRival) setRivalName(biggestRival.rivalName);
-
-        // Buscar títulos e clássicos (simulação)
-        const fetchedTitles = await fetchTitlesUnlocked(storedUserId);
-        setTitlesUnlocked(fetchedTitles);
-
-        const fetchedClassics = await fetchClassicsCount(storedUserId);
-        setClassicsCount(fetchedClassics);
-
-        // Gera a primeira análise
-        generateAllParts(computedStats, biggestRival, fetchedTitles, fetchedClassics);
-      } catch (err) {
-        console.log("Erro ao carregar stats:", err);
-        setErrorLog("Falha ao carregar estatísticas.");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  // Observa se atingiu 5 gerações e bloqueia
-  useEffect(() => {
-    if (generationCount >= 5) {
-      setBlockGeneration(true);
-      setBlockModalVisible(true);
-      // Desbloqueia depois de 10min
-      setTimeout(() => {
-        setBlockGeneration(false);
-        setGenerationCount(0);
-        setBlockModalVisible(false);
-      }, 10 * 60 * 1000);
-    }
-  }, [generationCount]);
-
-  // Gera Nova Análise
-  function handleGenerateNewAnalysis() {
-    if (blockGeneration) {
-      setBlockModalVisible(true);
-      return;
-    }
-    if (stats) {
-      const now = new Date();
-      if (lastGenerationTime && now.getTime() - lastGenerationTime.getTime() < 10000) {
-        setGenerationCount((prev) => prev + 1);
-      } else {
-        setGenerationCount(1);
-      }
-      setLastGenerationTime(now);
-      generateAllParts(stats, { rivalId: "", rivalName, matches: 0 }, titlesUnlocked, classicsCount);
-    }
-  }
-
-  // -------------- FUNÇÕES DE BUSCA --------------
-  async function fetchAllMatches() {
-    const snap = await getDocs(collectionGroup(db, "matches"));
-    const matches: any[] = [];
-    snap.forEach((docSnap) => {
-      matches.push(docSnap.data());
-    });
-    return matches;
-  }
-
-  function computeBasicStats(userId: string, matches: any[]): PlayerStats {
-    let wins = 0,
-      losses = 0,
-      draws = 0;
-    const uniqueOpponents = new Set<string>();
-
-    matches.forEach((m) => {
-      const isP1 = m.player1_id === userId;
-      const oppId = isP1 ? m.player2_id : m.player1_id;
-      if (oppId && oppId !== "N/A") uniqueOpponents.add(oppId);
-
-      switch (m.outcomeNumber) {
-        case 1:
-          isP1 ? wins++ : losses++;
-          break;
-        case 2:
-          isP1 ? losses++ : wins++;
-          break;
-        case 3:
-          draws++;
-          break;
-        case 10:
-          losses++;
-          break;
-      }
-    });
-
-    return {
-      wins,
-      losses,
-      draws,
-      matchesTotal: matches.length,
-      uniqueOpponents: uniqueOpponents.size,
-    };
-  }
-
-  async function fetchBiggestRival(userId: string, matches: any[]): Promise<RivalData | null> {
-    let mapRivals: Record<string, number> = {};
-
-    matches.forEach((m: any) => {
-      const isP1 = m.player1_id === userId;
-      const rid = isP1 ? m.player2_id : m.player1_id;
-      if (!rid) return;
-      if (!mapRivals[rid]) mapRivals[rid] = 0;
-      mapRivals[rid]++;
-    });
-
-    let topId = "";
-    let topCount = 0;
-    Object.keys(mapRivals).forEach((r) => {
-      if (mapRivals[r] > topCount) {
-        topCount = mapRivals[r];
-        topId = r;
-      }
-    });
-    if (!topId) return null;
-
-    // Buscar nome no Firestore
-    try {
-      const docRef = doc(db, "players", topId);
-      const snap = await getDoc(docRef);
-      let rName = `User ${topId}`;
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data && data.fullname) rName = data.fullname;
-      }
-      return {
-        rivalId: topId,
-        rivalName: rName,
-        matches: topCount,
-      };
-    } catch (err) {
-      return {
-        rivalId: topId,
-        rivalName: `User ${topId}`,
-        matches: topCount,
-      };
-    }
-  }
-
-  // Exemplo: Buscar títulos desbloqueados
-  async function fetchTitlesUnlocked(userId: string): Promise<number> {
-    // Lógica fictícia
-    // Retorna quantos títulos esse user tem
-    // Exemplo: 4
-    return 4;
-  }
-
-  // Exemplo: Buscar quantos clássicos
-  async function fetchClassicsCount(userId: string): Promise<number> {
-    // Lógica fictícia
-    // Exemplo: 2
-    return 2;
-  }
-
-  // -------------- GERA FRASES --------------
-  function generateAllParts(
-    st: PlayerStats,
-    rival: RivalData | null,
-    userTitles: number,
-    userClassics: number
-  ) {
-    // 1) Mensagem Genérica
-    const gen = getRandomGeneric();
-
-    // 2) Dicas/Conselhos (depende de vitórias/derrotas)
-    const tip = getRandomTip(st);
-
-    // 3) Análise Específica (rival, títulos, clássicos)
-    const spec = getSpecificAnalysis(st, rival, userTitles, userClassics);
-
-    setAiMessageGeneric(gen);
-    setAiMessageTip(tip);
-    setAiMessageSpecific(spec);
-  }
-
-  // Mensagem genérica (debochada)
-  function getRandomGeneric(): string {
-    const arr = [
       "Lembre-se: cada carta no seu deck tem um propósito. Conheça-as bem!",
       "A prática leva à perfeição. Continue treinando suas estratégias!",
       "Estude o meta atual para adaptar seu deck às tendências.",
@@ -347,10 +122,86 @@ export default function PikachuIA() {
       "Estude a lista dos vencedores de torneios. Eles são exemplos claros do que funciona no meta atual.",
       "Lembre-se: a Liga Pokémon não é conquistada em um dia. Treine, ajuste e continue competindo!",
     ];
-    return arr[Math.floor(Math.random() * arr.length)];
+    
+  const [welcomeIndex] = useState(
+    Math.floor(Math.random() * welcomeMessages.length)
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const storedUserId = await AsyncStorage.getItem("@userId");
+        if (!storedUserId) {
+          Alert.alert("Erro", "Não foi possível obter ID do jogador.");
+          setLoading(false);
+          return;
+        }
+        // Obtém estatísticas agregadas do usuário usando a função otimizada
+        const computedStats = await fetchAllStatsByFilter(storedUserId);
+        // Converte para PlayerStats (calculando uniqueOpponents como o tamanho da lista)
+        const playerStats: PlayerStats = {
+          wins: computedStats.wins,
+          losses: computedStats.losses,
+          draws: computedStats.draws,
+          matchesTotal: computedStats.matchesTotal,
+          uniqueOpponents: computedStats.opponentsList.length,
+        };
+        setStats(playerStats);
+        // Gera a análise baseada somente nas estatísticas
+        generateAnalysis(playerStats);
+      } catch (err) {
+        console.log("Erro ao carregar estatísticas:", err);
+        setErrorLog("Falha ao carregar estatísticas.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (generationCount >= 5) {
+      setBlockGeneration(true);
+      setBlockModalVisible(true);
+      // Desbloqueia após 10 minutos
+      setTimeout(() => {
+        setBlockGeneration(false);
+        setGenerationCount(0);
+        setBlockModalVisible(false);
+      }, 10 * 60 * 1000);
+    }
+  }, [generationCount]);
+
+  function handleGenerateNewAnalysis() {
+    if (blockGeneration) {
+      setBlockModalVisible(true);
+      return;
+    }
+    if (stats) {
+      const now = new Date();
+      if (lastGenerationTime && now.getTime() - lastGenerationTime.getTime() < 10000) {
+        setGenerationCount((prev) => prev + 1);
+      } else {
+        setGenerationCount(1);
+      }
+      setLastGenerationTime(now);
+      generateAnalysis(stats);
+    }
   }
 
-  // Dica: baseia-se em vitórias e derrotas
+  function generateAnalysis(st: PlayerStats) {
+    const gen = getRandomGeneric();
+    const tip = getRandomTip(st);
+    const spec = `Você jogou um total de ${st.matchesTotal} partidas com ${st.wins} vitórias, ${st.losses} derrotas e ${st.draws} empates.`;
+    setAiMessageGeneric(gen);
+    setAiMessageTip(tip);
+    setAiMessageSpecific(spec);
+  }
+
+  function getRandomGeneric(): string {
+    return welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
+  }
+
   function getRandomTip(st: PlayerStats): string {
     const arrHighWins = [
       "Seus números de vitória são impressionantes! Que tal se arriscar em torneios oficiais? 🏆",
@@ -426,113 +277,16 @@ export default function PikachuIA() {
       "Nem Groudon, nem Kyogre. Tá na hora de chamar o Rayquaza e resolver esse impasse! ☯️",
       "Teu jogo tá mais neutro que a expressão de um Sudowoodo. Mostra emoção! 🌳"
     ];
-    
-
-    // checa as estatísticas
-    let chosen = [];
+    let chosen: string[] = [];
     if (st.wins > st.losses && st.wins >= 10) chosen = arrHighWins;
     else if (st.losses > st.wins && st.losses >= 10) chosen = arrHighLosses;
-    else if (st.draws > st.wins && st.draws > st.losses) chosen = arrDraws;
     else chosen = arrNeutral;
-
     return chosen[Math.floor(Math.random() * chosen.length)];
-  }
-
-  // Análise específica do Rival, Títulos, Clássicos
-  function getSpecificAnalysis(
-    st: PlayerStats,
-    rival: RivalData | null,
-    userTitles: number,
-    userClassics: number
-  ): string {
-    let msgRival = "Sem rival detectado no momento... Quanta solidão!";
-    if (rival && rival.rivalName) {
-      msgRival = `Seu rival mais frequente é ${rival.rivalName}, com ${rival.matches} partidas épicas!`;
-    }
-
-    const msgTitles = userTitles > 0
-  ? [
-    `E olha, você já conquistou ${userTitles} títulos. Só cuidado pra não deixar subir à cabeça!`,
-    `Uau, ${userTitles} títulos? Tá querendo virar o Lance da vida real, é?`,
-    `${userTitles} títulos? Impressionante! Mas lembra que até o Ash demorou pra ser campeão.`,
-    `Com ${userTitles} títulos, você tá mais estrelado que um Clefairy usando Metronome!`,
-    `${userTitles} títulos? Tá colecionando mais que o Professor Carvalho coleciona Pokémon!`,
-    `Olha só, ${userTitles} títulos! Tá querendo abrir seu próprio ginásio, é?`,
-    `${userTitles} títulos? Tá mais vitorioso que um Magikarp evoluindo pra Gyarados!`,
-    `Com ${userTitles} títulos, você tá mais brilhante que um Pokémon shiny!`,
-    `${userTitles} títulos? Tá mais famoso que o Team Rocket (e provavelmente mais bem-sucedido)!`,
-    `Uau, ${userTitles} títulos! Tá mais ocupado que um Nurse Joy em dia de torneio!`,
-    `${userTitles} títulos? Tá mais valioso que uma carta Charizard de primeira edição!`,
-    `Com ${userTitles} títulos, você tá mais raro que um Mewtwo selvagem!`,
-    `${userTitles} títulos? Tá mais imponente que um Onix usando Rock Slide!`,
-    `Olha só, ${userTitles} títulos! Tá mais versátil que um Ditto em convenção de Pokémon!`,
-    `${userTitles} títulos? Tá mais poderoso que um Pikachu com Light Ball!`,
-    `Com ${userTitles} títulos, você tá mais respeitado que um Dragonite entre os dragões!`
-  ][Math.floor(Math.random() * 16)]
-  : [
-    "Ainda não tem nenhum título? Pika-chateado, mas calma, tudo é treino!",
-    "Zero títulos? Tá mais zerado que a Pokédex do Ash no começo da jornada!",
-    "Sem títulos ainda? Tá mais atrasado que um Slowpoke pensando!",
-    "Nenhum título? Tá mais vazio que uma Ultra Ball sem Pokémon!",
-    "Títulos? Que títulos? Tá mais perdido que um Psyduck com dor de cabeça!",
-    "Cadê os títulos? Sumiram mais rápido que um Abra usando Teleport!",
-    "Sem títulos? Tá mais parado que um Snorlax bloqueando o caminho!",
-    "Títulos zerados? Tá mais no início que um Charmander recém-nascido!",
-    "Nenhum título ainda? Tá evoluindo mais devagar que um Metapod só usando Harden!",
-    "Títulos? Acho que um Gastly pegou todos, porque não tô vendo nenhum!",
-    "Zero títulos? Tá mais frio que um Articuno em uma tempestade de neve!",
-    "Sem títulos? Tá mais confuso que um Spinda depois de usar Teeter Dance!",
-    "Nenhum título? Tá mais vazio que o estômago de um Snorlax em dieta!",
-    "Títulos? Que títulos? Tá mais invisível que um Kecleon usando camuflagem!",
-    "Sem títulos ainda? Tá mais lento que uma corrida de Shuckle!",
-    "Nenhum título? Tá mais no começo que um treinador escolhendo seu primeiro Pokémon!"
-  ][Math.floor(Math.random() * 16)];
-
-const msgClassics = userClassics > 0
-  ? [
-    `Além disso, você tem ${userClassics} clássicos ativos. Adoro uma rivalidade acirrada!`,
-    `${userClassics} clássicos? Tá mais competitivo que Ash vs Gary!`,
-    `Uau, ${userClassics} clássicos em andamento! Tá pegando fogo que nem a cauda de um Charizard!`,
-    `Com ${userClassics} clássicos, você tá mais ocupado que um Chansey no Centro Pokémon!`,
-    `${userClassics} clássicos ativos? Tá mais elétrico que um Pikachu com sobrecarga!`,
-    `Olha só, ${userClassics} clássicos! Tá mais intenso que uma batalha de lendários!`,
-    `${userClassics} clássicos? Tá mais agitado que um Mankey usando Thrash!`,
-    `Com ${userClassics} clássicos, você tá mais disputado que uma Master Ball no mercado negro!`,
-    `${userClassics} clássicos ativos? Tá mais movimentado que Vermilion City em dia de torneio!`,
-    `Uau, ${userClassics} clássicos! Tá mais acelerado que um Ninjask usando Speed Boost!`,
-    `${userClassics} clássicos? Tá mais famoso que o Professor Carvalho em Pallet Town!`,
-    `Com ${userClassics} clássicos, você tá mais ocupado que um Ditto em dia de breeding!`,
-    `${userClassics} clássicos ativos? Tá mais agitado que um Electrode prestes a explodir!`,
-    `Olha só, ${userClassics} clássicos! Tá mais disputado que um Mewtwo em raid!`,
-    `${userClassics} clássicos? Tá mais movimentado que uma Pokémart em promoção de Poké Balls!`,
-    `Com ${userClassics} clássicos, você tá mais popular que um Eevee em convenção de evolução!`
-  ][Math.floor(Math.random() * 16)]
-  : [
-    "Sem clássicos? Cadê a emoção dessa liga? Bora encontrar um rival de verdade!",
-    "Nenhum clássico? Tá mais parado que um Metapod usando Harden!",
-    "Zero clássicos? Tá mais solitário que um Cubone sem sua mãe!",
-    "Sem clássicos ativos? Tá mais vazio que uma Pokébola usada!",
-    "Nenhum clássico? Tá mais esquecido que um Trubbish no depósito!",
-    "Cadê os clássicos? Sumiram mais rápido que um Diglett entrando na terra!",
-    "Sem rivalidades clássicas? Tá mais monótono que um Magikarp só usando Splash!",
-    "Nenhum clássico ativo? Tá mais parado que um Sudowoodo se fingindo de árvore!",
-    "Zero clássicos? Tá mais sozinho que um Mimikyu sem fantasia!",
-    "Sem clássicos? Tá mais entediante que uma batalha entre dois Metapod!",
-    "Nenhuma rivalidade clássica? Tá mais pacífico que um Togepi recém-nascido!",
-    "Cadê os clássicos? Tão mais perdidos que um Zubat sem ecolocalização!",
-    "Sem clássicos ativos? Tá mais quieto que um Whismur com laringite!",
-    "Nenhum clássico? Tá mais esquecido que um Unown no alfabeto Pokémon!",
-    "Zero rivalidades épicas? Tá mais parado que um Slakoth em dia de preguiça!",
-    "Sem clássicos? Tá mais solitário que um Wailord em uma Pokébola!"
-  ][Math.floor(Math.random() * 16)];
-
-return `${msgRival}\n${msgTitles}\n${msgClassics}`;
-
   }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {/* MODAL BLOQUEIO */}
+      {/* Modal de bloqueio de geração */}
       <Modal
         visible={blockModalVisible}
         transparent
@@ -540,37 +294,23 @@ return `${msgRival}\n${msgTitles}\n${msgClassics}`;
         onRequestClose={() => setBlockModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <Animatable.View
-            style={styles.modalContainer}
-            animation="tada"
-            duration={1200}
-          >
+          <Animatable.View style={styles.modalContainer} animation="tada" duration={1200}>
             <Text style={styles.modalTitle}>PikachuIA diz:</Text>
             <Text style={styles.modalMsg}>
-              Ei, calma aí! Você tá treinando mais que um Machamp na academia! Bora dar uma pausa de 10 minutos?
+              Ei, calma aí! Você está gerando análises muito rápido. Dê uma pausa de 10 minutos!
             </Text>
-            <TouchableOpacity
-              style={styles.closeBtn}
-              onPress={() => setBlockModalVisible(false)}
-            >
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setBlockModalVisible(false)}>
               <Text style={styles.closeBtnText}>Fechar</Text>
             </TouchableOpacity>
           </Animatable.View>
         </View>
       </Modal>
 
-      <Animatable.Text
-        animation="bounceIn"
-        style={styles.welcomeText}
-      >
+      <Animatable.Text animation="bounceIn" style={styles.welcomeText}>
         {welcomeMessages[welcomeIndex]}
       </Animatable.Text>
 
-      {/* Pikachu IA Info */}
-      <Animatable.View
-        animation="fadeInDown"
-        style={styles.aiRow}
-      >
+      <Animatable.View animation="fadeInDown" style={styles.aiRow}>
         <Image
           source={require("../../assets/images/avatar/avatar6.jpg")}
           style={styles.aiIcon}
@@ -579,38 +319,25 @@ return `${msgRival}\n${msgTitles}\n${msgClassics}`;
       </Animatable.View>
 
       {loading && (
-        <ActivityIndicator
-          size="large"
-          color="#E3350D"
-          style={{ marginVertical: 10 }}
-        />
+        <ActivityIndicator size="large" color="#E3350D" style={{ marginVertical: 10 }} />
       )}
 
       {errorLog ? (
         <Text style={styles.errorText}>{errorLog}</Text>
       ) : (
         stats && (
-          <Animatable.View
-            animation="fadeInUp"
-            style={styles.aiCard}
-          >
+          <Animatable.View animation="fadeInUp" style={styles.aiCard}>
             <Text style={styles.aiCardTitle}>Bora Conversar</Text>
-
-            {/* Mensagem Genérica */}
             <Text style={styles.aiCardMessage}>
               <Text style={styles.msgLabel}>Dica: </Text>
               {aiMessageGeneric}
             </Text>
-
-            {/* Mensagem Tip */}
             <Text style={styles.aiCardMessage}>
               <Text style={styles.msgLabel}>Analise: </Text>
               {aiMessageTip}
             </Text>
-
-            {/* Mensagem Específica */}
             <Text style={styles.aiCardMessage}>
-              <Text style={styles.msgLabel}>Só para você:: </Text>
+              <Text style={styles.msgLabel}>Resumo: </Text>
               {aiMessageSpecific}
             </Text>
           </Animatable.View>
@@ -618,10 +345,7 @@ return `${msgRival}\n${msgTitles}\n${msgClassics}`;
       )}
 
       {!loading && (
-        <TouchableOpacity
-          style={styles.generateBtn}
-          onPress={handleGenerateNewAnalysis}
-        >
+        <TouchableOpacity style={styles.generateBtn} onPress={handleGenerateNewAnalysis}>
           <Text style={styles.generateBtnText}>Gerar Nova Análise</Text>
         </TouchableOpacity>
       )}
@@ -629,7 +353,6 @@ return `${msgRival}\n${msgTitles}\n${msgClassics}`;
   );
 }
 
-// ---------- ESTILOS ----------
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
@@ -703,7 +426,6 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     textAlign: "center",
   },
-  // Modal Bloqueio
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.65)",
