@@ -92,22 +92,29 @@ export default function CardsSearchScreen() {
    */
   useEffect(() => {
     console.log("🔄 [Cartas] Iniciando carregamento de dados...");
-
+  
     (async () => {
       try {
         const storedId = await AsyncStorage.getItem("@userId");
-        const storedName = (await AsyncStorage.getItem("@playerName")) || "Jogador";
+        const storedName = (await AsyncStorage.getItem("@userName")) || "Jogador";
+        const storedFilterType = await AsyncStorage.getItem("@filterType");
+        const storedLeagueId = await AsyncStorage.getItem("@leagueId");
+  
         console.log("📢 [Cartas] AsyncStorage retornou playerId:", storedId);
-
+        console.log("📢 [Cartas] AsyncStorage retornou filterType:", storedFilterType);
+        console.log("📢 [Cartas] AsyncStorage retornou leagueId:", storedLeagueId);
+  
         setPlayerId(storedId);
         setPlayerName(storedName);
-
-        console.log("🎯 [Cartas] Estados atualizados:", { storedId, storedName });
+        setFilterType(storedFilterType || "");
+        setLeagueId(storedLeagueId || "");
+  
+        console.log("🎯 [Cartas] Estados atualizados:", { storedId, storedName, storedFilterType, storedLeagueId });
       } catch (err) {
-        console.error("❌ [Cartas] Erro ao buscar playerId:", err);
+        console.error("❌ [Cartas] Erro ao buscar dados do AsyncStorage:", err);
       }
     })();
-
+  
     (async () => {
       try {
         setLoading(true);
@@ -122,7 +129,7 @@ export default function CardsSearchScreen() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, []);  
 
   /**
    * Filtro (para salvamento)
