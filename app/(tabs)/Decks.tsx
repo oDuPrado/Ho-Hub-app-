@@ -13,24 +13,29 @@ import {
   Platform,
   FlatList,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import {
   collection,
+  query,
   onSnapshot,
+  doc,
+  getDoc,
   addDoc,
   deleteDoc,
-  getDoc,
-  doc,
-  query,
-  // where, // Descomentaria se quiser filtrar por usuário
 } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { db } from "../../lib/firebaseConfig";
-import { useTranslation } from "react-i18next";
 import * as Animatable from "react-native-animatable";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
+import moment from "moment";
+import "moment/locale/pt-br";
+import { db } from "../../lib/firebaseConfig";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
-/** Tipagem das linhas de cartas (remoção do uuidv4) */
+
+/**
+ * Tipagem das linhas de cartas.
+ */
 interface CardLine {
   incrementalId: number;
   quantity: number;
@@ -39,9 +44,14 @@ interface CardLine {
   cardNumber?: string | null;
 }
 
-/** Tipagem do Deck */
+/**
+ * Tipagem do Deck.
+ */
 interface DeckData {
   id: string;
+  ownerUid: string;
+  ownerName: string;
+  leagueId: string;
   name: string;
   createdAt: string;
   pokemons: CardLine[];
@@ -49,14 +59,68 @@ interface DeckData {
   energies: CardLine[];
   style?: string[];
   archetype?: string | null;
-
-  /** Novos campos para identificar o dono e a liga. */
-  ownerUid?: string;
-  ownerName?: string;
-  leagueId?: string;
 }
 
-/** Opções de Estilo + Ícones */
+/**
+ * Formato usado no Firestore para cada carta.
+ */
+interface FirestoreCard {
+  quantity: number;
+  name: string;
+  expansion?: string | null;
+  cardNumber?: string | null;
+}
+
+/**
+ * Para armazenar o mapeamento ptcgoCode -> setId
+ */
+interface SetIdMap {
+  [code: string]: string;
+}
+
+/**
+ * Componente Principal: DecksScreen
+ */
+export default function DecksScreen() {
+  moment.locale("pt-br");
+
+  const [playerId, setPlayerId] = useState("");
+  const [playerName, setPlayerName] = useState("Jogador");
+  const [leagueId, setLeagueId] = useState("");
+
+  // Lista de decks
+  const [decks, setDecks] = useState<DeckData[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // Modal de criação de deck
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [newDeckName, setNewDeckName] = useState("");
+  const [newDeckContent, setNewDeckContent] = useState("");
+  const [newStyles, setNewStyles] = useState<string[]>([]);
+  const [newArchetype, setNewArchetype] = useState<string | null>(null);
+
+  // Modal de visualizar deck
+  const [viewModalVisible, setViewModalVisible] = useState(false);
+  const [viewDeck, setViewDeck] = useState<DeckData | null>(null);
+  const [deckViewMode, setDeckViewMode] = useState<"table" | "mosaic">("table");
+
+  // Estados auxiliares de parse (criando deck) e imagem
+  const [parsing, setParsing] = useState(false);
+  const [setIdMap, setSetIdMap] = useState<SetIdMap>({});
+  const [deckCards, setDeckCards] = useState<
+    {
+      category: string;
+      quantity: number;
+      name: string;
+      expansion?: string;
+      cardNumber?: string;
+    }[]
+  >([]);
+  const [cardImages, setCardImages] = useState<Record<string, string>>({});
+  const [loadingImages, setLoadingImages] = useState(false);
+
+  /** Opções de Estilo + Ícones */
 const STYLE_OPTIONS = [
   "controle",
   "aggro",
@@ -74,7 +138,7 @@ const STYLE_ICONS: Record<string, string> = {
   "vozes da minha cabeça": "brain",
 };
 
-/** Opções de Arquétipo */
+  /** Opções de Arquétipo */
 const ARCHETYPE_OPTIONS = [
   "Regidrago VSTAR",
   "Charizard ex",
@@ -114,112 +178,65 @@ const ARCHETYPE_OPTIONS = [
   "Outros",
 ];
 
-/** Quantas linhas serão processadas a cada chunk */
-const LINES_PER_CHUNK = 20;
-
-export default function DecksScreen() {
-  const { t } = useTranslation();
-
-  // Campos obtidos do AsyncStorage
-  const [ownerUid, setOwnerUid] = useState("");
-  const [ownerName, setOwnerName] = useState("Jogador");
-  const [leagueId, setLeagueId] = useState("");
-
-  const [decks, setDecks] = useState<DeckData[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  // Modal de criação
-  const [modalVisible, setModalVisible] = useState(false);
-  const [newDeckName, setNewDeckName] = useState("");
-  const [newDeckContent, setNewDeckContent] = useState("");
-
-  // Campos adicionais
-  const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
-  const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null);
-
-  // Submodals
-  const [styleModalVisible, setStyleModalVisible] = useState(false);
+  // Modais auxiliares de seleção
+  const [stylesModalVisible, setStylesModalVisible] = useState(false);
   const [archetypeModalVisible, setArchetypeModalVisible] = useState(false);
 
-  // Modal de visualização do deck
-  const [viewModalVisible, setViewModalVisible] = useState(false);
-  const [viewDeck, setViewDeck] = useState<DeckData | null>(null);
-
-  // Estado interno para mostrar “carregando parse”
-  const [parsingDeck, setParsingDeck] = useState(false);
-
   /**
-   * 1) Carrega ownerUid, ownerName e leagueId do AsyncStorage
+   * Carrega dados do AsyncStorage (userId, userName, leagueId) e o setIdMap
    */
   useEffect(() => {
     (async () => {
       try {
-        console.log("[Decks] Carregando infos do AsyncStorage...");
-        const uid = await AsyncStorage.getItem("@userId");
-        const uname = await AsyncStorage.getItem("@userName");
-        const lid = await AsyncStorage.getItem("@leagueId");
+        const pId = await AsyncStorage.getItem("@userId");
+        const pName = await AsyncStorage.getItem("@userName");
+        const lId = await AsyncStorage.getItem("@leagueId");
+        if (pId) setPlayerId(pId);
+        if (pName) setPlayerName(pName);
+        if (lId) setLeagueId(lId);
 
-        if (uid) setOwnerUid(uid);
-        if (uname) setOwnerName(uname);
-        if (lid) setLeagueId(lid);
-
-        console.log("[Decks] Dados do AsyncStorage:", { uid, uname, lid });
+        // Carrega sets (ptcgoCode -> setId)
+        loadSetIdMap();
       } catch (error) {
-        console.log("[Decks] Erro ao buscar AsyncStorage:", error);
+        console.log("Erro ao buscar dados do AsyncStorage:", error);
       }
     })();
   }, []);
 
   /**
-   * 2) Carrega decks da coleção "decks"
+   * Busca decks do Firestore
    */
   useEffect(() => {
     setLoading(true);
-    console.log("[Decks] Iniciando onSnapshot em 'decks'.");
+    const decksRef = collection(db, "decks");
+    const decksQuery = query(decksRef);
 
-    const decksReference = collection(db, "decks");
-    const decksQuery = query(decksReference);
-    // Se quiser filtrar só pelos decks do usuário, poderia fazer:
-    // const decksQuery = query(decksReference, where("ownerUid", "==", ownerUid));
-
-    const unsubscribe = onSnapshot(
-      decksQuery,
-      (snapshot) => {
-        console.log("[Decks] onSnapshot =>", snapshot.size, "docs");
-        const allDecks: DeckData[] = [];
-
-        snapshot.forEach((docSnapshot) => {
-          const deckFirestore = docSnapshot.data();
-          allDecks.push({
-            id: docSnapshot.id,
-            name: deckFirestore.name,
-            createdAt: deckFirestore.createdAt,
-            pokemons: convertToCardLines(deckFirestore.pokemons),
-            trainers: convertToCardLines(deckFirestore.trainers),
-            energies: convertToCardLines(deckFirestore.energies),
-            style: deckFirestore.style || [],
-            archetype: deckFirestore.archetype || null,
-            ownerUid: deckFirestore.ownerUid || "",
-            ownerName: deckFirestore.ownerName || "",
-            leagueId: deckFirestore.leagueId || "",
-          });
+    const unsubscribe = onSnapshot(decksQuery, (snapshot) => {
+      const deckArray: DeckData[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        deckArray.push({
+          id: docSnap.id,
+          ownerUid: d.ownerUid || "",
+          ownerName: d.ownerName || "",
+          leagueId: d.leagueId || "",
+          name: d.name || "",
+          createdAt: d.createdAt,
+          pokemons: convertFirestoreToCardLines(d.pokemons),
+          trainers: convertFirestoreToCardLines(d.trainers),
+          energies: convertFirestoreToCardLines(d.energies),
+          style: d.style || [],
+          archetype: d.archetype || null,
         });
-
-        setDecks(allDecks);
-        setLoading(false);
-      },
-      (error) => {
-        console.log("[Decks] Erro onSnapshot =>", error);
-        setLoading(false);
-      }
-    );
-
+      });
+      setDecks(deckArray);
+      setLoading(false);
+    });
     return () => unsubscribe();
-  }, [ownerUid]);
+  }, [playerId]);
 
   /**
-   * Filtra decks pelo termo de busca
+   * Filtro de decks pelo termo de busca
    */
   const filteredDecks = decks.filter((deck) => {
     if (!searchTerm.trim()) return true;
@@ -227,80 +244,97 @@ export default function DecksScreen() {
   });
 
   /**
-   * Criação de deck (usando parse assíncrono com chunks)
+   * Carrega setIdMap
+   */
+  async function loadSetIdMap() {
+    try {
+      const response = await fetch("https://api.pokemontcg.io/v2/sets");
+      const data = await response.json();
+      if (data && data.data) {
+        const map: Record<string, string> = {};
+        const groupedSets: Record<string, any[]> = {};
+        data.data.forEach((setItem: any) => {
+          const code = setItem.ptcgoCode?.toUpperCase();
+          if (!code) return;
+          if (!groupedSets[code]) groupedSets[code] = [];
+          groupedSets[code].push(setItem);
+        });
+        Object.keys(groupedSets).forEach((code) => {
+          const sets = groupedSets[code];
+          const bestSet = sets.reduce((prev, curr) =>
+            curr.total > prev.total ? curr : prev
+          );
+          map[code] = bestSet.id;
+        });
+        setSetIdMap(map);
+      }
+    } catch (error) {
+      console.log("Erro ao carregar setIdMap:", error);
+    }
+  }
+
+  /**
+   * Lógica de criar deck
    */
   async function handleCreateDeck() {
     if (!newDeckName.trim()) {
-      Alert.alert("Erro", "Digite o nome do deck.");
+      Alert.alert("Erro", "O deck precisa de um nome.");
       return;
     }
-
-    // Inicia parse em blocos
-    setParsingDeck(true);
+    setParsing(true);
     setLoading(true);
-
     try {
       const { pokemons, trainers, energies } = await parseDeckContentChunked(newDeckContent);
-      // Se não encontrou nada, avisa
       if (!pokemons.length && !trainers.length && !energies.length) {
-        Alert.alert("Erro", "Nenhuma carta detectada.");
-        setParsingDeck(false);
+        Alert.alert("Erro", "Nenhuma carta detectada na lista.");
+        setParsing(false);
         setLoading(false);
         return;
       }
 
-      // Monta o objeto para salvar
       const payload = {
+        ownerUid: playerId,
+        ownerName: playerName,
+        leagueId,
         name: newDeckName.trim(),
         createdAt: new Date().toISOString(),
         pokemons: pokemons.map(toFirestoreCard),
         trainers: trainers.map(toFirestoreCard),
         energies: energies.map(toFirestoreCard),
-        style: selectedStyles,
-        archetype: selectedArchetype,
-        ownerUid,
-        ownerName,
-        leagueId,
+        style: newStyles,
+        archetype: newArchetype,
       };
-      console.log("[Decks] Salvando deck com payload:", payload);
 
-      const decksReference = collection(db, "decks");
-      await addDoc(decksReference, payload);
-      Alert.alert("Sucesso", "Deck criado com sucesso!");
+      const refDecks = collection(db, "decks");
+      await addDoc(refDecks, payload);
 
-      // Reseta campos
       setNewDeckName("");
       setNewDeckContent("");
-      setSelectedStyles([]);
-      setSelectedArchetype(null);
-      setModalVisible(false);
+      setNewStyles([]);
+      setNewArchetype(null);
+      setCreateModalVisible(false);
+
+      Alert.alert("Sucesso", "Deck criado com sucesso!");
     } catch (error) {
-      console.log("[Decks] Erro ao criar deck =>", error);
+      console.log("Erro ao criar deck:", error);
       Alert.alert("Erro", "Falha ao criar deck.");
     } finally {
-      setParsingDeck(false);
+      setParsing(false);
       setLoading(false);
     }
   }
 
   /**
-   * Deletar deck
+   * Excluir deck
    */
-  async function handleDeleteDeck(deckId: string) {
-    console.log("[Decks] handleDeleteDeck =>", deckId);
+  async function handleDeleteDeck(deck: DeckData) {
     setLoading(true);
     try {
-      const deckDocumentReference = doc(db, "decks", deckId);
-      const deckSnapshot = await getDoc(deckDocumentReference);
-      if (!deckSnapshot.exists()) {
-        Alert.alert("Erro", "Deck não encontrado no Firestore.");
-        setLoading(false);
-        return;
-      }
-      await deleteDoc(deckDocumentReference);
+      const deckRef = doc(db, "decks", deck.id);
+      await deleteDoc(deckRef);
       Alert.alert("Sucesso", "Deck excluído!");
     } catch (error) {
-      console.log("[Decks] Erro ao deletar =>", error);
+      console.log("Erro ao excluir deck:", error);
       Alert.alert("Erro", "Falha ao excluir deck.");
     } finally {
       setLoading(false);
@@ -308,140 +342,226 @@ export default function DecksScreen() {
   }
 
   /**
-   * Abrir modal de visualização
+   * Ao clicar no card, abrimos a visualização e carregamos as imagens
    */
-  function openViewDeck(deck: DeckData) {
+  function openViewModal(deck: DeckData) {
     setViewDeck(deck);
+    setDeckViewMode("table");
     setViewModalVisible(true);
+    loadDeckImages(deck);
   }
 
   /**
-   * Toggle de estilo (até 3)
+   * Fecha modal de visualização
    */
-  function toggleStyleOption(option: string) {
-    if (selectedStyles.includes(option)) {
-      setSelectedStyles((previous) => previous.filter((sty) => sty !== option));
-    } else {
-      if (selectedStyles.length >= 3) {
-        Alert.alert("Atenção", "Máximo de 3 estilos.");
-        return;
+  function closeViewModal() {
+    setViewModalVisible(false);
+    setViewDeck(null);
+  }
+
+  /**
+   * Carrega as cartas + imagens
+   */
+  async function loadDeckImages(deck: DeckData) {
+    const allCards = [
+      ...deck.pokemons.map((c) => ({
+        ...c,
+        category: "Pokémon",
+        expansion: c.expansion ?? undefined,
+        cardNumber: c.cardNumber ?? undefined,
+      })),
+      ...deck.trainers.map((c) => ({
+        ...c,
+        category: "Treinador",
+        expansion: c.expansion ?? undefined,
+        cardNumber: c.cardNumber ?? undefined,
+      })),
+      ...deck.energies.map((c) => ({
+        ...c,
+        category: "Energia",
+        expansion: c.expansion ?? undefined,
+        cardNumber: c.cardNumber ?? undefined,
+      })),
+    ];
+
+    setDeckCards(allCards);
+    setLoadingImages(true);
+
+    const imagePromises = allCards.map(async (card) => {
+      const keyStr = `${card.name}__${card.expansion || ""}__${card.cardNumber || ""}`;
+      const url = await fetchCardImage(card.name, card.expansion, card.cardNumber);
+      return { key: keyStr, url };
+    });
+
+    const results = await Promise.all(imagePromises);
+    const newMap: Record<string, string> = {};
+    results.forEach((item) => {
+      if (item.url) {
+        newMap[item.key] = item.url;
       }
-      setSelectedStyles((previous) => [...previous, option]);
+    });
+
+    setCardImages(newMap);
+    setLoadingImages(false);
+  }
+
+  /**
+   * Chama API TCG para pegar imagem
+   */
+  async function fetchCardImage(
+    cardName: string,
+    expansion?: string,
+    cardNumber?: string
+  ): Promise<string | null> {
+    try {
+      if (!cardName) return null;
+      const sanitized = cardName.replace(/\bPH\b/g, "").trim();
+      let queryParts: string[] = [`name:"${encodeURIComponent(sanitized)}"`];
+
+      if (expansion) {
+        const setId = setIdMap[expansion.toUpperCase()];
+        if (setId) {
+          queryParts.push(`set.id:"${setId}"`);
+        }
+      }
+      if (cardNumber) {
+        queryParts.push(`number:"${cardNumber}"`);
+      }
+
+      const finalQuery = queryParts.join("%20");
+      const url = `https://api.pokemontcg.io/v2/cards?q=${finalQuery}`;
+      const resp = await fetch(url, {
+        headers: {
+          "X-Api-Key": "8d293a2a-4949-4d04-a06c-c20672a7a12c",
+        },
+      });
+      const data = await resp.json();
+      if (data && data.data && data.data.length > 0) {
+        return data.data[0].images.small ?? null;
+      }
+      return null;
+    } catch (error) {
+      console.log("Erro em fetchCardImage:", error);
+      return null;
     }
   }
 
   /**
-   * Renderiza cada item (deck) na FlatList
+   * Renderiza cada deck no FlatList
    */
   function renderDeckItem({ item }: { item: DeckData }) {
-    const totalPokemon = item.pokemons.reduce((accumulator, card) => accumulator + card.quantity, 0);
-    const totalTrainer = item.trainers.reduce((accumulator, card) => accumulator + card.quantity, 0);
-    const totalEnergy = item.energies.reduce((accumulator, card) => accumulator + card.quantity, 0);
-    const totalAll = totalPokemon + totalTrainer + totalEnergy;
+    const totalPoke = item.pokemons.reduce((acc, c) => acc + c.quantity, 0);
+    const totalTrea = item.trainers.reduce((acc, c) => acc + c.quantity, 0);
+    const totalEner = item.energies.reduce((acc, c) => acc + c.quantity, 0);
+    const totalAll = totalPoke + totalTrea + totalEner;
 
     return (
-      <Animatable.View style={styles.deckTile} animation="fadeInUp">
+      <Animatable.View style={styles.deckCard} animation="fadeInUp">
         <TouchableOpacity
           style={{ flex: 1 }}
-          onPress={() => openViewDeck(item)}
-          onLongPress={() =>
-            Alert.alert("Excluir Deck", `Deseja excluir o deck "${item.name}"?`, [
+          onPress={() => openViewModal(item)}
+          onLongPress={() => {
+            Alert.alert("Excluir Deck", `Deseja excluir ${item.name}?`, [
               { text: "Cancelar", style: "cancel" },
               {
                 text: "Excluir",
                 style: "destructive",
-                onPress: () => handleDeleteDeck(item.id),
+                onPress: () => handleDeleteDeck(item),
               },
-            ])
-          }
+            ]);
+          }}
         >
-          <Text style={styles.deckName}>{item.name}</Text>
-          <Text style={styles.deckDate}>
-            {item.createdAt ? new Date(item.createdAt).toLocaleString() : "?"}
+          {/* Cabeçalho do card */}
+          <View style={styles.deckHeaderRow}>
+            <Text style={styles.deckName}>{item.name}</Text>
+            {!!item.style?.length && (
+              <Text
+                style={styles.deckStyle}
+                numberOfLines={1}
+              >
+                {item.style.join(", ")}
+              </Text>
+            )}
+          </View>
+
+          {/* Segunda linha: Arquetipo e data */}
+          <View style={styles.deckHeaderRow}>
+            {!!item.archetype && (
+              <Text style={styles.deckArchetype} numberOfLines={1}>
+                {item.archetype}
+              </Text>
+            )}
+            <Text style={styles.deckDate}>
+              {item.createdAt ? formatDate(item.createdAt) : ""}
+            </Text>
+          </View>
+
+          {/* Dono */}
+          <Text style={styles.deckOwner}>
+            Dono: {item.ownerName || `User ${item.ownerUid}`}
           </Text>
+
+          {/* Quantidade de cartas */}
           <Text style={styles.deckCount}>
-            P:{totalPokemon} T:{totalTrainer} E:{totalEnergy} Total:{totalAll}
+            P: {totalPoke} T: {totalTrea} E: {totalEner} | Total: {totalAll}
           </Text>
-
-          {item.ownerName ? (
-            <Text style={styles.deckOwner}>Dono: {item.ownerName}</Text>
-          ) : null}
-          {item.leagueId ? (
-            <Text style={styles.deckOwner}>Liga: {item.leagueId}</Text>
-          ) : null}
-
-          {item.style?.length ? (
-            <Text style={styles.deckStyle}>
-              Estilos: {item.style.join(", ")}
-            </Text>
-          ) : null}
-          {item.archetype ? (
-            <Text style={styles.deckStyle}>
-              Arquetipo: {item.archetype}
-            </Text>
-          ) : null}
         </TouchableOpacity>
       </Animatable.View>
     );
   }
 
+  // ==================== RENDER PRINCIPAL ====================
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header + Busca */}
+    <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Meus Decks</Text>
       </View>
 
-      <View style={styles.searchContainer}>
+      <View style={styles.searchBar}>
         <Ionicons name="search" size={20} color="#999" style={{ marginRight: 8 }} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar deck por nome..."
+          placeholder="Buscar deck..."
           placeholderTextColor="#999"
           value={searchTerm}
           onChangeText={setSearchTerm}
         />
       </View>
 
-      {/* Lista de decks */}
-      <View style={{ flex: 1, padding: 10 }}>
-        {loading && (
-          <View style={styles.loadingContainer}>
-            <Animatable.Text
-              animation="pulse"
-              iterationCount="infinite"
-              style={styles.loadingText}
-            >
-              Carregando...
-            </Animatable.Text>
-          </View>
-        )}
-        <FlatList
-          data={filteredDecks}
-          keyExtractor={(deckItem) => deckItem.id}
-          numColumns={2}
-          columnWrapperStyle={{ justifyContent: "space-between" }}
-          renderItem={renderDeckItem}
-        />
-      </View>
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <Animatable.Text animation="pulse" iterationCount="infinite" style={styles.loadingText}>
+            Carregando...
+          </Animatable.Text>
+        </View>
+      )}
 
-      {/* Botão flutuante */}
-      <View style={styles.floatingButtonContainer}>
+      <FlatList
+        data={filteredDecks}
+        keyExtractor={(deckItem) => deckItem.id}
+        renderItem={renderDeckItem}
+        numColumns={2}
+        columnWrapperStyle={{ justifyContent: "space-between" }}
+        contentContainerStyle={{ paddingBottom: 80, paddingHorizontal: 10 }}
+      />
+
+      {/* Botão flutuante para criar deck */}
+      <View style={styles.floatingContainer}>
         <TouchableOpacity
           style={styles.floatingButton}
-          onPress={() => setModalVisible(true)}
+          onPress={() => setCreateModalVisible(true)}
         >
-          <Ionicons name="add" size={26} color="#FFF" style={{ marginRight: 6 }} />
-          <Text style={styles.floatingButtonText}>Cadastrar Deck</Text>
+          <Ionicons name="add" size={22} color="#FFF" style={{ marginRight: 6 }} />
+          <Text style={styles.floatingButtonText}>Criar Deck</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Modal de criação */}
+      {/* Modal de criação de deck */}
       <Modal
-        visible={modalVisible}
+        visible={createModalVisible}
         animationType="slide"
+        onRequestClose={() => setCreateModalVisible(false)}
         transparent
-        onRequestClose={() => setModalVisible(false)}
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
@@ -449,152 +569,149 @@ export default function DecksScreen() {
         >
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
+              <TouchableOpacity onPress={() => setCreateModalVisible(false)}>
+                <Ionicons name="arrow-back" size={24} color="#FFF" />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>Cadastrar Deck</Text>
+              <Text style={styles.modalTitle}>Criar Deck</Text>
             </View>
 
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
+            <ScrollView contentContainerStyle={{ padding: 16 }}>
               <Text style={styles.label}>Nome do Deck</Text>
               <TextInput
-                style={styles.modalInput}
+                style={styles.input}
+                placeholder="Ex: Deck do Pikachu"
+                placeholderTextColor="#999"
                 value={newDeckName}
                 onChangeText={setNewDeckName}
-                placeholder="Ex: Deck do Charizard"
-                placeholderTextColor="#999"
               />
 
-              <Text style={styles.label}>Estilo (até 3)</Text>
-              <TouchableOpacity
-                style={styles.selectField}
-                onPress={() => setStyleModalVisible(true)}
-              >
-                <Text style={styles.selectFieldText}>
-                  {selectedStyles.length
-                    ? selectedStyles.join(", ")
-                    : "Selecione os estilos..."}
-                </Text>
-                <MaterialCommunityIcons name="chevron-down" size={20} color="#FFF" />
-              </TouchableOpacity>
-
-              <Text style={styles.label}>Arquetipo</Text>
-              <TouchableOpacity
-                style={styles.selectField}
-                onPress={() => setArchetypeModalVisible(true)}
-              >
-                <Text style={styles.selectFieldText}>
-                  {selectedArchetype ?? "Selecione um arquetipo..."}
-                </Text>
-                <MaterialCommunityIcons name="chevron-down" size={20} color="#FFF" />
-              </TouchableOpacity>
-
-              <Text style={[styles.label, { marginTop: 12 }]}>Lista do Deck</Text>
+              <Text style={styles.label}>Lista do Deck</Text>
               <TextInput
-                style={[styles.modalInput, { height: 100 }]}
+                style={[styles.input, { height: 80 }]}
                 multiline
+                placeholder="Cole a lista aqui..."
+                placeholderTextColor="#999"
                 value={newDeckContent}
                 onChangeText={setNewDeckContent}
-                placeholder="Copie e cole aqui sua lista..."
-                placeholderTextColor="#999"
               />
 
-              {/* Exemplo de indicador de parse */}
-              {parsingDeck && (
-                <View style={{ alignItems: "center", marginVertical: 10 }}>
+              {parsing && (
+                <View style={styles.parseOverlay}>
                   <ActivityIndicator size="large" color="#E3350D" />
-                  <Text style={{ color: "#FFF", marginTop: 4 }}>Processando Deck...</Text>
+                  <Text style={{ color: "#FFF", marginTop: 10 }}>Processando Deck...</Text>
                 </View>
               )}
 
               <TouchableOpacity
-                style={styles.saveDeckButton}
-                onPress={handleCreateDeck}
-                disabled={parsingDeck}
+                style={styles.selectButton}
+                onPress={() => setStylesModalVisible(true)}
               >
-                <Text style={styles.saveDeckButtonText}>Salvar Deck</Text>
+                <Ionicons name="color-filter" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                <Text style={styles.selectButtonText}>
+                  {newStyles.length ? `Estilos: ${newStyles.join(", ")}` : "Selecionar Estilos"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.selectButton, { marginTop: 12 }]}
+                onPress={() => setArchetypeModalVisible(true)}
+              >
+                <Ionicons name="options" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                <Text style={styles.selectButtonText}>
+                  {newArchetype ? `Arquetipo: ${newArchetype}` : "Selecionar Arquetipo"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.button, { marginTop: 20 }]}
+                onPress={handleCreateDeck}
+                disabled={parsing}
+              >
+                <Text style={styles.buttonText}>Salvar</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Submodal de Estilo */}
       <Modal
-        visible={styleModalVisible}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setStyleModalVisible(false)}
-      >
-        <View style={styles.subModalOverlay}>
-          <View style={styles.subModalContainer}>
-            <Text style={styles.subModalTitle}>Selecione até 3 Estilos</Text>
-            <ScrollView style={{ maxHeight: 300, marginVertical: 10 }}>
-              {STYLE_OPTIONS.map((option) => {
-                const isSelected = selectedStyles.includes(option);
-                const iconName = STYLE_ICONS[option] || "help-circle-outline";
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={styles.optionRow}
-                    onPress={() => toggleStyleOption(option)}
-                  >
-                    <MaterialCommunityIcons
-                      name={isSelected ? "checkbox-marked" : "checkbox-blank-outline"}
-                      size={20}
-                      color={isSelected ? "#E3350D" : "#FFF"}
-                      style={{ marginRight: 8 }}
-                    />
-                    <MaterialCommunityIcons
-                      name={iconName as keyof typeof MaterialCommunityIcons.glyphMap}
-                      size={20}
-                      color="#FFF"
-                      style={{ marginRight: 6 }}
-                    />
-                    <Text style={{ color: "#FFF" }}>{option}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+  visible={stylesModalVisible}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setStylesModalVisible(false)}
+>
+  <View style={styles.subModalOverlay}>
+    <View style={styles.subModalContainer}>
+      <Text style={styles.subModalTitle}>Selecione até 3 estilos</Text>
+      <ScrollView>
+        {STYLE_OPTIONS.map((opt) => {
+          const selected = newStyles.includes(opt);
+          const iconName = STYLE_ICONS[opt] || "help-circle-outline";
+          return (
             <TouchableOpacity
-              style={styles.closeOptionButton}
-              onPress={() => setStyleModalVisible(false)}
+              key={opt}
+              style={styles.subModalItem}
+              onPress={() => toggleStyleOption(opt)}
             >
-              <Text style={styles.closeOptionButtonText}>OK</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+              {/* Ícone de seleção */}
+              <Ionicons
+                name={selected ? "checkbox" : "square-outline"}
+                size={20}
+                color={selected ? "#E3350D" : "#FFF"}
+                style={{ marginRight: 8 }}
+              />
+              {/* Ícone do estilo */}
+              <MaterialCommunityIcons
+                name={iconName as any}
+                size={20}
+                color="#FFF"
+                style={{ marginRight: 8 }}
+              />
 
-      {/* Submodal de Arquétipo */}
+              <Text style={{ color: "#FFF" }}>{opt}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      <TouchableOpacity
+        style={styles.closeOptionButton}
+        onPress={() => setStylesModalVisible(false)}
+      >
+        <Text style={styles.closeOptionButtonText}>OK</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
+
+      {/* Submodal de arquétipo (create) */}
       <Modal
         visible={archetypeModalVisible}
-        animationType="fade"
         transparent
+        animationType="fade"
         onRequestClose={() => setArchetypeModalVisible(false)}
       >
         <View style={styles.subModalOverlay}>
           <View style={styles.subModalContainer}>
             <Text style={styles.subModalTitle}>Selecione um Arquetipo</Text>
-            <ScrollView style={{ maxHeight: 350, marginVertical: 10 }}>
-              {ARCHETYPE_OPTIONS.map((option) => {
-                const isSelected = selectedArchetype === option;
+            <ScrollView>
+              {ARCHETYPE_OPTIONS.map((opt) => {
+                const selected = newArchetype === opt;
                 return (
                   <TouchableOpacity
-                    key={option}
-                    style={styles.optionRow}
+                    key={opt}
+                    style={styles.subModalItem}
                     onPress={() => {
-                      setSelectedArchetype(option);
+                      setNewArchetype(opt);
                       setArchetypeModalVisible(false);
                     }}
                   >
-                    <MaterialCommunityIcons
-                      name={isSelected ? "radiobox-marked" : "radiobox-blank"}
+                    <Ionicons
+                      name={selected ? "radio-button-on" : "radio-button-off"}
                       size={20}
-                      color={isSelected ? "#E3350D" : "#FFF"}
+                      color={selected ? "#E3350D" : "#FFF"}
                       style={{ marginRight: 8 }}
                     />
-                    <Text style={{ color: "#FFF" }}>{option}</Text>
+                    <Text style={{ color: "#FFF" }}>{opt}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -609,95 +726,88 @@ export default function DecksScreen() {
         </View>
       </Modal>
 
-      {/* Modal de Visualização de Deck */}
+      {/* Modal de visualização de deck */}
       <Modal
         visible={viewModalVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setViewModalVisible(false)}
+        onRequestClose={closeViewModal}
       >
         <Animatable.View style={styles.viewModalOverlay} animation="fadeIn">
           <Animatable.View style={styles.viewModalContainer} animation="fadeInUp">
             <View style={styles.viewModalHeader}>
-              <TouchableOpacity onPress={() => setViewModalVisible(false)}>
-                <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
+              <TouchableOpacity onPress={closeViewModal}>
+                <Ionicons name="arrow-back" size={22} color="#FFF" />
               </TouchableOpacity>
-              <Text style={styles.viewModalTitle}>{viewDeck?.name || "Deck"}</Text>
+
+              <Text style={styles.viewModalTitle}>
+                {viewDeck?.name ?? "Deck"}
+              </Text>
+
+              {/* Alternar Tabela / Mosaico */}
+              <View style={styles.deckViewSwitchRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.deckViewSwitchButton,
+                    deckViewMode === "table" && styles.deckViewSwitchButtonActive,
+                  ]}
+                  onPress={() => setDeckViewMode("table")}
+                >
+                  <Ionicons name="list" size={16} color="#FFF" />
+                  <Text style={styles.deckViewSwitchText}> Tabela</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.deckViewSwitchButton,
+                    deckViewMode === "mosaic" && styles.deckViewSwitchButtonActive,
+                  ]}
+                  onPress={() => setDeckViewMode("mosaic")}
+                >
+                  <Ionicons name="images" size={16} color="#FFF" />
+                  <Text style={styles.deckViewSwitchText}> Mosaico</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <ScrollView style={{ flex: 1, padding: 16 }}>
+            <ScrollView contentContainerStyle={{ padding: 16 }}>
               {viewDeck && (
                 <>
-                  <Text style={styles.viewDeckInfo}>
-                    Data de Criação:{" "}
-                    {viewDeck.createdAt
-                      ? new Date(viewDeck.createdAt).toLocaleString()
-                      : "?"}
-                  </Text>
-                  {viewDeck.ownerName && (
-                    <Text style={styles.viewDeckInfo}>
-                      Dono: {viewDeck.ownerName}
+                  <View style={styles.deckDetailHeaderRow}>
+                    <Text style={styles.deckDetailHeaderText}>
+                      Data: {formatDate(viewDeck.createdAt)}
                     </Text>
-                  )}
-                  {viewDeck.leagueId && (
-                    <Text style={styles.viewDeckInfo}>
-                      Liga: {viewDeck.leagueId}
+                    <Text style={[styles.deckDetailHeaderText, { marginLeft: 10 }]}>
+                      Dono: {viewDeck.ownerName || `User ${viewDeck.ownerUid}`}
                     </Text>
-                  )}
-                  {viewDeck.style?.length ? (
-                    <Text style={styles.viewDeckInfo}>
+                  </View>
+
+                  {/* Liga removida do card inicial, mas aqui pode aparecer se quiser
+                      Se não quiser, basta remover este if. */}
+                  {!!viewDeck.style?.length && (
+                    <Text style={[styles.deckDetailHeaderText, { marginTop: 4 }]}>
                       Estilos: {viewDeck.style.join(", ")}
                     </Text>
-                  ) : null}
-                  {viewDeck.archetype && (
-                    <Text style={styles.viewDeckInfo}>
+                  )}
+                  {!!viewDeck.archetype && (
+                    <Text style={[styles.deckDetailHeaderText, { marginTop: 4 }]}>
                       Arquetipo: {viewDeck.archetype}
                     </Text>
                   )}
 
-                  <Animatable.Text style={styles.deckSectionTitle} animation="fadeInRight">
-                    Pokémons:
-                  </Animatable.Text>
-                  {viewDeck.pokemons.map((line) => (
-                    <Text style={styles.deckLine} key={line.incrementalId}>
-                      {line.quantity}x {line.name}
-                      {line.expansion
-                        ? ` [${line.expansion}${line.cardNumber ?? ""}]`
-                        : ""}
-                    </Text>
-                  ))}
-
-                  <Animatable.Text
-                    style={styles.deckSectionTitle}
-                    animation="fadeInRight"
-                    delay={100}
-                  >
-                    Treinadores:
-                  </Animatable.Text>
-                  {viewDeck.trainers.map((line) => (
-                    <Text style={styles.deckLine} key={line.incrementalId}>
-                      {line.quantity}x {line.name}
-                      {line.expansion
-                        ? ` [${line.expansion}${line.cardNumber ?? ""}]`
-                        : ""}
-                    </Text>
-                  ))}
-
-                  <Animatable.Text
-                    style={styles.deckSectionTitle}
-                    animation="fadeInRight"
-                    delay={200}
-                  >
-                    Energias:
-                  </Animatable.Text>
-                  {viewDeck.energies.map((line) => (
-                    <Text style={styles.deckLine} key={line.incrementalId}>
-                      {line.quantity}x {line.name}
-                      {line.expansion
-                        ? ` [${line.expansion}${line.cardNumber ?? ""}]`
-                        : ""}
-                    </Text>
-                  ))}
+                  {deckViewMode === "table" ? (
+                    <RenderDeckTable
+                      deck={viewDeck}
+                      cardImages={cardImages}
+                      loadingImages={loadingImages}
+                    />
+                  ) : (
+                    <RenderDeckMosaic
+                      deck={viewDeck}
+                      cardImages={cardImages}
+                      loadingImages={loadingImages}
+                    />
+                  )}
                 </>
               )}
             </ScrollView>
@@ -706,154 +816,222 @@ export default function DecksScreen() {
       </Modal>
     </SafeAreaView>
   );
+
+  // =================== FUNÇÃO DE TOGGLE DE ESTILO ===================
+  function toggleStyleOption(opt: string) {
+    if (newStyles.includes(opt)) {
+      setNewStyles((prev) => prev.filter((s) => s !== opt));
+    } else {
+      if (newStyles.length >= 3) {
+        Alert.alert("Atenção", "Máximo de 3 estilos.");
+        return;
+      }
+      setNewStyles((prev) => [...prev, opt]);
+    }
+  }
 }
-
-/** =========================================================
- *  Funções de Conversão
- * ========================================================= */
-
-/** Converte array do Firestore em CardLine[] */
-function convertToCardLines(dataArray: any[]): CardLine[] {
-  if (!dataArray || !Array.isArray(dataArray)) return [];
-  return dataArray.map((obj: any, index: number) => {
-    return {
-      incrementalId: index + 1,
-      quantity: obj.quantity || 1,
-      name: obj.name || "",
-      expansion: obj.expansion ?? null,
-      cardNumber: obj.cardNumber ?? null,
-    };
-  });
-}
-
-/** Converte CardLine para formato que vai ao Firestore */
-function toFirestoreCard(cardLine: CardLine) {
-  return {
-    quantity: cardLine.quantity,
-    name: cardLine.name,
-    expansion: cardLine.expansion || null,
-    cardNumber: cardLine.cardNumber || null,
-  };
-}
-
-/** =========================================================
- *  Parse Assíncrono em Blocos
- * ========================================================= */
 
 /**
- * Lê o texto do deck, processa por blocos (chunks) e retorna:
- * { pokemons, trainers, energies }.
+ * Exibe as cartas em tabela.
  */
-function parseDeckContentChunked(text: string): Promise<{
+function RenderDeckTable({
+  deck,
+  cardImages,
+  loadingImages,
+}: {
+  deck: DeckData;
+  cardImages: Record<string, string>;
+  loadingImages: boolean;
+}) {
+  const allCards = [
+    ...deck.pokemons.map((c) => ({ ...c, category: "Pokémon" })),
+    ...deck.trainers.map((c) => ({ ...c, category: "Treinador" })),
+    ...deck.energies.map((c) => ({ ...c, category: "Energia" })),
+  ];
+
+  return (
+    <View style={{ marginTop: 10 }}>
+      <View style={styles.tableHeaderRow}>
+        <Text style={[styles.tableHeaderText, { flex: 1 }]}>Qtd</Text>
+        <Text style={[styles.tableHeaderText, { flex: 2 }]}>Tipo</Text>
+        <Text style={[styles.tableHeaderText, { flex: 3 }]}>Nome</Text>
+        <Text style={[styles.tableHeaderText, { flex: 2 }]}>Exp</Text>
+        <Text style={[styles.tableHeaderText, { flex: 1 }]}>Nº</Text>
+      </View>
+      {allCards.map((card, index) => {
+        const keyStr = `${card.name}__${card.expansion ?? ""}__${card.cardNumber ?? ""}`;
+        const imgUrl = cardImages[keyStr];
+        return (
+          <View
+            key={`tab-${index}`}
+            style={[
+              styles.tableRow,
+              { backgroundColor: index % 2 === 0 ? "#2A2A2A" : "#3A3A3A" },
+            ]}
+          >
+            <Text style={[styles.tableRowText, { flex: 1 }]}>{card.quantity}</Text>
+            <Text style={[styles.tableRowText, { flex: 2 }]}>{card.category}</Text>
+            <Text style={[styles.tableRowText, { flex: 3 }]} numberOfLines={1}>
+              {card.name}
+            </Text>
+            <Text style={[styles.tableRowText, { flex: 2 }]}>
+              {card.expansion ?? ""}
+            </Text>
+            <Text style={[styles.tableRowText, { flex: 1 }]}>
+              {card.cardNumber ?? ""}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Exibe as cartas em mosaico, com imagens.
+ */
+function RenderDeckMosaic({
+  deck,
+  cardImages,
+  loadingImages,
+}: {
+  deck: DeckData;
+  cardImages: Record<string, string>;
+  loadingImages: boolean;
+}) {
+  const allCards = [
+    ...deck.pokemons.map((c) => ({ ...c, category: "Pokémon" })),
+    ...deck.trainers.map((c) => ({ ...c, category: "Treinador" })),
+    ...deck.energies.map((c) => ({ ...c, category: "Energia" })),
+  ];
+
+  return (
+    <View style={{ marginTop: 10 }}>
+      {loadingImages && (
+        <View style={styles.imageLoadingOverlay}>
+          <ActivityIndicator size="large" color="#E3350D" />
+          <Text style={{ color: "#FFF", marginTop: 10 }}>Carregando imagens...</Text>
+        </View>
+      )}
+
+      <View style={styles.mosaicContainer}>
+        {allCards.map((card, index) => {
+          const keyStr = `${card.name}__${card.expansion ?? ""}__${card.cardNumber ?? ""}`;
+          const imgUrl = cardImages[keyStr];
+          return (
+            <View key={`mosaic-${index}`} style={styles.mosaicItem}>
+              <View style={styles.mosaicImageWrapper}>
+                {imgUrl ? (
+                  <Image
+                    source={{ uri: imgUrl }}
+                    style={styles.mosaicImage}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <View style={styles.noImageBox}>
+                    <Text style={styles.noImageText}>Sem Imagem</Text>
+                  </View>
+                )}
+                <View style={styles.mosaicQtyBox}>
+                  <Text style={styles.mosaicQtyText}>{card.quantity}</Text>
+                </View>
+              </View>
+              <Text style={styles.mosaicName} numberOfLines={2}>
+                {card.name}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+// =============== PARSE EM CHUNKS ===============
+async function parseDeckContentChunked(text: string): Promise<{
   pokemons: CardLine[];
   trainers: CardLine[];
   energies: CardLine[];
 }> {
   return new Promise((resolve) => {
-    const lines = text.split("\n").map((line) => line.trim());
-    const totalLines = lines.length;
+    const lines = text.split("\n").map((l) => l.trim());
+    const total = lines.length;
 
     const pokemons: CardLine[] = [];
     const trainers: CardLine[] = [];
     const energies: CardLine[] = [];
 
     let currentBlock: "POKEMON" | "TRAINER" | "ENERGY" | "" = "";
-    let incrementalIndex = 1;
-
     let currentIndex = 0;
+    let incrementalId = 1;
 
-    function processNextChunk() {
-      const endIndex = Math.min(currentIndex + LINES_PER_CHUNK, totalLines);
-
+    function processBlock() {
+      const endIndex = Math.min(currentIndex + 20, total);
       for (let i = currentIndex; i < endIndex; i++) {
         const line = lines[i];
         if (!line) continue;
+        const lower = line.toLowerCase();
 
-        const lowerCaseLine = line.toLowerCase();
-
-        // Identifica se é "Pokémon:", "Treinador:", "Energia:"
-        if (lowerCaseLine.startsWith("pokémon:") || lowerCaseLine.startsWith("pokemon:")) {
+        if (lower.startsWith("pokémon:") || lower.startsWith("pokemon:")) {
           currentBlock = "POKEMON";
           continue;
         }
-        if (lowerCaseLine.startsWith("treinador:") || lowerCaseLine.startsWith("trainer:")) {
+        if (lower.startsWith("treinador:") || lower.startsWith("trainer:")) {
           currentBlock = "TRAINER";
           continue;
         }
-        if (lowerCaseLine.startsWith("energia:") || lowerCaseLine.startsWith("energy:")) {
+        if (lower.startsWith("energia:") || lower.startsWith("energy:")) {
           currentBlock = "ENERGY";
           continue;
         }
+        if (!currentBlock) continue;
 
-        if (!currentBlock) {
-          // Caso o texto venha fora do formato esperado, ignoramos
-          continue;
-        }
-
-        const parsedLine = parseSingleLine(line, incrementalIndex);
-        incrementalIndex++;
+        const parsed = parseSingleLine(line, incrementalId);
+        incrementalId++;
 
         if (currentBlock === "POKEMON") {
-          pokemons.push(parsedLine);
+          pokemons.push(parsed);
         } else if (currentBlock === "TRAINER") {
-          trainers.push(parsedLine);
+          trainers.push(parsed);
         } else if (currentBlock === "ENERGY") {
-          energies.push(parsedLine);
+          energies.push(parsed);
         }
       }
-
       currentIndex = endIndex;
-
-      if (currentIndex < totalLines) {
-        // Ainda tem linhas para processar, faz nova chunk
-        setTimeout(processNextChunk, 0);
+      if (currentIndex < total) {
+        setTimeout(processBlock, 0);
       } else {
-        // Terminou de processar tudo
         resolve({ pokemons, trainers, energies });
       }
     }
-
-    // Começa a processar
-    processNextChunk();
+    processBlock();
   });
 }
 
-/**
- * Faz o parse de uma única linha do deck
- * Exemplo: "4 Charizard PAL 34"
- * e retorna um CardLine com incrementalId.
- */
-function parseSingleLine(line: string, incrementalIndex: number): CardLine {
+function parseSingleLine(line: string, incrementalId: number): CardLine {
   const tokens = line.split(" ").filter(Boolean);
-
   let quantity = 1;
   let expansion: string | null = null;
   let cardNumber: string | null = null;
-
   const nameParts: string[] = [];
 
-  // Se o primeiro token for número, interpretamos como quantidade
-  const firstToken = tokens[0];
-  const possibleQuantity = parseInt(firstToken || "", 10);
   let index = 0;
-  if (!isNaN(possibleQuantity) && possibleQuantity > 0) {
-    quantity = possibleQuantity;
+  const first = tokens[0];
+  const maybeQ = parseInt(first ?? "", 10);
+  if (!isNaN(maybeQ) && maybeQ > 0) {
+    quantity = maybeQ;
     index = 1;
   }
 
   while (index < tokens.length) {
-    const token = tokens[index];
-    const isThreeLetters = /^[A-Z]{3}$/.test(token);
-
-    if (isThreeLetters) {
-      // É a sigla da expansão
-      expansion = token;
-      // Ver se o próximo token é um número
+    const tok = tokens[index];
+    if (/^[A-Z]{3}$/.test(tok)) {
+      expansion = tok;
       if (index + 1 < tokens.length) {
-        const nextToken = tokens[index + 1];
-        const possibleCardNumber = parseInt(nextToken, 10);
-        if (!isNaN(possibleCardNumber) && possibleCardNumber > 0) {
-          cardNumber = nextToken;
+        const nextTok = tokens[index + 1];
+        const nextNum = parseInt(nextTok, 10);
+        if (!isNaN(nextNum) && nextNum > 0) {
+          cardNumber = nextTok;
           index += 2;
           continue;
         }
@@ -861,21 +1039,18 @@ function parseSingleLine(line: string, incrementalIndex: number): CardLine {
       index++;
       continue;
     }
-
-    const possibleCardNumber = parseInt(token, 10);
-    if (!isNaN(possibleCardNumber) && possibleCardNumber > 0) {
-      cardNumber = token;
+    const possibleNum = parseInt(tok, 10);
+    if (!isNaN(possibleNum) && possibleNum > 0) {
+      cardNumber = tok;
       index++;
       continue;
     }
-
-    // Caso contrário, faz parte do nome
-    nameParts.push(token);
+    nameParts.push(tok);
     index++;
   }
 
   return {
-    incrementalId: incrementalIndex,
+    incrementalId,
     quantity,
     name: nameParts.join(" "),
     expansion,
@@ -883,11 +1058,37 @@ function parseSingleLine(line: string, incrementalIndex: number): CardLine {
   };
 }
 
-/** =========================================================
- *  Estilos
- * ========================================================= */
+function convertFirestoreToCardLines(arr: any[]): CardLine[] {
+  if (!arr) return [];
+  return arr.map((obj: any, index: number) => ({
+    incrementalId: index + 1,
+    quantity: obj.quantity || 1,
+    name: obj.name || "",
+    expansion: obj.expansion || null,
+    cardNumber: obj.cardNumber || null,
+  }));
+}
+
+function toFirestoreCard(c: CardLine): FirestoreCard {
+  return {
+    quantity: c.quantity,
+    name: c.name,
+    expansion: c.expansion || null,
+    cardNumber: c.cardNumber || null,
+  };
+}
+
+/** Formatação de datas */
+function formatDate(dateIso: string) {
+  if (!dateIso) return "";
+  const m = moment(dateIso);
+  if (!m.isValid()) return dateIso;
+  return m.format("DD/MM/YYYY HH:mm");
+}
+
+/** Estilos visuais */
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: "#1E1E1E",
   },
@@ -898,27 +1099,27 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: "#E3350D",
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "bold",
   },
-  searchContainer: {
+  searchBar: {
     flexDirection: "row",
     backgroundColor: "#2A2A2A",
+    alignItems: "center",
+    margin: 10,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    margin: 12,
-    alignItems: "center",
   },
   searchInput: {
     flex: 1,
     color: "#FFF",
-    fontSize: 16,
   },
-  loadingContainer: {
+  loadingOverlay: {
     position: "absolute",
     top: 100,
-    alignSelf: "center",
+    width: "100%",
+    alignItems: "center",
     zIndex: 999,
   },
   loadingText: {
@@ -926,54 +1127,65 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
   },
-  deckTile: {
-    backgroundColor: "#333",
-    borderRadius: 10,
-    padding: 12,
+  deckCard: {
     width: "48%",
+    backgroundColor: "#333",
+    borderRadius: 8,
     marginBottom: 10,
+    padding: 10,
+  },
+  deckHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 2,
   },
   deckName: {
     color: "#FFF",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "bold",
-    marginBottom: 4,
-  },
-  deckDate: {
-    color: "#ccc",
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  deckCount: {
-    color: "#ccc",
-    fontSize: 12,
-  },
-  deckOwner: {
-    color: "#999",
-    fontSize: 12,
-    marginTop: 6,
+    maxWidth: "66%", // Evita que o nome estoure o card
   },
   deckStyle: {
     color: "#4CAF50",
     fontSize: 13,
+    fontWeight: "bold",
+    maxWidth: "30%",
+  },
+  deckArchetype: {
+    color: "#FFF",
+    fontSize: 13,
+    fontStyle: "italic",
+    maxWidth: "65%",
+  },
+  deckDate: {
+    color: "#999",
+    fontSize: 12,
+  },
+  deckOwner: {
+    color: "#ccc",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  deckCount: {
+    color: "#ccc",
+    fontSize: 12,
     marginTop: 4,
   },
-  floatingButtonContainer: {
+  floatingContainer: {
     position: "absolute",
     bottom: 20,
-    right: 16,
+    right: 20,
   },
   floatingButton: {
     backgroundColor: "#E3350D",
+    borderRadius: 30,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 30,
+    paddingVertical: 10,
   },
   floatingButtonText: {
     color: "#FFF",
-    fontSize: 16,
     fontWeight: "bold",
   },
   modalOverlay: {
@@ -986,10 +1198,10 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     backgroundColor: "#000",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   modalTitle: {
     color: "#E3350D",
@@ -1000,79 +1212,81 @@ const styles = StyleSheet.create({
   label: {
     color: "#FFF",
     fontSize: 14,
-    marginTop: 12,
+    marginTop: 14,
   },
-  modalInput: {
+  input: {
     backgroundColor: "#2A2A2A",
-    color: "#FFF",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 6,
-  },
-  selectField: {
-    flexDirection: "row",
-    backgroundColor: "#2A2A2A",
-    borderRadius: 8,
+    borderRadius: 6,
     paddingHorizontal: 10,
-    paddingVertical: 12,
-    marginTop: 6,
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  selectFieldText: {
+    paddingVertical: 6,
     color: "#FFF",
-    fontSize: 14,
+    marginTop: 6,
   },
-  saveDeckButton: {
-    backgroundColor: "#E3350D",
+  parseOverlay: {
+    alignItems: "center",
+    marginVertical: 10,
+  },
+  selectButton: {
+    backgroundColor: "#444",
     borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  selectButtonText: {
+    color: "#FFF",
+    fontWeight: "bold",
+  },
+  button: {
+    backgroundColor: "#E3350D",
+    borderRadius: 6,
     paddingHorizontal: 16,
     paddingVertical: 10,
     alignItems: "center",
-    marginTop: 20,
   },
-  saveDeckButtonText: {
+  buttonText: {
     color: "#FFF",
-    fontSize: 16,
     fontWeight: "bold",
   },
   subModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    padding: 16,
   },
   subModalContainer: {
-    backgroundColor: "#1E1E1E",
-    borderRadius: 10,
-    padding: 16,
+    backgroundColor: "#2A2A2A",
+    borderRadius: 8,
     width: "90%",
     maxHeight: "80%",
+    padding: 16,
   },
   subModalTitle: {
     color: "#FFF",
     fontSize: 16,
     fontWeight: "bold",
-    marginBottom: 6,
+    marginBottom: 10,
     textAlign: "center",
   },
-  optionRow: {
+  subModalItem: {
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 6,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#555",
   },
   closeOptionButton: {
     backgroundColor: "#E3350D",
-    borderRadius: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    borderRadius: 6,
     alignItems: "center",
+    paddingVertical: 10,
     marginTop: 14,
   },
   closeOptionButtonText: {
     color: "#FFF",
-    fontSize: 14,
     fontWeight: "bold",
   },
   viewModalOverlay: {
@@ -1082,7 +1296,7 @@ const styles = StyleSheet.create({
   viewModalContainer: {
     flex: 1,
     backgroundColor: "#1E1E1E",
-    marginTop: 70,
+    marginTop: 60,
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
   },
@@ -1091,7 +1305,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#000",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   viewModalTitle: {
     color: "#E3350D",
@@ -1099,22 +1313,118 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginLeft: 10,
   },
-  viewDeckInfo: {
-    color: "#FFF",
-    fontSize: 14,
-    marginBottom: 4,
+  deckViewSwitchRow: {
+    flexDirection: "row",
+    marginLeft: "auto",
   },
-  deckSectionTitle: {
-    color: "#E3350D",
-    fontWeight: "bold",
-    fontSize: 16,
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  deckLine: {
-    color: "#FFF",
-    fontSize: 14,
+  deckViewSwitchButton: {
+    flexDirection: "row",
+    backgroundColor: "#555",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    alignItems: "center",
     marginLeft: 8,
-    marginVertical: 2,
+  },
+  deckViewSwitchButtonActive: {
+    backgroundColor: "#777",
+  },
+  deckViewSwitchText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    marginLeft: 4,
+  },
+  deckDetailHeaderRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+  },
+  deckDetailHeaderText: {
+    color: "#FFF",
+    fontSize: 14,
+  },
+  tableHeaderRow: {
+    flexDirection: "row",
+    backgroundColor: "#444",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    marginTop: 10,
+  },
+  tableHeaderText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  tableRow: {
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  tableRowText: {
+    color: "#FFF",
+    fontSize: 13,
+    textAlign: "center",
+  },
+  mosaicContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 6,
+  },
+  mosaicItem: {
+    width: "33%",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  mosaicImageWrapper: {
+    width: 80,
+    height: 110,
+    backgroundColor: "#444",
+    borderRadius: 6,
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
+  },
+  mosaicImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 6,
+  },
+  noImageBox: {
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 8,
+  },
+  noImageText: {
+    color: "#aaa",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  mosaicQtyBox: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    backgroundColor: "#E3350D",
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  mosaicQtyText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 12,
+  },
+  mosaicName: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 4,
+    width: "100%",
+  },
+  imageLoadingOverlay: {
+    alignItems: "center",
+    marginVertical: 10,
   },
 });
+
