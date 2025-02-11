@@ -771,7 +771,7 @@ useEffect(() => {
     setSelectedDeckId("");
 
     const decksRef = collection(db, "decks");
-    onSnapshot(query(decksRef, where("playerId", "==", playerId)), (resp) => {
+    onSnapshot(query(decksRef, where("ownerUid", "==", playerId)), (resp) => {
       const arr: DeckData[] = [];
       resp.forEach((docSnap) => {
         arr.push({

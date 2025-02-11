@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   FlatList,
+  ActivityIndicator,
 } from "react-native";
 import {
   collection,
@@ -21,18 +22,17 @@ import {
   getDoc,
   doc,
   query,
-  where,
+  // where, // Descomentaria se quiser filtrar por usuário
 } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db } from "../../lib/firebaseConfig";
-import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 import * as Animatable from "react-native-animatable";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 
-/** Tipagem das linhas de cartas */
+/** Tipagem das linhas de cartas (remoção do uuidv4) */
 interface CardLine {
-  _tempId: string;
+  incrementalId: number;
   quantity: number;
   name: string;
   expansion?: string | null;
@@ -50,22 +50,10 @@ interface DeckData {
   style?: string[];
   archetype?: string | null;
 
-  /** Novos campos para identificar o dono e a liga */
+  /** Novos campos para identificar o dono e a liga. */
   ownerUid?: string;
   ownerName?: string;
   leagueId?: string;
-}
-
-/** Converte do Firestore para CardLine */
-function convertFirestoreToCardLines(arr?: any[]): CardLine[] {
-  if (!arr) return [];
-  return arr.map((item: any) => ({
-    _tempId: uuidv4(),
-    quantity: item.quantity || 1,
-    name: item.name || "",
-    expansion: item.expansion ?? null,
-    cardNumber: item.cardNumber ?? null,
-  }));
 }
 
 /** Opções de Estilo + Ícones */
@@ -126,12 +114,15 @@ const ARCHETYPE_OPTIONS = [
   "Outros",
 ];
 
+/** Quantas linhas serão processadas a cada chunk */
+const LINES_PER_CHUNK = 20;
+
 export default function DecksScreen() {
   const { t } = useTranslation();
 
   // Campos obtidos do AsyncStorage
   const [ownerUid, setOwnerUid] = useState("");
-  const [ownerName, setOwnerName] = useState("Jogador"); 
+  const [ownerName, setOwnerName] = useState("Jogador");
   const [leagueId, setLeagueId] = useState("");
 
   const [decks, setDecks] = useState<DeckData[]>([]);
@@ -155,6 +146,9 @@ export default function DecksScreen() {
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [viewDeck, setViewDeck] = useState<DeckData | null>(null);
 
+  // Estado interno para mostrar “carregando parse”
+  const [parsingDeck, setParsingDeck] = useState(false);
+
   /**
    * 1) Carrega ownerUid, ownerName e leagueId do AsyncStorage
    */
@@ -162,56 +156,53 @@ export default function DecksScreen() {
     (async () => {
       try {
         console.log("[Decks] Carregando infos do AsyncStorage...");
-        const uid = await AsyncStorage.getItem("@playerId"); // ID do jogador
-        const uname = await AsyncStorage.getItem("@playerName"); // Nome do jogador
-        const lid = await AsyncStorage.getItem("@leagueId"); // Liga
+        const uid = await AsyncStorage.getItem("@userId");
+        const uname = await AsyncStorage.getItem("@userName");
+        const lid = await AsyncStorage.getItem("@leagueId");
 
         if (uid) setOwnerUid(uid);
         if (uname) setOwnerName(uname);
         if (lid) setLeagueId(lid);
 
         console.log("[Decks] Dados do AsyncStorage:", { uid, uname, lid });
-      } catch (err) {
-        console.log("[Decks] Erro ao buscar @playerId / @playerName / @leagueId:", err);
+      } catch (error) {
+        console.log("[Decks] Erro ao buscar AsyncStorage:", error);
       }
     })();
   }, []);
 
   /**
    * 2) Carrega decks da coleção "decks"
-   *    Se quiser filtrar somente os decks desse usuário, use um where: 
-   *    query(collection(db, "decks"), where("ownerUid", "==", ownerUid))
    */
   useEffect(() => {
-    console.log("[Decks] Iniciando onSnapshot em 'decks' (todas ou filtrar?)");
     setLoading(true);
+    console.log("[Decks] Iniciando onSnapshot em 'decks'.");
 
-    // Se quiser ver SÓ seus decks, descomente a linha de "where(...)"
-    const decksRef = collection(db, "decks");
-    //const qDecks = query(decksRef, where("ownerUid", "==", ownerUid));
-    const qDecks = query(decksRef);
+    const decksReference = collection(db, "decks");
+    const decksQuery = query(decksReference);
+    // Se quiser filtrar só pelos decks do usuário, poderia fazer:
+    // const decksQuery = query(decksReference, where("ownerUid", "==", ownerUid));
 
     const unsubscribe = onSnapshot(
-      qDecks,
+      decksQuery,
       (snapshot) => {
         console.log("[Decks] onSnapshot =>", snapshot.size, "docs");
         const allDecks: DeckData[] = [];
-        snapshot.forEach((docSnap) => {
-          const d = docSnap.data();
-          allDecks.push({
-            id: docSnap.id,
-            name: d.name,
-            createdAt: d.createdAt,
-            pokemons: convertFirestoreToCardLines(d.pokemons),
-            trainers: convertFirestoreToCardLines(d.trainers),
-            energies: convertFirestoreToCardLines(d.energies),
-            style: d.style || [],
-            archetype: d.archetype || null,
 
-            // Metadados do dono
-            ownerUid: d.ownerUid || "",
-            ownerName: d.ownerName || "",
-            leagueId: d.leagueId || "",
+        snapshot.forEach((docSnapshot) => {
+          const deckFirestore = docSnapshot.data();
+          allDecks.push({
+            id: docSnapshot.id,
+            name: deckFirestore.name,
+            createdAt: deckFirestore.createdAt,
+            pokemons: convertToCardLines(deckFirestore.pokemons),
+            trainers: convertToCardLines(deckFirestore.trainers),
+            energies: convertToCardLines(deckFirestore.energies),
+            style: deckFirestore.style || [],
+            archetype: deckFirestore.archetype || null,
+            ownerUid: deckFirestore.ownerUid || "",
+            ownerName: deckFirestore.ownerName || "",
+            leagueId: deckFirestore.leagueId || "",
           });
         });
 
@@ -228,7 +219,7 @@ export default function DecksScreen() {
   }, [ownerUid]);
 
   /**
-   * 3) Filtra decks pelo searchTerm
+   * Filtra decks pelo termo de busca
    */
   const filteredDecks = decks.filter((deck) => {
     if (!searchTerm.trim()) return true;
@@ -236,25 +227,29 @@ export default function DecksScreen() {
   });
 
   /**
-   * Função de criação de deck (salva na coleção "decks")
+   * Criação de deck (usando parse assíncrono com chunks)
    */
   async function handleCreateDeck() {
-    console.log("[Decks] handleCreateDeck disparado...");
     if (!newDeckName.trim()) {
       Alert.alert("Erro", "Digite o nome do deck.");
       return;
     }
 
-    console.log("[Decks] parseDeckContent...");
-    const { pokemons, trainers, energies } = parseDeckContent(newDeckContent);
-    if (!pokemons.length && !trainers.length && !energies.length) {
-      Alert.alert("Erro", "Nenhuma carta detectada.");
-      return;
-    }
-
+    // Inicia parse em blocos
+    setParsingDeck(true);
     setLoading(true);
+
     try {
-      const decksRef = collection(db, "decks");
+      const { pokemons, trainers, energies } = await parseDeckContentChunked(newDeckContent);
+      // Se não encontrou nada, avisa
+      if (!pokemons.length && !trainers.length && !energies.length) {
+        Alert.alert("Erro", "Nenhuma carta detectada.");
+        setParsingDeck(false);
+        setLoading(false);
+        return;
+      }
+
+      // Monta o objeto para salvar
       const payload = {
         name: newDeckName.trim(),
         createdAt: new Date().toISOString(),
@@ -263,28 +258,27 @@ export default function DecksScreen() {
         energies: energies.map(toFirestoreCard),
         style: selectedStyles,
         archetype: selectedArchetype,
-
-        // Info do dono e liga
-        ownerUid,    // Vem do AsyncStorage
-        ownerName,   // Vem do AsyncStorage
-        leagueId,    // Vem do AsyncStorage
+        ownerUid,
+        ownerName,
+        leagueId,
       };
       console.log("[Decks] Salvando deck com payload:", payload);
 
-      const docRef = await addDoc(decksRef, payload);
-      console.log("[Decks] Deck criado. docId =", docRef.id);
-
+      const decksReference = collection(db, "decks");
+      await addDoc(decksReference, payload);
       Alert.alert("Sucesso", "Deck criado com sucesso!");
+
       // Reseta campos
       setNewDeckName("");
       setNewDeckContent("");
       setSelectedStyles([]);
       setSelectedArchetype(null);
       setModalVisible(false);
-    } catch (err: any) {
-      console.log("[Decks] Erro ao criar deck =>", err.code, err.message);
+    } catch (error) {
+      console.log("[Decks] Erro ao criar deck =>", error);
       Alert.alert("Erro", "Falha ao criar deck.");
     } finally {
+      setParsingDeck(false);
       setLoading(false);
     }
   }
@@ -296,17 +290,17 @@ export default function DecksScreen() {
     console.log("[Decks] handleDeleteDeck =>", deckId);
     setLoading(true);
     try {
-      const deckRef = doc(db, "decks", deckId);
-      const snap = await getDoc(deckRef);
-      if (!snap.exists()) {
-        Alert.alert("Erro", "Deck não encontrado.");
+      const deckDocumentReference = doc(db, "decks", deckId);
+      const deckSnapshot = await getDoc(deckDocumentReference);
+      if (!deckSnapshot.exists()) {
+        Alert.alert("Erro", "Deck não encontrado no Firestore.");
         setLoading(false);
         return;
       }
-      await deleteDoc(deckRef);
+      await deleteDoc(deckDocumentReference);
       Alert.alert("Sucesso", "Deck excluído!");
-    } catch (err) {
-      console.log("[Decks] Erro ao deletar =>", err);
+    } catch (error) {
+      console.log("[Decks] Erro ao deletar =>", error);
       Alert.alert("Erro", "Falha ao excluir deck.");
     } finally {
       setLoading(false);
@@ -314,7 +308,7 @@ export default function DecksScreen() {
   }
 
   /**
-   * Abre modal de visualização
+   * Abrir modal de visualização
    */
   function openViewDeck(deck: DeckData) {
     setViewDeck(deck);
@@ -322,143 +316,28 @@ export default function DecksScreen() {
   }
 
   /**
-   * Toggle de estilo
+   * Toggle de estilo (até 3)
    */
-  function toggleStyleOption(opt: string) {
-    if (selectedStyles.includes(opt)) {
-      setSelectedStyles((prev) => prev.filter((s) => s !== opt));
+  function toggleStyleOption(option: string) {
+    if (selectedStyles.includes(option)) {
+      setSelectedStyles((previous) => previous.filter((sty) => sty !== option));
     } else {
       if (selectedStyles.length >= 3) {
         Alert.alert("Atenção", "Máximo de 3 estilos.");
         return;
       }
-      setSelectedStyles((prev) => [...prev, opt]);
+      setSelectedStyles((previous) => [...previous, option]);
     }
   }
 
   /**
-   * Parse do conteúdo (Pokémon/Trainer/Energy)
+   * Renderiza cada item (deck) na FlatList
    */
-  function parseDeckContent(text: string) {
-    const lines = text.split("\n").map((l) => l.trim());
-    const pokemons: CardLine[] = [];
-    const trainers: CardLine[] = [];
-    const energies: CardLine[] = [];
-
-    let currentBlock: "POKEMON" | "TRAINER" | "ENERGY" | "" = "";
-
-    for (const line of lines) {
-      if (!line) continue;
-
-      const lower = line.toLowerCase();
-      if (lower.startsWith("pokémon:") || lower.startsWith("pokemon:")) {
-        currentBlock = "POKEMON";
-        continue;
-      }
-      if (lower.startsWith("treinador:") || lower.startsWith("trainer:")) {
-        currentBlock = "TRAINER";
-        continue;
-      }
-      if (lower.startsWith("energia:") || lower.startsWith("energy:")) {
-        currentBlock = "ENERGY";
-        continue;
-      }
-      if (!currentBlock) {
-        // Ex: "Pokémon: 13" -> ignora
-        continue;
-      }
-
-      const parsed = parseSingleLine(line);
-      if (currentBlock === "POKEMON") pokemons.push(parsed);
-      if (currentBlock === "TRAINER") trainers.push(parsed);
-      if (currentBlock === "ENERGY") energies.push(parsed);
-    }
-
-    return { pokemons, trainers, energies };
-  }
-
-  function parseSingleLine(line: string): CardLine {
-    const tokens = line.split(" ").filter(Boolean);
-
-    let quantity = 1;
-    let expansion: string | null = null;
-    let cardNumber: string | null = null;
-    const nameParts: string[] = [];
-
-    // Se o primeiro token for um número > 0, é a quantidade
-    const firstTok = tokens[0];
-    const maybeQ = parseInt(firstTok ?? "");
-    let i = 0;
-    if (!isNaN(maybeQ) && maybeQ > 0) {
-      quantity = maybeQ;
-      i = 1;
-    }
-
-    while (i < tokens.length) {
-      const t = tokens[i];
-      const reg3 = /^[A-Z]{3}$/; // 3 letras ex: SCR
-      if (reg3.test(t)) {
-        expansion = t;
-        // Verifica se o próximo token é um número
-        if (i + 1 < tokens.length) {
-          const maybeNum = parseInt(tokens[i + 1]);
-          if (!isNaN(maybeNum) && maybeNum > 0) {
-            cardNumber = tokens[i + 1];
-            i += 2;
-            continue;
-          }
-        }
-        i++;
-        continue;
-      }
-
-      // Se for um número e não for a qty, pode ser cardNumber
-      const maybeCardNum = parseInt(t);
-      if (!isNaN(maybeCardNum)) {
-        cardNumber = t;
-        i++;
-        continue;
-      }
-
-      // Caso contrário, faz parte do nome
-      nameParts.push(t);
-      i++;
-    }
-
-    return {
-      _tempId: uuidv4(),
-      quantity,
-      name: nameParts.join(" "),
-      expansion,
-      cardNumber,
-    };
-  }
-
-  function sanitizeCardLines(lines: CardLine[]): CardLine[] {
-    return lines.map((c) => ({
-      ...c,
-      quantity: c.quantity > 0 ? c.quantity : 1,
-      name: c.name || "",
-    }));
-  }
-
-  function toFirestoreCard(c: CardLine) {
-    return {
-      quantity: c.quantity,
-      name: c.name,
-      expansion: c.expansion || null,
-      cardNumber: c.cardNumber || null,
-    };
-  }
-
-  /**
-   * Renderiza cada deck na lista
-   */
-  const renderDeckItem = ({ item }: { item: DeckData }) => {
-    const totalPoke = item.pokemons.reduce((acc, x) => acc + x.quantity, 0);
-    const totalTrainer = item.trainers.reduce((acc, x) => acc + x.quantity, 0);
-    const totalEnergy = item.energies.reduce((acc, x) => acc + x.quantity, 0);
-    const totalAll = totalPoke + totalTrainer + totalEnergy;
+  function renderDeckItem({ item }: { item: DeckData }) {
+    const totalPokemon = item.pokemons.reduce((accumulator, card) => accumulator + card.quantity, 0);
+    const totalTrainer = item.trainers.reduce((accumulator, card) => accumulator + card.quantity, 0);
+    const totalEnergy = item.energies.reduce((accumulator, card) => accumulator + card.quantity, 0);
+    const totalAll = totalPokemon + totalTrainer + totalEnergy;
 
     return (
       <Animatable.View style={styles.deckTile} animation="fadeInUp">
@@ -466,7 +345,7 @@ export default function DecksScreen() {
           style={{ flex: 1 }}
           onPress={() => openViewDeck(item)}
           onLongPress={() =>
-            Alert.alert("Excluir Deck", `Excluir o deck "${item.name}"?`, [
+            Alert.alert("Excluir Deck", `Deseja excluir o deck "${item.name}"?`, [
               { text: "Cancelar", style: "cancel" },
               {
                 text: "Excluir",
@@ -481,30 +360,30 @@ export default function DecksScreen() {
             {item.createdAt ? new Date(item.createdAt).toLocaleString() : "?"}
           </Text>
           <Text style={styles.deckCount}>
-            P:{totalPoke} T:{totalTrainer} E:{totalEnergy} Total:{totalAll}
+            P:{totalPokemon} T:{totalTrainer} E:{totalEnergy} Total:{totalAll}
           </Text>
 
-          {item.ownerName && (
+          {item.ownerName ? (
             <Text style={styles.deckOwner}>Dono: {item.ownerName}</Text>
-          )}
-          {item.leagueId && (
+          ) : null}
+          {item.leagueId ? (
             <Text style={styles.deckOwner}>Liga: {item.leagueId}</Text>
-          )}
+          ) : null}
 
           {item.style?.length ? (
             <Text style={styles.deckStyle}>
               Estilos: {item.style.join(", ")}
             </Text>
           ) : null}
-          {item.archetype && (
+          {item.archetype ? (
             <Text style={styles.deckStyle}>
               Arquetipo: {item.archetype}
             </Text>
-          )}
+          ) : null}
         </TouchableOpacity>
       </Animatable.View>
     );
-  };
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -539,7 +418,7 @@ export default function DecksScreen() {
         )}
         <FlatList
           data={filteredDecks}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(deckItem) => deckItem.id}
           numColumns={2}
           columnWrapperStyle={{ justifyContent: "space-between" }}
           renderItem={renderDeckItem}
@@ -620,7 +499,19 @@ export default function DecksScreen() {
                 placeholderTextColor="#999"
               />
 
-              <TouchableOpacity style={styles.saveDeckButton} onPress={handleCreateDeck}>
+              {/* Exemplo de indicador de parse */}
+              {parsingDeck && (
+                <View style={{ alignItems: "center", marginVertical: 10 }}>
+                  <ActivityIndicator size="large" color="#E3350D" />
+                  <Text style={{ color: "#FFF", marginTop: 4 }}>Processando Deck...</Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={styles.saveDeckButton}
+                onPress={handleCreateDeck}
+                disabled={parsingDeck}
+              >
                 <Text style={styles.saveDeckButtonText}>Salvar Deck</Text>
               </TouchableOpacity>
             </ScrollView>
@@ -639,14 +530,14 @@ export default function DecksScreen() {
           <View style={styles.subModalContainer}>
             <Text style={styles.subModalTitle}>Selecione até 3 Estilos</Text>
             <ScrollView style={{ maxHeight: 300, marginVertical: 10 }}>
-              {STYLE_OPTIONS.map((opt) => {
-                const isSelected = selectedStyles.includes(opt);
-                const iconName = STYLE_ICONS[opt] || "help-circle-outline";
+              {STYLE_OPTIONS.map((option) => {
+                const isSelected = selectedStyles.includes(option);
+                const iconName = STYLE_ICONS[option] || "help-circle-outline";
                 return (
                   <TouchableOpacity
-                    key={opt}
+                    key={option}
                     style={styles.optionRow}
-                    onPress={() => toggleStyleOption(opt)}
+                    onPress={() => toggleStyleOption(option)}
                   >
                     <MaterialCommunityIcons
                       name={isSelected ? "checkbox-marked" : "checkbox-blank-outline"}
@@ -660,7 +551,7 @@ export default function DecksScreen() {
                       color="#FFF"
                       style={{ marginRight: 6 }}
                     />
-                    <Text style={{ color: "#FFF" }}>{opt}</Text>
+                    <Text style={{ color: "#FFF" }}>{option}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -686,14 +577,14 @@ export default function DecksScreen() {
           <View style={styles.subModalContainer}>
             <Text style={styles.subModalTitle}>Selecione um Arquetipo</Text>
             <ScrollView style={{ maxHeight: 350, marginVertical: 10 }}>
-              {ARCHETYPE_OPTIONS.map((opt) => {
-                const isSelected = selectedArchetype === opt;
+              {ARCHETYPE_OPTIONS.map((option) => {
+                const isSelected = selectedArchetype === option;
                 return (
                   <TouchableOpacity
-                    key={opt}
+                    key={option}
                     style={styles.optionRow}
                     onPress={() => {
-                      setSelectedArchetype(opt);
+                      setSelectedArchetype(option);
                       setArchetypeModalVisible(false);
                     }}
                   >
@@ -703,7 +594,7 @@ export default function DecksScreen() {
                       color={isSelected ? "#E3350D" : "#FFF"}
                       style={{ marginRight: 8 }}
                     />
-                    <Text style={{ color: "#FFF" }}>{opt}</Text>
+                    <Text style={{ color: "#FFF" }}>{option}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -768,7 +659,7 @@ export default function DecksScreen() {
                     Pokémons:
                   </Animatable.Text>
                   {viewDeck.pokemons.map((line) => (
-                    <Text style={styles.deckLine} key={line._tempId}>
+                    <Text style={styles.deckLine} key={line.incrementalId}>
                       {line.quantity}x {line.name}
                       {line.expansion
                         ? ` [${line.expansion}${line.cardNumber ?? ""}]`
@@ -784,7 +675,7 @@ export default function DecksScreen() {
                     Treinadores:
                   </Animatable.Text>
                   {viewDeck.trainers.map((line) => (
-                    <Text style={styles.deckLine} key={line._tempId}>
+                    <Text style={styles.deckLine} key={line.incrementalId}>
                       {line.quantity}x {line.name}
                       {line.expansion
                         ? ` [${line.expansion}${line.cardNumber ?? ""}]`
@@ -800,7 +691,7 @@ export default function DecksScreen() {
                     Energias:
                   </Animatable.Text>
                   {viewDeck.energies.map((line) => (
-                    <Text style={styles.deckLine} key={line._tempId}>
+                    <Text style={styles.deckLine} key={line.incrementalId}>
                       {line.quantity}x {line.name}
                       {line.expansion
                         ? ` [${line.expansion}${line.cardNumber ?? ""}]`
@@ -817,54 +708,174 @@ export default function DecksScreen() {
   );
 }
 
-/** Funções auxiliares de parse e formatação */
-function parseSingleLine(line: string): CardLine {
+/** =========================================================
+ *  Funções de Conversão
+ * ========================================================= */
+
+/** Converte array do Firestore em CardLine[] */
+function convertToCardLines(dataArray: any[]): CardLine[] {
+  if (!dataArray || !Array.isArray(dataArray)) return [];
+  return dataArray.map((obj: any, index: number) => {
+    return {
+      incrementalId: index + 1,
+      quantity: obj.quantity || 1,
+      name: obj.name || "",
+      expansion: obj.expansion ?? null,
+      cardNumber: obj.cardNumber ?? null,
+    };
+  });
+}
+
+/** Converte CardLine para formato que vai ao Firestore */
+function toFirestoreCard(cardLine: CardLine) {
+  return {
+    quantity: cardLine.quantity,
+    name: cardLine.name,
+    expansion: cardLine.expansion || null,
+    cardNumber: cardLine.cardNumber || null,
+  };
+}
+
+/** =========================================================
+ *  Parse Assíncrono em Blocos
+ * ========================================================= */
+
+/**
+ * Lê o texto do deck, processa por blocos (chunks) e retorna:
+ * { pokemons, trainers, energies }.
+ */
+function parseDeckContentChunked(text: string): Promise<{
+  pokemons: CardLine[];
+  trainers: CardLine[];
+  energies: CardLine[];
+}> {
+  return new Promise((resolve) => {
+    const lines = text.split("\n").map((line) => line.trim());
+    const totalLines = lines.length;
+
+    const pokemons: CardLine[] = [];
+    const trainers: CardLine[] = [];
+    const energies: CardLine[] = [];
+
+    let currentBlock: "POKEMON" | "TRAINER" | "ENERGY" | "" = "";
+    let incrementalIndex = 1;
+
+    let currentIndex = 0;
+
+    function processNextChunk() {
+      const endIndex = Math.min(currentIndex + LINES_PER_CHUNK, totalLines);
+
+      for (let i = currentIndex; i < endIndex; i++) {
+        const line = lines[i];
+        if (!line) continue;
+
+        const lowerCaseLine = line.toLowerCase();
+
+        // Identifica se é "Pokémon:", "Treinador:", "Energia:"
+        if (lowerCaseLine.startsWith("pokémon:") || lowerCaseLine.startsWith("pokemon:")) {
+          currentBlock = "POKEMON";
+          continue;
+        }
+        if (lowerCaseLine.startsWith("treinador:") || lowerCaseLine.startsWith("trainer:")) {
+          currentBlock = "TRAINER";
+          continue;
+        }
+        if (lowerCaseLine.startsWith("energia:") || lowerCaseLine.startsWith("energy:")) {
+          currentBlock = "ENERGY";
+          continue;
+        }
+
+        if (!currentBlock) {
+          // Caso o texto venha fora do formato esperado, ignoramos
+          continue;
+        }
+
+        const parsedLine = parseSingleLine(line, incrementalIndex);
+        incrementalIndex++;
+
+        if (currentBlock === "POKEMON") {
+          pokemons.push(parsedLine);
+        } else if (currentBlock === "TRAINER") {
+          trainers.push(parsedLine);
+        } else if (currentBlock === "ENERGY") {
+          energies.push(parsedLine);
+        }
+      }
+
+      currentIndex = endIndex;
+
+      if (currentIndex < totalLines) {
+        // Ainda tem linhas para processar, faz nova chunk
+        setTimeout(processNextChunk, 0);
+      } else {
+        // Terminou de processar tudo
+        resolve({ pokemons, trainers, energies });
+      }
+    }
+
+    // Começa a processar
+    processNextChunk();
+  });
+}
+
+/**
+ * Faz o parse de uma única linha do deck
+ * Exemplo: "4 Charizard PAL 34"
+ * e retorna um CardLine com incrementalId.
+ */
+function parseSingleLine(line: string, incrementalIndex: number): CardLine {
   const tokens = line.split(" ").filter(Boolean);
 
   let quantity = 1;
   let expansion: string | null = null;
   let cardNumber: string | null = null;
+
   const nameParts: string[] = [];
 
-  const firstTok = tokens[0];
-  const maybeQ = parseInt(firstTok ?? "");
-  let i = 0;
-  if (!isNaN(maybeQ) && maybeQ > 0) {
-    quantity = maybeQ;
-    i = 1;
+  // Se o primeiro token for número, interpretamos como quantidade
+  const firstToken = tokens[0];
+  const possibleQuantity = parseInt(firstToken || "", 10);
+  let index = 0;
+  if (!isNaN(possibleQuantity) && possibleQuantity > 0) {
+    quantity = possibleQuantity;
+    index = 1;
   }
 
-  while (i < tokens.length) {
-    const t = tokens[i];
-    const reg3 = /^[A-Z]{3}$/; // ex: "SCR", "PAL"
-    if (reg3.test(t)) {
-      expansion = t;
-      if (i + 1 < tokens.length) {
-        const nextTok = tokens[i + 1];
-        const nextNum = parseInt(nextTok);
-        if (!isNaN(nextNum)) {
-          cardNumber = nextTok;
-          i += 2;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    const isThreeLetters = /^[A-Z]{3}$/.test(token);
+
+    if (isThreeLetters) {
+      // É a sigla da expansão
+      expansion = token;
+      // Ver se o próximo token é um número
+      if (index + 1 < tokens.length) {
+        const nextToken = tokens[index + 1];
+        const possibleCardNumber = parseInt(nextToken, 10);
+        if (!isNaN(possibleCardNumber) && possibleCardNumber > 0) {
+          cardNumber = nextToken;
+          index += 2;
           continue;
         }
       }
-      i++;
+      index++;
       continue;
     }
 
-    const maybeNum = parseInt(t);
-    if (!isNaN(maybeNum)) {
-      cardNumber = t;
-      i++;
+    const possibleCardNumber = parseInt(token, 10);
+    if (!isNaN(possibleCardNumber) && possibleCardNumber > 0) {
+      cardNumber = token;
+      index++;
       continue;
     }
 
-    nameParts.push(t);
-    i++;
+    // Caso contrário, faz parte do nome
+    nameParts.push(token);
+    index++;
   }
 
   return {
-    _tempId: uuidv4(),
+    incrementalId: incrementalIndex,
     quantity,
     name: nameParts.join(" "),
     expansion,
@@ -872,63 +883,9 @@ function parseSingleLine(line: string): CardLine {
   };
 }
 
-function parseDeckContent(text: string) {
-  const lines = text.split("\n").map((l) => l.trim());
-  const pokemons: CardLine[] = [];
-  const trainers: CardLine[] = [];
-  const energies: CardLine[] = [];
-
-  let currentBlock: "POKEMON" | "TRAINER" | "ENERGY" | "" = "";
-
-  for (const line of lines) {
-    if (!line) continue;
-    const lower = line.toLowerCase();
-
-    if (lower.startsWith("pokémon:") || lower.startsWith("pokemon:")) {
-      currentBlock = "POKEMON";
-      continue;
-    }
-    if (lower.startsWith("treinador:") || lower.startsWith("trainer:")) {
-      currentBlock = "TRAINER";
-      continue;
-    }
-    if (lower.startsWith("energia:") || lower.startsWith("energy:")) {
-      currentBlock = "ENERGY";
-      continue;
-    }
-
-    if (!currentBlock) {
-      // Ex: "Pokémon: 13" => ignoramos
-      continue;
-    }
-
-    const parsed = parseSingleLine(line);
-    if (currentBlock === "POKEMON") pokemons.push(parsed);
-    if (currentBlock === "TRAINER") trainers.push(parsed);
-    if (currentBlock === "ENERGY") energies.push(parsed);
-  }
-
-  return { pokemons, trainers, energies };
-}
-
-function sanitizeCardLines(lines: CardLine[]): CardLine[] {
-  return lines.map((c) => ({
-    ...c,
-    quantity: c.quantity > 0 ? c.quantity : 1,
-    name: c.name || "",
-  }));
-}
-
-function toFirestoreCard(c: CardLine) {
-  return {
-    quantity: c.quantity,
-    name: c.name,
-    expansion: c.expansion || null,
-    cardNumber: c.cardNumber || null,
-  };
-}
-
-/** Estilos */
+/** =========================================================
+ *  Estilos
+ * ========================================================= */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
