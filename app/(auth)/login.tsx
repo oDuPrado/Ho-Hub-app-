@@ -5,7 +5,6 @@ import {
   TextInput,
   StyleSheet,
   Alert,
-  Switch,
   KeyboardAvoidingView,
   Platform,
   Animated,
@@ -32,12 +31,12 @@ import {
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
-import BackgroundFetch from "react-native-background-fetch";
 
 import { auth, db } from "../../lib/firebaseConfig";
 import { useTranslation } from "react-i18next";
 import i18n from "../../i18n";
 import { BAN_PLAYER_IDS } from "../hosts";
+import { AppState } from "react-native";
 
 const { width, height } = Dimensions.get("window");
 const BACKGROUND = "#1E1E1E";
@@ -47,6 +46,7 @@ const INPUT_BG = "#292929";
 const INPUT_BORDER = "#4D4D4D";
 const ACCENT = "#FF6F61";
 
+/** Função que checa a “força” da senha */
 function checkPasswordStrength(password: string) {
   let score = 0;
   if (/[A-Z]/.test(password)) score++;
@@ -61,6 +61,7 @@ function checkPasswordStrength(password: string) {
   return "Fraca";
 }
 
+/** Escolhe cor conforme a força */
 function getPasswordStrengthColor(strength: string) {
   if (strength === "Fraca") return "#E3350D";
   if (strength === "Média") return "#FFC107";
@@ -69,11 +70,13 @@ function getPasswordStrengthColor(strength: string) {
   return SECONDARY;
 }
 
+/** Valida email */
 function validateEmail(mail: string): boolean {
   const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return regex.test(mail);
 }
 
+/** Valida senha */
 function validatePassword(pw: string): boolean {
   const upper = /[A-Z]/.test(pw);
   const lower = /[a-z]/.test(pw);
@@ -82,61 +85,43 @@ function validatePassword(pw: string): boolean {
   return upper && lower && digit && special && pw.length >= 8;
 }
 
-// Renova token em background no Android
-async function backgroundRefreshToken() {
-  console.log("====> [BackgroundFetch] Iniciando backgroundRefreshToken...");
-  const savedEmail = await SecureStore.getItemAsync("email");
-  const savedPassword = await SecureStore.getItemAsync("password");
-  if (savedEmail && savedPassword) {
-    try {
-      console.log("====> [BackgroundFetch] Fazendo signIn silencioso...");
-      await signInWithEmailAndPassword(auth, savedEmail, savedPassword);
-      console.log("====> [BackgroundFetch] Token renovado com sucesso!");
-    } catch (err) {
-      console.log("====> [BackgroundFetch] Erro ao renovar token:", err);
-    }
-  } else {
-    console.log("====> [BackgroundFetch] Nenhum email/senha salvos. Pulando.");
-  }
+/** Salva login e senha no SecureStore, para login rápido */
+async function saveLoginData(email: string, password: string) {
+  await SecureStore.setItemAsync("savedEmail", email);
+  await SecureStore.setItemAsync("savedPassword", password);
 }
 
-function configureBackgroundFetch() {
-  console.log("====> [LoginScreen] Configurando BackgroundFetch...");
-  BackgroundFetch.configure(
-    {
-      minimumFetchInterval: 15,
-      stopOnTerminate: false,
-      enableHeadless: true,
-      startOnBoot: true,
-    },
-    async () => {
-      console.log("====> [BackgroundFetch] Evento de background disparado!");
-      await backgroundRefreshToken();
-      BackgroundFetch.finish();
-    },
-    (error) => {
-      console.log("====> [BackgroundFetch] Erro ao configurar:", error);
-    }
-  );
+/** Verifica se tem login salvo no SecureStore */
+async function getSavedLogin() {
+  const savedEmail = await SecureStore.getItemAsync("savedEmail");
+  const savedPassword = await SecureStore.getItemAsync("savedPassword");
+  return { savedEmail, savedPassword };
 }
 
 export default function LoginScreen() {
   const router = useRouter();
   const { t } = useTranslation();
 
+  // Modo do formulário: login ou signup
   const [mode, setMode] = useState<"login" | "signup">("login");
+
+  // Campos
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [userId, setUserId] = useState("");
   const [pin, setPin] = useState("");
   const [playerName, setPlayerName] = useState("");
-  const [stayLogged, setStayLogged] = useState(false);
+
+  // Switch e toggles
   const [showPassword, setShowPassword] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState("Fraca");
-  const [loading, setLoading] = useState(false);
-  const [banModalVisible, setBanModalVisible] = useState(false);
 
+  // Modal de ban, loading e etc
+  const [banModalVisible, setBanModalVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Modal de idioma
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
   const languages = [
     { code: "pt", label: "Português" },
@@ -144,10 +129,20 @@ export default function LoginScreen() {
     { code: "es", label: "Español" },
   ];
 
+  // Animação do logo
   const logoScale = useRef(new Animated.Value(1)).current;
 
+  // Campos do SecureStore (para “login salvo”)
+  const [savedEmail, setSavedEmail] = useState("");
+  const [savedPassword, setSavedPassword] = useState("");
+  const [hasSavedLogin, setHasSavedLogin] = useState(false);
+
+  // No seu código original, tinha “stayLogged” (mas agora iremos usar login salvo)
+  // Ainda assim, mantemos para condiz com a UI (mas sem background fetch).
+  const [stayLogged, setStayLogged] = useState(false);
+
+  /** Anima o logo (pulsando) */
   useEffect(() => {
-    console.log("====> [LoginScreen] Montando componente...");
     Animated.loop(
       Animated.sequence([
         Animated.timing(logoScale, {
@@ -166,30 +161,40 @@ export default function LoginScreen() {
     ).start();
   }, [logoScale]);
 
-  useEffect(() => {
-    console.log("====> [LoginScreen] Chamando configureBackgroundFetch()");
-    configureBackgroundFetch();
-  }, []);
-
+  /** Carrega login salvo do SecureStore (se houver) */
   useEffect(() => {
     (async () => {
-      console.log("====> [LoginScreen] Carregando @stayLogged do AsyncStorage...");
+      try {
+        const { savedEmail, savedPassword } = await getSavedLogin();
+        if (savedEmail && savedPassword) {
+          setSavedEmail(savedEmail);
+          setSavedPassword(savedPassword);
+          setHasSavedLogin(true);
+        }
+      } catch (err) {
+        console.log("Erro ao buscar login salvo:", err);
+      }
+    })();
+  }, []);
+
+  /** Carrega a config stayLogged do AsyncStorage (opcional) */
+  useEffect(() => {
+    (async () => {
       try {
         const stay = await AsyncStorage.getItem("@stayLogged");
         if (stay === "true") {
           setStayLogged(true);
         }
       } catch (error) {
-        console.log("====> [LoginScreen] Erro ao carregar @stayLogged:", error);
+        console.log("Erro ao carregar @stayLogged:", error);
       }
     })();
   }, []);
 
+  /** Observa se usuário está logado (onAuthStateChanged) e faz verificação no Firestore */
   useEffect(() => {
-    console.log("====> [LoginScreen] Iniciando onAuthStateChanged watcher...");
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
-        console.log("====> [LoginScreen] onAuthStateChanged detectou user:", user.uid);
         setLoading(true);
         try {
           const firebaseToken = await user.getIdToken(true);
@@ -197,7 +202,6 @@ export default function LoginScreen() {
           const snap = await getDoc(docRef);
 
           if (!snap.exists()) {
-            console.log("====> [LoginScreen] Documento de login não existe no Firestore.");
             Alert.alert(
               t("login.alerts.incomplete_account"),
               t("login.alerts.incomplete_account")
@@ -208,10 +212,7 @@ export default function LoginScreen() {
           }
 
           const data = snap.data();
-          console.log("====> [LoginScreen] Dados do Firestore:", data);
-
           if (!data.playerId || !data.pin) {
-            console.log("====> [LoginScreen] playerId/pin faltando no documento");
             Alert.alert(
               t("login.alerts.missing_data"),
               t("login.alerts.missing_data")
@@ -222,7 +223,6 @@ export default function LoginScreen() {
           }
 
           if (BAN_PLAYER_IDS.includes(data.playerId)) {
-            console.log("====> [LoginScreen] ID banido:", data.playerId);
             setBanModalVisible(true);
             await signOut(auth);
             setLoading(false);
@@ -236,11 +236,10 @@ export default function LoginScreen() {
           await AsyncStorage.setItem("@firebaseUID", user.uid);
           await AsyncStorage.setItem("@firebaseToken", firebaseToken);
 
+          // se user marcou stayLogged
           if (stayLogged) {
-            console.log("====> [LoginScreen] Salvando @stayLogged = true");
             await AsyncStorage.setItem("@stayLogged", "true");
           } else {
-            console.log("====> [LoginScreen] Removendo @stayLogged");
             await AsyncStorage.removeItem("@stayLogged");
           }
 
@@ -248,40 +247,63 @@ export default function LoginScreen() {
             t("login.alerts.welcome"),
             t("login.alerts.welcome") + ", " + docName
           );
-
-          console.log("====> [LoginScreen] Navegando para /home");
+          // navega
           router.push("/(tabs)/home");
         } catch (e) {
-          console.log("====> [LoginScreen] Erro no onAuthStateChanged:", e);
+          console.log("Erro no onAuthStateChanged:", e);
           Alert.alert(t("login.alerts.error"), t("login.alerts.error"));
         } finally {
           setLoading(false);
         }
-      } else {
-        console.log("====> [LoginScreen] onAuthStateChanged: sem usuário logado.");
       }
     });
     return () => unsubscribe();
-  }, [router, t, stayLogged]);
+  }, [t, stayLogged]);
 
+  /** A cada 55 minutos, renova token do Firebase em foreground. */
   useEffect(() => {
-    console.log("====> [LoginScreen] Iniciando interval p/ renovar token a cada 55min");
     const interval = setInterval(async () => {
       const currentUser = auth.currentUser;
       if (currentUser) {
         try {
-          console.log("====> [LoginScreen] Renovando token em foreground...");
           const newToken = await currentUser.getIdToken(true);
           await AsyncStorage.setItem("@firebaseToken", newToken);
-          console.log("====> [LoginScreen] Token renovado com sucesso (foreground).");
+          console.log("Token renovado (foreground).");
         } catch (err) {
-          console.log("====> [LoginScreen] Erro ao renovar token em foreground:", err);
+          console.log("Erro ao renovar token em foreground:", err);
         }
       }
     }, 55 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
+/** Renova token ao voltar do background */
+useEffect(() => {
+    const renewToken = async () => {
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+            try {
+                const newToken = await currentUser.getIdToken(true);
+                await AsyncStorage.setItem("@firebaseToken", newToken);
+                console.log("Token renovado ao voltar do background.");
+            } catch (err) {
+                console.log("Erro ao renovar token ao voltar do background:", err);
+            }
+        }
+    };
+
+    // Configura o evento ao voltar do background
+    const appStateListener = AppState.addEventListener("change", (nextAppState) => {
+        if (nextAppState === "active") {
+            renewToken();
+        }
+    });
+
+    return () => appStateListener.remove();
+}, []);
+
+
+  /** Se estiver no modo signup, recalcula força da senha */
   useEffect(() => {
     if (mode === "signup") {
       const s = checkPasswordStrength(password);
@@ -289,14 +311,14 @@ export default function LoginScreen() {
     }
   }, [mode, password]);
 
+  /** Muda idioma */
   function changeLanguage(lang: string) {
-    console.log("====> [LoginScreen] Mudando idioma para:", lang);
     i18n.changeLanguage(lang);
     setLanguageModalVisible(false);
   }
 
+  /** Cadastrar (SIGNUP) */
   async function handleSignUp() {
-    console.log("====> [LoginScreen] handleSignUp disparado...");
     if (!email || !password || !userId || !pin || !playerName) {
       Alert.alert(t("login.alerts.empty_fields"));
       return;
@@ -311,10 +333,9 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      console.log("====> [LoginScreen] Criando usuário Firebase...");
       const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-      console.log("====> [LoginScreen] Salvando doc login no Firestore...");
+      // salva no Firestore
       const docRef = doc(db, "login", cred.user.uid);
       await setDoc(docRef, {
         email,
@@ -324,22 +345,19 @@ export default function LoginScreen() {
         createdAt: new Date().toISOString(),
       });
 
-      console.log("====> [LoginScreen] Salvando email/senha no SecureStore...");
-      await SecureStore.setItemAsync("email", email);
-      await SecureStore.setItemAsync("password", password);
+      // salva no SecureStore
+      await saveLoginData(email, password);
 
       Alert.alert(t("login.alerts.signup_success", { playerId: userId, pin }));
-      console.log("====> [LoginScreen] handleSignUp concluído com sucesso!");
     } catch (err: any) {
-      console.log("====> [LoginScreen] Erro no SignUp:", err);
       Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
     } finally {
       setLoading(false);
     }
   }
 
+  /** Login normal */
   async function handleSignIn() {
-    console.log("====> [LoginScreen] handleSignIn disparado...");
     if (!email || !password) {
       Alert.alert(t("login.alerts.empty_fields"));
       return;
@@ -347,15 +365,9 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
-      console.log("====> [LoginScreen] SignIn realizado com sucesso:", cred.user.uid);
-
-      console.log("====> [LoginScreen] Salvando email/senha no SecureStore...");
-      await SecureStore.setItemAsync("email", email);
-      await SecureStore.setItemAsync("password", password);
-
-      console.log("====> [LoginScreen] handleSignIn concluído com sucesso!");
+      await saveLoginData(email, password); // salva p/ login rápido
+      console.log("SignIn ok:", cred.user.uid);
     } catch (err: any) {
-      console.log("====> [LoginScreen] Erro no SignIn:", err);
       let msg = t("login.alerts.login_error", { error: "" });
       if (err.code === "auth/wrong-password") {
         msg = t("login.alerts.wrong_password");
@@ -368,8 +380,8 @@ export default function LoginScreen() {
     }
   }
 
+  /** Reset de senha */
   async function handleResetPassword() {
-    console.log("====> [LoginScreen] handleResetPassword disparado...");
     if (!email) {
       Alert.alert(
         t("login.alerts.password_reset_error", { error: "" }),
@@ -380,22 +392,41 @@ export default function LoginScreen() {
     try {
       await sendPasswordResetEmail(auth, email);
       Alert.alert(t("login.alerts.password_reset_sent"));
-      console.log("====> [LoginScreen] Envio de reset de senha concluído!");
     } catch (err: any) {
-      console.log("====> [LoginScreen] Erro ao resetar senha:", err);
       Alert.alert(
         t("login.alerts.password_reset_error", { error: err.message || "" })
       );
     }
   }
 
+  /** Tentar login automático */
+  async function handleAutoLogin() {
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, savedEmail, savedPassword);
+      console.log("Login automático com:", savedEmail);
+    } catch (err) {
+      Alert.alert("Erro", "Falha ao entrar automaticamente.");
+    }
+    setLoading(false);
+  }
+
+  /** Limpar login salvo */
+  async function clearSavedLogin() {
+    await SecureStore.deleteItemAsync("savedEmail");
+    await SecureStore.deleteItemAsync("savedPassword");
+    setSavedEmail("");
+    setSavedPassword("");
+    setHasSavedLogin(false);
+    Alert.alert("Login removido", "Seu login salvo foi apagado.");
+  }
+
+  // Se estiver carregando
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={PRIMARY} />
-        <Text style={{ color: SECONDARY, marginTop: 8 }}>
-          {t("login.loading")}
-        </Text>
+        <Text style={{ color: SECONDARY, marginTop: 8 }}>{t("login.loading")}</Text>
       </View>
     );
   }
@@ -420,9 +451,10 @@ export default function LoginScreen() {
             {mode === "signup" ? t("login.title_signup") : t("login.title_login")}
           </Text>
 
+          {/* Modal de idioma */}
           <Modal
             animationType="slide"
-            transparent={true}
+            transparent
             visible={languageModalVisible}
             onRequestClose={() => setLanguageModalVisible(false)}
           >
@@ -451,9 +483,10 @@ export default function LoginScreen() {
             </View>
           </Modal>
 
+          {/* Modal Banido */}
           <Modal
             animationType="fade"
-            transparent={true}
+            transparent
             visible={banModalVisible}
             onRequestClose={() => setBanModalVisible(false)}
           >
@@ -475,6 +508,7 @@ export default function LoginScreen() {
             </View>
           </Modal>
 
+          {/* Campo Email */}
           <Text style={styles.label}>{t("login.email_label")}</Text>
           <TextInput
             style={styles.input}
@@ -486,6 +520,7 @@ export default function LoginScreen() {
             autoCapitalize="none"
           />
 
+          {/* Campo Senha */}
           <Text style={styles.label}>{t("login.password_label")}</Text>
           <View style={styles.inputWithIcon}>
             <TextInput
@@ -497,10 +532,7 @@ export default function LoginScreen() {
               onChangeText={setPassword}
               autoCapitalize="none"
             />
-            <TouchableOpacity
-              onPress={() => setShowPassword(!showPassword)}
-              style={styles.eyeIcon}
-            >
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
               <Ionicons
                 name={showPassword ? "eye-off" : "eye"}
                 size={24}
@@ -509,6 +541,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Esqueci a senha (apenas no modo login) */}
           {mode === "login" && (
             <TouchableOpacity
               style={{ marginTop: 10, alignSelf: "flex-end" }}
@@ -518,6 +551,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Se for cadastro, mostra força da senha */}
           {mode === "signup" && (
             <Text
               style={[
@@ -529,6 +563,7 @@ export default function LoginScreen() {
             </Text>
           )}
 
+          {/* Campos extras do signup */}
           {mode === "signup" && (
             <>
               <Text style={styles.label}>{t("login.player_name_label")}</Text>
@@ -561,10 +596,7 @@ export default function LoginScreen() {
                   onChangeText={setPin}
                   keyboardType="numeric"
                 />
-                <TouchableOpacity
-                  onPress={() => setShowPin(!showPin)}
-                  style={styles.eyeIcon}
-                >
+                <TouchableOpacity onPress={() => setShowPin(!showPin)}>
                   <Ionicons
                     name={showPin ? "eye-off" : "eye"}
                     size={24}
@@ -575,16 +607,7 @@ export default function LoginScreen() {
             </>
           )}
 
-          <View style={styles.switchRow}>
-            <Text style={styles.switchText}>{t("login.stay_logged")} </Text>
-            <Switch
-              value={stayLogged}
-              onValueChange={setStayLogged}
-              trackColor={{ false: "#555", true: PRIMARY }}
-              thumbColor={stayLogged ? "#FFF" : "#ccc"}
-            />
-          </View>
-
+          {/* Botão principal: SIGNUP ou LOGIN */}
           {mode === "signup" ? (
             <TouchableOpacity style={styles.signupButton} onPress={handleSignUp}>
               <Text style={styles.buttonText}>{t("login.signup_button")}</Text>
@@ -595,6 +618,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Trocar modo */}
           {mode === "signup" ? (
             <TouchableOpacity
               style={{ marginTop: 20 }}
@@ -611,12 +635,30 @@ export default function LoginScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Se tivermos login salvo, botão de autoLogin */}
+          {hasSavedLogin && (
+            <View style={{ marginTop: 24 }}>
+              <Text style={{ color: SECONDARY, marginBottom: 8 }}>
+                Você tem um login salvo:
+              </Text>
+              <TouchableOpacity style={styles.autoLoginButton} onPress={handleAutoLogin}>
+                <Ionicons name="log-in" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                <Text style={styles.autoLoginText}>Entrar como {savedEmail}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.forgetSavedButton}
+                onPress={clearSavedLogin}
+              >
+                <Ionicons name="trash-outline" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                <Text style={{ color: "#FFF", fontWeight: "bold" }}>Esquecer esse login</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Botão mudar idioma */}
           <TouchableOpacity
             style={styles.languageButton}
-            onPress={() => {
-              console.log("====> [LoginScreen] Abrindo modal de idioma...");
-              setLanguageModalVisible(true);
-            }}
+            onPress={() => setLanguageModalVisible(true)}
           >
             <Text style={styles.languageButtonText}>Mudar idioma</Text>
           </TouchableOpacity>
@@ -626,6 +668,7 @@ export default function LoginScreen() {
   );
 }
 
+// ==================== ESTILOS ====================
 const styles = StyleSheet.create({
   background: {
     flex: 1,
@@ -681,9 +724,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: "100%",
   },
-  eyeIcon: {
-    padding: 6,
-  },
   forgotText: {
     color: ACCENT,
     fontSize: 14,
@@ -696,35 +736,45 @@ const styles = StyleSheet.create({
     marginTop: 8,
     alignSelf: "center",
   },
-  switchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 16,
-    alignSelf: "flex-start",
-  },
-  switchText: {
-    color: SECONDARY,
-    fontSize: 16,
-    marginRight: 8,
-  },
   signupButton: {
     backgroundColor: ACCENT,
     paddingVertical: 12,
     paddingHorizontal: 40,
     borderRadius: 8,
-    marginTop: 5,
+    marginTop: 18,
   },
   loginButton: {
     backgroundColor: PRIMARY,
     paddingVertical: 12,
     paddingHorizontal: 40,
     borderRadius: 8,
-    marginTop: 5,
+    marginTop: 18,
   },
   buttonText: {
     color: SECONDARY,
     fontSize: 16,
     fontWeight: "bold",
+  },
+  autoLoginButton: {
+    flexDirection: "row",
+    backgroundColor: "#4A4A4A",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  autoLoginText: {
+    color: "#FFF",
+    fontWeight: "bold",
+  },
+  forgetSavedButton: {
+    flexDirection: "row",
+    backgroundColor: "#999",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   languageButton: {
     alignSelf: "flex-end",
