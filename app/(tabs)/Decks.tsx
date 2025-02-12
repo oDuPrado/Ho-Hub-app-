@@ -178,6 +178,57 @@ const ARCHETYPE_OPTIONS = [
   "Outros",
 ];
 
+// Mapeamento dos arquétipos para os nomes de arquivo reais
+const ARCHETYPE_IMAGE_MAP: Record<string, string> = {
+  "Regidrago VSTAR": "regidrago.png",
+  "Charizard ex": "charizard.png",
+  "Lugia Archeops": "lugia.png",
+  "Gardevoir ex": "gardevoir.png",
+  "Raging Bolt ex": "raging-bolt.png",
+  "Terapagos ex": "terapagos.png",
+  "Klawf Unhinged Scissors": "klawf-unhinged-scissors.png",
+  "Dragapult ex": "dragapult.png",
+  "Snorlax Stall PGO": "snorlax.png",
+  "Palkia VSTAR": "palkia.png",
+  "Archaludon ex": "archaludon.png",
+  "Gholdengo ex": "gholdengo.png",
+  "Roaring Moon ex": "roaring-moon.png",
+  "Lost Zone Box": "comfey.png", // Conforme informado, Lost Zone Box exibe a imagem do Comfey
+  "Miraidon ex": "miraidon.png",
+  "Iron Thorns ex": "iron-thorns.png",
+  "Ancient Box": "flutter-mane.png", // Ancient Box exibirá a imagem do Flutter Mane
+  "Pidgeot Control": "pidgeot.png", // Pidgeot Control exibe o Pidgeot
+  "Cornerstone Ogerpon": "cornerstone-ogerpon.png",
+  "Gouging Fire ex": "gouging-fire.png",
+  "Ceruledge ex": "ceruledge.png",
+  "Banette ex": "banette.png",
+  "Chien-Pao Baxcalibur": "chien-pao.png", // Exibe somente "chien-pao.png"
+  "Greninja ex": "greninja.png",
+  "Regis Ancient Wisdom": "regis.png", // Exibe "regis.png" em vez de "regis-ancient-wisdom.png"
+  "Hydreigon ex": "hydreigon.png",
+  "Conkeldurr Gusty Swing": "conkeldurr.png", // Exibe "conkeldurr.png"
+  "Entei V": "entei.png",
+  "Giratina VSTAR": "giratina.png",
+  "Arceus VSTAR": "arceus.png",
+  "Dialga VSTAR": "dialga.png",
+  "United Wings": "united-wings.png",
+  "Future": "future.png", // Nesse caso, Future corresponde a "future.png" (o Pokémon é o Iron Crowns, conforme informado)
+  "Bloodmoon Ursaluna Mad Bite": "bloodmoon-ursaluna.png", // Exibe "bloodmoon-ursaluna.png"
+  "Toedscruel Ogerpon": "toedscruel.png", // Exibe "toedscruel.png"
+  "Outros": "substitute.png", // Para "Outros", usamos a imagem de substituição
+};
+
+// Função que retorna a URL do ícone do arquétipo
+function getArchetypeIconUrl(archetype: string): string {
+  const fileName = ARCHETYPE_IMAGE_MAP[archetype];
+  if (!fileName) {
+    // Caso o arquétipo não esteja mapeado, usa o ícone de substituição
+    return "https://limitless3.nyc3.cdn.digitaloceanspaces.com/pokemon/substitute.png";
+  }
+  return `https://r2.limitlesstcg.net/pokemon/gen9/${fileName}`;
+}
+
+
   // Modais auxiliares de seleção
   const [stylesModalVisible, setStylesModalVisible] = useState(false);
   const [archetypeModalVisible, setArchetypeModalVisible] = useState(false);
@@ -454,7 +505,7 @@ const ARCHETYPE_OPTIONS = [
     const totalTrea = item.trainers.reduce((acc, c) => acc + c.quantity, 0);
     const totalEner = item.energies.reduce((acc, c) => acc + c.quantity, 0);
     const totalAll = totalPoke + totalTrea + totalEner;
-
+  
     return (
       <Animatable.View style={styles.deckCard} animation="fadeInUp">
         <TouchableOpacity
@@ -471,36 +522,44 @@ const ARCHETYPE_OPTIONS = [
             ]);
           }}
         >
-          {/* Cabeçalho do card */}
+          {/* Cabeçalho do card com nome */}
           <View style={styles.deckHeaderRow}>
             <Text style={styles.deckName}>{item.name}</Text>
-            {!!item.style?.length && (
-              <Text
-                style={styles.deckStyle}
-                numberOfLines={1}
-              >
-                {item.style.join(", ")}
-              </Text>
-            )}
           </View>
 
-          {/* Segunda linha: Arquetipo e data */}
-          <View style={styles.deckHeaderRow}>
-            {!!item.archetype && (
-              <Text style={styles.deckArchetype} numberOfLines={1}>
-                {item.archetype}
-              </Text>
+            {/* Linha para exibir os estilos, abaixo do nome */}
+            {!!item.style?.length && (
+              <View style={styles.deckStyleRow}>
+                <Text style={styles.deckStyle} numberOfLines={2}>
+                  {item.style.join(", ")}
+                </Text>
+              </View>
             )}
+
+            {/* Linha para exibir o arquétipo com o ícone */}
+            {item.archetype && (
+              <View style={styles.archetypeIconContainer}>
+                <Image
+                  source={{ uri: getArchetypeIconUrl(item.archetype) }}
+                  style={styles.archetypeIcon}
+                  resizeMode="contain"
+                />
+                <Text style={styles.archetypeLabel}>{item.archetype}</Text>
+              </View>
+            )}
+
+          {/* Linha com data */}
+          <View style={styles.deckHeaderRow}>
             <Text style={styles.deckDate}>
               {item.createdAt ? formatDate(item.createdAt) : ""}
             </Text>
           </View>
-
+  
           {/* Dono */}
           <Text style={styles.deckOwner}>
             Dono: {item.ownerName || `User ${item.ownerUid}`}
           </Text>
-
+  
           {/* Quantidade de cartas */}
           <Text style={styles.deckCount}>
             P: {totalPoke} T: {totalTrea} E: {totalEner} | Total: {totalAll}
@@ -508,7 +567,7 @@ const ARCHETYPE_OPTIONS = [
         </TouchableOpacity>
       </Animatable.View>
     );
-  }
+  }  
 
   // ==================== RENDER PRINCIPAL ====================
   return (
@@ -754,7 +813,7 @@ const ARCHETYPE_OPTIONS = [
                   onPress={() => setDeckViewMode("table")}
                 >
                   <Ionicons name="list" size={16} color="#FFF" />
-                  <Text style={styles.deckViewSwitchText}> Tabela</Text>
+                  <Text style={styles.deckViewSwitchText}> Lista</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -765,7 +824,7 @@ const ARCHETYPE_OPTIONS = [
                   onPress={() => setDeckViewMode("mosaic")}
                 >
                   <Ionicons name="images" size={16} color="#FFF" />
-                  <Text style={styles.deckViewSwitchText}> Mosaico</Text>
+                  <Text style={styles.deckViewSwitchText}> Imagem</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1132,7 +1191,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#333",
     borderRadius: 8,
     marginBottom: 10,
-    padding: 10,
+    padding: 12,
+    // Aumenta o tamanho para acomodar as informações extras
+    minHeight: 150,
   },
   deckHeaderRow: {
     flexDirection: "row",
@@ -1143,13 +1204,13 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 15,
     fontWeight: "bold",
-    maxWidth: "66%", // Evita que o nome estoure o card
+    maxWidth: "80%", // Evita que o nome estoure o card
   },
   deckStyle: {
     color: "#4CAF50",
     fontSize: 13,
     fontWeight: "bold",
-    maxWidth: "30%",
+    maxWidth: "80%",
   },
   deckArchetype: {
     color: "#FFF",
@@ -1165,6 +1226,9 @@ const styles = StyleSheet.create({
     color: "#ccc",
     fontSize: 12,
     marginTop: 2,
+  },
+  deckStyleRow: {
+    marginBottom: 4,
   },
   deckCount: {
     color: "#ccc",
@@ -1425,6 +1489,21 @@ const styles = StyleSheet.create({
   imageLoadingOverlay: {
     alignItems: "center",
     marginVertical: 10,
+  },
+  archetypeIconContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  archetypeIcon: {
+    width: 30,
+    height: 30,
+    marginRight: 6,
+  },
+  archetypeLabel: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "bold",
   },
 });
 
