@@ -383,8 +383,14 @@ function getArchetypeIconUrl(archetype: string): string {
   async function handleDeleteDeck(deck: DeckData) {
     setLoading(true);
     try {
-      const deckRef = doc(db, "decks", deck.id);
+      if (!playerId) {
+        Alert.alert("Erro", "ID do jogador não encontrado.");
+        return;
+      }
+  
+      const deckRef = doc(db, `players/${playerId}/decks/${deck.id}`);
       await deleteDoc(deckRef);
+  
       Alert.alert("Sucesso", "Deck excluído!");
     } catch (error) {
       console.log("Erro ao excluir deck:", error);
