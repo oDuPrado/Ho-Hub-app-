@@ -11,12 +11,13 @@ import {
   Image,
   Platform,
   Modal,
+  TextInput,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import * as Notifications from "expo-notifications";
 import { useTranslation } from "react-i18next";
-import { useFocusEffect } from "@react-navigation/native"; // Para atualizar ao entrar na tela
+import { useFocusEffect } from "@react-navigation/native";
 
 import {
   Appbar,
@@ -28,11 +29,19 @@ import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
 
 // Busca hosts + fallback
-import { fetchRoleMembers, HOST_PLAYER_IDS } from "../hosts"; 
+import { fetchRoleMembers, HOST_PLAYER_IDS } from "../hosts";
 
 // Modais
 import JudgeScreen from "../../components/TorneioReportsScreen";
 import VoteScreen from "../../components/TorneioVoteScreen";
+
+// =========== [INÍCIO] ADMIN ===========
+// Lista de usuários que podem ver o botão de admin
+const AUTH_USERS = ["4893989", "4729671"];
+
+// IP/URL do servidor Flask no Raspberry (via Tailscale)
+const RASPBERRY_API = "http://100.80.36.66:5000"; // Ajuste para seu IP Tailscale real
+// =========== [FIM] ADMIN ==============
 
 // Configurações de Notificações
 Notifications.setNotificationHandler({
@@ -64,8 +73,8 @@ export default function TorneioScreen() {
   // Controle de erros / status
   const [errorModalVisible, setErrorModalVisible] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState("");
-  const [noTournament, setNoTournament] = useState(false); // Se não existir rodadas
-  const [notPlaying, setNotPlaying] = useState(false); // Se o usuário não estiver em mesa alguma
+  const [noTournament, setNoTournament] = useState(false);
+  const [notPlaying, setNotPlaying] = useState(false);
 
   // Modal de voto
   const [voteModalVisible, setVoteModalVisible] = useState(false);
@@ -76,6 +85,100 @@ export default function TorneioScreen() {
   // Interval para atualizar periodicamente
   const intervalRef = useRef<any>(null);
   const [fetchCount, setFetchCount] = useState(0);
+
+  // =========== [INÍCIO] ADMIN ===========
+  // Estado para saber se o usuário é "admin" (autorizado a ver o painel)
+  const [isAuthUser, setIsAuthUser] = useState(false);
+
+  // Controla a exibição do Modal de Admin
+  const [adminPanelVisible, setAdminPanelVisible] = useState(false);
+
+  // Estados para mostrar resultado das ações
+  const [connectionStatus, setConnectionStatus] = useState("");
+  const [consoleOutput, setConsoleOutput] = useState("");
+  const [customCommand, setCustomCommand] = useState("");
+
+  // Função para testar conexão (faz GET /ping)
+  async function testConnection() {
+    try {
+      setConnectionStatus("Testando conexão...");
+      const response = await fetch(`${RASPBERRY_API}/ping`);
+      const json = await response.json();
+      if (json.message === "Server is up") {
+        setConnectionStatus("Conexão OK! Server is up.");
+      } else {
+        setConnectionStatus("Falha inesperada na resposta do servidor.");
+      }
+    } catch (error) {
+      console.log("Erro ao testar conexão:", error);
+      setConnectionStatus("Erro ao conectar. Verifique se o Flask está rodando.");
+    }
+  }
+
+  // Função para reiniciar
+  async function handleRestart() {
+    try {
+      const response = await fetch(`${RASPBERRY_API}/restart`, {
+        method: "POST",
+      });
+      const json = await response.json();
+      Alert.alert("Resposta", json.message || "Sem mensagem");
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível reiniciar o Raspberry");
+    }
+  }
+
+  // Função para desligar
+  async function handleShutdown() {
+    try {
+      const response = await fetch(`${RASPBERRY_API}/shutdown`, {
+        method: "POST",
+      });
+      const json = await response.json();
+      Alert.alert("Resposta", json.message || "Sem mensagem");
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível desligar o Raspberry");
+    }
+  }
+
+  // Função para ler console (ps -ef | grep python)
+  async function handleShowConsole() {
+    try {
+      const response = await fetch(`${RASPBERRY_API}/console`);
+      const json = await response.json();
+      setConsoleOutput(json.output || "Sem saída.");
+    } catch (error) {
+      setConsoleOutput("Erro ao obter console.");
+    }
+  }
+
+  // Função para executar comando personalizado
+  async function handleExecuteCommand() {
+    if (!customCommand.trim()) {
+      Alert.alert("Atenção", "Digite um comando primeiro.");
+      return;
+    }
+    try {
+      const response = await fetch(`${RASPBERRY_API}/execute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ command: customCommand }),
+      });
+      const json = await response.json();
+      if (json.output) {
+        setConsoleOutput(json.output);
+      } else if (json.error) {
+        setConsoleOutput(`Erro: ${json.error}`);
+      } else {
+        setConsoleOutput("Nenhuma saída retornada.");
+      }
+    } catch (error) {
+      setConsoleOutput("Erro ao executar comando.");
+    }
+  }
+  // =========== [FIM] ADMIN =============
 
   // === useFocusEffect: toda vez que a tela entra em foco, recarrega ===
   useFocusEffect(
@@ -91,7 +194,6 @@ export default function TorneioScreen() {
     requestNotificationPermission();
     fetchTournamentData();
 
-    // A cada 60s, atualiza
     intervalRef.current = setInterval(() => {
       setFetchCount((prev) => prev + 1);
     }, 60000);
@@ -106,6 +208,7 @@ export default function TorneioScreen() {
     fetchTournamentData();
   }, [fetchCount]);
 
+  // ====== Pede permissão de notificação =====
   async function requestNotificationPermission() {
     try {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -144,6 +247,10 @@ export default function TorneioScreen() {
       }
       setUserName(storedName ?? t("torneio.info.none"));
 
+      // === [INÍCIO] Verifica se userID está em AUTH_USERS:
+      setIsAuthUser(AUTH_USERS.includes(storedId));
+      // === [FIM]
+
       // Se não houver liga selecionada, erro
       if (!leagueId) {
         showErrorModal("Nenhuma liga selecionada. Selecione uma liga na pagina home.");
@@ -154,8 +261,8 @@ export default function TorneioScreen() {
       // Verifica se é host (com fallback)
       await checkIfHostFallback(leagueId, storedId);
 
-      // Consulta ao backend
-      const url = `https://Doprado.pythonanywhere.com/get-data/${leagueId}`;
+      // Consulta ao backend do torneio
+      const url = `https://doprado.pythonanywhere.com/get-data/${leagueId}`;
       const res = await fetch(url, {
         method: "GET",
         headers: {
@@ -226,7 +333,7 @@ export default function TorneioScreen() {
         setOpponentName(foundOpponent ?? null);
 
         // link da mesa
-        const link = `https://Doprado.pythonanywhere.com/${leagueId}/mesa/${foundMesa}`;
+        const link = `https://doprado.pythonanywhere.com/${leagueId}/mesa/${foundMesa}`;
         setLinkReport(link);
 
         // Notifica caso rodada seja nova
@@ -235,7 +342,7 @@ export default function TorneioScreen() {
       }
 
       // Pega info da liga pra exibir no título
-      const infoRes = await fetch(`https://Doprado.pythonanywhere.com/get-league-info`, {
+      const infoRes = await fetch(`https://doprado.pythonanywhere.com/get-league-info`, {
         method: "GET",
         headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
       });
@@ -266,7 +373,7 @@ export default function TorneioScreen() {
         console.log("⚠️ Erro ao buscar hosts no Firebase, tentando fallback.", error);
       }
 
-      // 2. Fallback
+      // 2. Fallback local
       if (!isHostLocal) {
         if (HOST_PLAYER_IDS.includes(storedUserId)) {
           isHostLocal = true;
@@ -358,7 +465,10 @@ export default function TorneioScreen() {
         <Text style={styles.noTournamentText}>
           Nenhum torneio em andamento nesta liga.
         </Text>
-        <TouchableOpacity style={styles.noTournamentButton} onPress={() => router.replace("/(tabs)/home")}>
+        <TouchableOpacity
+          style={styles.noTournamentButton}
+          onPress={() => router.replace("/(tabs)/home")}
+        >
           <Text style={styles.noTournamentButtonText}>Voltar</Text>
         </TouchableOpacity>
       </View>
@@ -416,6 +526,110 @@ export default function TorneioScreen() {
         onClose={() => setReportsModalVisible(false)}
       />
 
+      {/* ========== MODAL DE ADMIN ========== */}
+<Modal
+  visible={adminPanelVisible}
+  animationType="slide"
+  onRequestClose={() => setAdminPanelVisible(false)}
+  transparent
+>
+  <Animatable.View
+    style={styles.adminModalBackground}
+    animation="fadeIn"
+    duration={400}
+  >
+    <Animatable.View
+      style={styles.adminContainer}
+      animation="fadeInUp"
+      duration={600}
+    >
+      <View style={styles.adminHeader}>
+        <Animatable.Text
+          style={styles.adminHeaderText}
+          animation="pulse"
+          easing="ease-out"
+          iterationCount="infinite"
+        >
+          Painel de Controle
+        </Animatable.Text>
+        <TouchableOpacity onPress={() => setAdminPanelVisible(false)}>
+          <MaterialCommunityIcons name="close-circle-outline" size={36} color="#FFF" />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
+        <Button
+          mode="contained"
+          onPress={testConnection}
+          style={styles.adminButton}
+          labelStyle={styles.adminButtonLabel}
+          icon="wifi"
+        >
+          Conectar/Ping
+        </Button>
+        <Text style={styles.statusText}>{connectionStatus}</Text>
+
+        <Button
+          mode="contained"
+          onPress={handleRestart}
+          style={[styles.adminButton, { backgroundColor: "#E69900" }]}
+          labelStyle={styles.adminButtonLabel}
+          icon="restart"
+        >
+          Reiniciar
+        </Button>
+
+        <Button
+          mode="contained"
+          onPress={handleShutdown}
+          style={[styles.adminButton, { backgroundColor: "#A81D16" }]}
+          labelStyle={styles.adminButtonLabel}
+          icon="power"
+        >
+          Desligar
+        </Button>
+
+        <Button
+          mode="contained"
+          onPress={handleShowConsole}
+          style={styles.adminButton}
+          labelStyle={styles.adminButtonLabel}
+          icon="console-line"
+        >
+          Ver Console
+        </Button>
+
+        <ScrollView style={styles.consoleArea}>
+          <Text style={{ color: "#FFF" }}>{consoleOutput}</Text>
+        </ScrollView>
+
+        <Text style={[styles.statusText, { marginTop: 20 }]}>
+          Comando Personalizado:
+        </Text>
+        <TextInput
+          value={customCommand}
+          onChangeText={setCustomCommand}
+          placeholder="Digite um comando (ex: kill 1234)"
+          placeholderTextColor="#CCC"
+          style={styles.commandInput}
+        />
+
+        <Button
+          mode="contained"
+          onPress={handleExecuteCommand}
+          style={styles.adminButton}
+          labelStyle={styles.adminButtonLabel}
+          icon="code-tags"
+        >
+          Executar Comando
+        </Button>
+      </ScrollView>
+    </Animatable.View>
+  </Animatable.View>
+</Modal>
+{/* ========== FIM DO MODAL DE ADMIN ========== */}
+
+
       {/* AppBar */}
       <Appbar.Header style={{ backgroundColor: BLACK }}>
         <Image
@@ -427,6 +641,18 @@ export default function TorneioScreen() {
           title={userName}
           titleStyle={{ color: RED, fontWeight: "bold", fontSize: 20 }}
         />
+
+        {/* Ícone especial (laranja) que só aparece se isAuthUser = true */}
+        {isAuthUser && (
+          <TouchableOpacity onPress={() => setAdminPanelVisible(true)}>
+            <MaterialCommunityIcons
+              name="shield-lock"
+              size={32}
+              color="orange"
+              style={{ marginRight: 10 }}
+            />
+          </TouchableOpacity>
+        )}
       </Appbar.Header>
 
       {/* Conteúdo Principal */}
@@ -609,7 +835,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     width: "70%",
   },
-
   // Erro
   errorOverlay: {
     flex: 1,
@@ -685,5 +910,72 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginVertical: 15,
     maxWidth: "80%",
+  },
+
+  // Fundo semitransparente para o modal
+  adminModalBackground: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  // Container principal do painel
+  adminContainer: {
+    width: "90%",
+    height: "85%",
+    backgroundColor: "#222",
+    borderRadius: 20,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  adminHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#444",
+    paddingBottom: 8,
+  },
+  adminHeaderText: {
+    color: "#FFF",
+    fontSize: 24,
+    fontWeight: "bold",
+  },
+  adminButton: {
+    backgroundColor: RED,
+    borderRadius: 12,
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  adminButtonLabel: {
+    color: WHITE,
+    fontSize: 16,
+  },
+  statusText: {
+    marginTop: 10,
+    color: "#FFF",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  consoleArea: {
+    backgroundColor: "#333",
+    marginTop: 12,
+    padding: 12,
+    minHeight: 100,
+    maxHeight: 180,
+    borderRadius: 8,
+  },
+  commandInput: {
+    backgroundColor: "#444",
+    color: "#FFF",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
   },
 });
