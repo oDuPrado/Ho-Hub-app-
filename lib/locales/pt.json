@@ -24,7 +24,7 @@
       "cancel": "Cancelar",
       "alerts": {
         "welcome": "Bem-vindo",
-        "empty_fields": "Preencha todos os campos (Nome, E-mail, Senha, ID e PIN).",
+        "empty_fields": "Preencha todos os campos (E-mail e Senha).",
         "invalid_email": "E-mail inválido.",
         "weak_password": "Sua senha deve ter ao menos 1 maiúscula, 1 minúscula, 1 número, 1 especial e 8 caracteres.",
         "signup_success": "Conta criada. ID={{playerId}}, PIN={{pin}}",
