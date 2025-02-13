@@ -28,7 +28,7 @@ import {
   signOut,
   User,
 } from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, getDocs } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
 
@@ -137,6 +137,24 @@ export default function LoginScreen() {
   const [savedPassword, setSavedPassword] = useState("");
   const [hasSavedLogin, setHasSavedLogin] = useState(false);
 
+  /** Verifica se o usuário está banido em alguma liga */
+async function isUserBanned(userId: string): Promise<boolean> {
+  try {
+    const leaguesSnap = await getDocs(collection(db, "leagues"));
+
+    for (const leagueDoc of leaguesSnap.docs) {
+      const banSnap = await getDocs(collection(db, `leagues/${leagueDoc.id}/roles/ban/members`));
+      if (banSnap.docs.some((doc) => doc.id === userId)) {
+        console.log(`🚫 Usuário ${userId} está banido na liga ${leagueDoc.id}`);
+        return true; // Encontrou o banido, retorna true
+      }
+    }
+  } catch (error) {
+    console.error("Erro ao verificar bans:", error);
+  }
+  return false; // Se passou por todas as ligas e não encontrou, retorna false
+}
+
   // No seu código original, tinha “stayLogged” (mas agora iremos usar login salvo)
   // Ainda assim, mantemos para condiz com a UI (mas sem background fetch).
   const [stayLogged, setStayLogged] = useState(false);
@@ -200,65 +218,58 @@ export default function LoginScreen() {
           const firebaseToken = await user.getIdToken(true);
           const docRef = doc(db, "login", user.uid);
           const snap = await getDoc(docRef);
-
+  
           if (!snap.exists()) {
-            Alert.alert(
-              t("login.alerts.incomplete_account"),
-              t("login.alerts.incomplete_account")
-            );
+            Alert.alert("Conta incompleta", "Seu cadastro não está completo.");
             await signOut(auth);
             setLoading(false);
             return;
           }
-
+  
           const data = snap.data();
           if (!data.playerId || !data.pin) {
-            Alert.alert(
-              t("login.alerts.missing_data"),
-              t("login.alerts.missing_data")
-            );
+            Alert.alert("Dados ausentes", "Seu cadastro está incompleto.");
             await signOut(auth);
             setLoading(false);
             return;
           }
-
-          if (BAN_PLAYER_IDS.includes(data.playerId)) {
+  
+          // Verificar bans
+          const isBanned = await isUserBanned(data.playerId);
+          if (isBanned) {
             setBanModalVisible(true);
             await signOut(auth);
             setLoading(false);
             return;
           }
-
-          const docName = data.name || "Jogador";
+  
+          // Salva os dados localmente
           await AsyncStorage.setItem("@userId", data.playerId);
           await AsyncStorage.setItem("@userPin", data.pin);
-          await AsyncStorage.setItem("@userName", docName);
+          await AsyncStorage.setItem("@userName", data.name || "Jogador");
           await AsyncStorage.setItem("@firebaseUID", user.uid);
           await AsyncStorage.setItem("@firebaseToken", firebaseToken);
-
-          // se user marcou stayLogged
+  
+          // Se usuário marcou para permanecer logado
           if (stayLogged) {
             await AsyncStorage.setItem("@stayLogged", "true");
           } else {
             await AsyncStorage.removeItem("@stayLogged");
           }
-
-          Alert.alert(
-            t("login.alerts.welcome"),
-            t("login.alerts.welcome") + ", " + docName
-          );
-          // navega
+  
+          Alert.alert("Bem-vindo!", `Olá, ${data.name || "Jogador"}!`);
           router.push("/(tabs)/home");
         } catch (e) {
           console.log("Erro no onAuthStateChanged:", e);
-          Alert.alert(t("login.alerts.error"), t("login.alerts.error"));
+          Alert.alert("Erro", "Falha ao carregar dados.");
         } finally {
           setLoading(false);
         }
       }
     });
+  
     return () => unsubscribe();
-  }, [t, stayLogged]);
+  }, [stayLogged]);  
 
   /** A cada 55 minutos, renova token do Firebase em foreground. */
   useEffect(() => {
