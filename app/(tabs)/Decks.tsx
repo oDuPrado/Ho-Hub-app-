@@ -258,17 +258,18 @@ function getArchetypeIconUrl(archetype: string): string {
    * Busca decks do Firestore
    */
   useEffect(() => {
+    if (!playerId) return; // Aguarda o carregamento do userId
+  
     setLoading(true);
-    const decksRef = collection(db, "decks");
-    const decksQuery = query(decksRef);
-
-    const unsubscribe = onSnapshot(decksQuery, (snapshot) => {
+    const decksRef = collection(db, `players/${playerId}/decks`); // Busca só os decks do jogador
+  
+    const unsubscribe = onSnapshot(decksRef, (snapshot) => {
       const deckArray: DeckData[] = [];
       snapshot.forEach((docSnap) => {
         const d = docSnap.data();
         deckArray.push({
           id: docSnap.id,
-          ownerUid: d.ownerUid || "",
+          ownerUid: playerId,
           ownerName: d.ownerName || "",
           leagueId: d.leagueId || "",
           name: d.name || "",
@@ -283,8 +284,9 @@ function getArchetypeIconUrl(archetype: string): string {
       setDecks(deckArray);
       setLoading(false);
     });
+  
     return () => unsubscribe();
-  }, [playerId]);
+  }, [playerId]); // 🔥 Garante que só rode quando o playerId mudar
 
   /**
    * Filtro de decks pelo termo de busca
@@ -356,7 +358,7 @@ function getArchetypeIconUrl(archetype: string): string {
         archetype: newArchetype,
       };
 
-      const refDecks = collection(db, "decks");
+      const refDecks = collection(db, `players/${playerId}/decks`);
       await addDoc(refDecks, payload);
 
       setNewDeckName("");

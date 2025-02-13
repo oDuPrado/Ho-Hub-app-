@@ -770,20 +770,20 @@ useEffect(() => {
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
 
-    const decksRef = collection(db, "decks");
-    onSnapshot(query(decksRef, where("ownerUid", "==", playerId)), (resp) => {
-      const arr: DeckData[] = [];
-      resp.forEach((docSnap) => {
-        arr.push({
-          id: docSnap.id,
-          name: docSnap.data().name || `Deck ${docSnap.id}`,
-          playerId: docSnap.data().playerId,
+    const decksRef = collection(db, `players/${playerId}/decks`);
+      onSnapshot(decksRef, (resp) => {
+        const arr: DeckData[] = [];
+        resp.forEach((docSnap) => {
+          arr.push({
+            id: docSnap.id,
+            name: docSnap.data().name || `Deck ${docSnap.id}`,
+            playerId: playerId, // Agora o playerId já é o mesmo do caminho
+          });
         });
+        setUserDecks(arr);
       });
-      setUserDecks(arr);
-    });
-    setInscricaoModalVisible(true);
-  }
+      setInscricaoModalVisible(true);
+      }
 
   async function handleWaitlist(t: Torneio, vip: boolean) {
     Alert.alert("Lista de Espera", "O torneio está lotado. Você foi adicionado à lista de espera.");
