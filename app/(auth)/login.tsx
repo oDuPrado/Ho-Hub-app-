@@ -1,3 +1,6 @@
+//////////////////////////////////////
+// ARQUIVO: LoginScreen.tsx (reformulado)
+//////////////////////////////////////
 import React, { useEffect, useRef, useState } from "react";
 import {
   View,
@@ -17,6 +20,7 @@ import {
   ImageBackground,
   Image,
   FlatList,
+  Pressable,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -28,7 +32,13 @@ import {
   signOut,
   User,
 } from "firebase/auth";
-import { doc, setDoc, getDoc, collection, getDocs } from "firebase/firestore";
+import {
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  getDocs,
+} from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
 
@@ -38,15 +48,25 @@ import i18n from "../../i18n";
 import { BAN_PLAYER_IDS } from "../hosts";
 import { AppState } from "react-native";
 
-const { width, height } = Dimensions.get("window");
-const BACKGROUND = "#1E1E1E";
-const PRIMARY = "#E3350D";
-const SECONDARY = "#FFFFFF";
-const INPUT_BG = "#292929";
-const INPUT_BORDER = "#4D4D4D";
-const ACCENT = "#FF6F61";
+// >>> ADICIONEI: react-native-animatable <<<
+import * as Animatable from "react-native-animatable";
 
-/** Função que checa a “força” da senha */
+//////////////////////////////////////
+// CONSTANTES DE CORES
+//////////////////////////////////////
+const { width, height } = Dimensions.get("window");
+
+const COLORS = {
+  BACKGROUND: "#1E1E1E",
+  PRIMARY: "#E3350D",
+  SECONDARY: "#FFFFFF",
+  ACCENT: "#FF6F61",
+  INPUT_BG: "#292929",
+  INPUT_BORDER: "#4D4D4D",
+};
+
+// >>> Lógica de verificação de senha e etc. (inalterada) <<<
+
 function checkPasswordStrength(password: string) {
   let score = 0;
   if (/[A-Z]/.test(password)) score++;
@@ -61,22 +81,19 @@ function checkPasswordStrength(password: string) {
   return "Fraca";
 }
 
-/** Escolhe cor conforme a força */
 function getPasswordStrengthColor(strength: string) {
-  if (strength === "Fraca") return "#E3350D";
+  if (strength === "Fraca") return COLORS.PRIMARY;
   if (strength === "Média") return "#FFC107";
   if (strength === "Forte") return "#4CAF50";
   if (strength === "Muito Forte") return "#009688";
-  return SECONDARY;
+  return COLORS.SECONDARY;
 }
 
-/** Valida email */
 function validateEmail(mail: string): boolean {
   const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return regex.test(mail);
 }
 
-/** Valida senha */
 function validatePassword(pw: string): boolean {
   const upper = /[A-Z]/.test(pw);
   const lower = /[a-z]/.test(pw);
@@ -85,13 +102,11 @@ function validatePassword(pw: string): boolean {
   return upper && lower && digit && special && pw.length >= 8;
 }
 
-/** Salva login e senha no SecureStore, para login rápido */
 async function saveLoginData(email: string, password: string) {
   await SecureStore.setItemAsync("savedEmail", email);
   await SecureStore.setItemAsync("savedPassword", password);
 }
 
-/** Verifica se tem login salvo no SecureStore */
 async function getSavedLogin() {
   const savedEmail = await SecureStore.getItemAsync("savedEmail");
   const savedPassword = await SecureStore.getItemAsync("savedPassword");
@@ -102,26 +117,21 @@ export default function LoginScreen() {
   const router = useRouter();
   const { t } = useTranslation();
 
-  // Modo do formulário: login ou signup
+  // >>> ESTADOS E LÓGICA (INALTERADOS) <<<
   const [mode, setMode] = useState<"login" | "signup">("login");
-
-  // Campos
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [userId, setUserId] = useState("");
   const [pin, setPin] = useState("");
   const [playerName, setPlayerName] = useState("");
 
-  // Switch e toggles
   const [showPassword, setShowPassword] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState("Fraca");
 
-  // Modal de ban, loading e etc
   const [banModalVisible, setBanModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Modal de idioma
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
   const languages = [
     { code: "pt", label: "Português" },
@@ -129,42 +139,39 @@ export default function LoginScreen() {
     { code: "es", label: "Español" },
   ];
 
-  // Animação do logo
   const logoScale = useRef(new Animated.Value(1)).current;
 
-  // Campos do SecureStore (para “login salvo”)
   const [savedEmail, setSavedEmail] = useState("");
   const [savedPassword, setSavedPassword] = useState("");
   const [hasSavedLogin, setHasSavedLogin] = useState(false);
 
-  /** Verifica se o usuário está banido em alguma liga */
-async function isUserBanned(userId: string): Promise<boolean> {
-  try {
-    const leaguesSnap = await getDocs(collection(db, "leagues"));
-
-    for (const leagueDoc of leaguesSnap.docs) {
-      const banSnap = await getDocs(collection(db, `leagues/${leagueDoc.id}/roles/ban/members`));
-      if (banSnap.docs.some((doc) => doc.id === userId)) {
-        console.log(`🚫 Usuário ${userId} está banido na liga ${leagueDoc.id}`);
-        return true; // Encontrou o banido, retorna true
+  // >>> MANTENDO A LÓGICA DA FUNÇÃO isUserBanned <<<
+  async function isUserBanned(userId: string): Promise<boolean> {
+    try {
+      const leaguesSnap = await getDocs(collection(db, "leagues"));
+      for (const leagueDoc of leaguesSnap.docs) {
+        const banSnap = await getDocs(
+          collection(db, `leagues/${leagueDoc.id}/roles/ban/members`)
+        );
+        if (banSnap.docs.some((doc) => doc.id === userId)) {
+          console.log(`🚫 Usuário ${userId} está banido na liga ${leagueDoc.id}`);
+          return true;
+        }
       }
+    } catch (error) {
+      console.error("Erro ao verificar bans:", error);
     }
-  } catch (error) {
-    console.error("Erro ao verificar bans:", error);
+    return false;
   }
-  return false; // Se passou por todas as ligas e não encontrou, retorna false
-}
 
-  // No seu código original, tinha “stayLogged” (mas agora iremos usar login salvo)
-  // Ainda assim, mantemos para condiz com a UI (mas sem background fetch).
   const [stayLogged, setStayLogged] = useState(false);
 
-  /** Anima o logo (pulsando) */
+  // >>> ANIMAÇÃO DO LOGO <<<
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
         Animated.timing(logoScale, {
-          toValue: 1.05,
+          toValue: 1.08,
           duration: 800,
           easing: Easing.ease,
           useNativeDriver: true,
@@ -179,7 +186,6 @@ async function isUserBanned(userId: string): Promise<boolean> {
     ).start();
   }, [logoScale]);
 
-  /** Carrega login salvo do SecureStore (se houver) */
   useEffect(() => {
     (async () => {
       try {
@@ -195,7 +201,6 @@ async function isUserBanned(userId: string): Promise<boolean> {
     })();
   }, []);
 
-  /** Carrega a config stayLogged do AsyncStorage (opcional) */
   useEffect(() => {
     (async () => {
       try {
@@ -209,7 +214,6 @@ async function isUserBanned(userId: string): Promise<boolean> {
     })();
   }, []);
 
-  /** Observa se usuário está logado (onAuthStateChanged) e faz verificação no Firestore */
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
@@ -218,14 +222,14 @@ async function isUserBanned(userId: string): Promise<boolean> {
           const firebaseToken = await user.getIdToken(true);
           const docRef = doc(db, "login", user.uid);
           const snap = await getDoc(docRef);
-  
+
           if (!snap.exists()) {
             Alert.alert("Conta incompleta", "Seu cadastro não está completo.");
             await signOut(auth);
             setLoading(false);
             return;
           }
-  
+
           const data = snap.data();
           if (!data.playerId || !data.pin) {
             Alert.alert("Dados ausentes", "Seu cadastro está incompleto.");
@@ -233,8 +237,7 @@ async function isUserBanned(userId: string): Promise<boolean> {
             setLoading(false);
             return;
           }
-  
-          // Verificar bans
+
           const isBanned = await isUserBanned(data.playerId);
           if (isBanned) {
             setBanModalVisible(true);
@@ -242,21 +245,19 @@ async function isUserBanned(userId: string): Promise<boolean> {
             setLoading(false);
             return;
           }
-  
-          // Salva os dados localmente
+
           await AsyncStorage.setItem("@userId", data.playerId);
           await AsyncStorage.setItem("@userPin", data.pin);
           await AsyncStorage.setItem("@userName", data.name || "Jogador");
           await AsyncStorage.setItem("@firebaseUID", user.uid);
           await AsyncStorage.setItem("@firebaseToken", firebaseToken);
-  
-          // Se usuário marcou para permanecer logado
+
           if (stayLogged) {
             await AsyncStorage.setItem("@stayLogged", "true");
           } else {
             await AsyncStorage.removeItem("@stayLogged");
           }
-  
+
           Alert.alert("Bem-vindo!", `Olá, ${data.name || "Jogador"}!`);
           router.push("/(tabs)/home");
         } catch (e) {
@@ -267,11 +268,10 @@ async function isUserBanned(userId: string): Promise<boolean> {
         }
       }
     });
-  
-    return () => unsubscribe();
-  }, [stayLogged]);  
 
-  /** A cada 55 minutos, renova token do Firebase em foreground. */
+    return () => unsubscribe();
+  }, [stayLogged]);
+
   useEffect(() => {
     const interval = setInterval(async () => {
       const currentUser = auth.currentUser;
@@ -288,33 +288,29 @@ async function isUserBanned(userId: string): Promise<boolean> {
     return () => clearInterval(interval);
   }, []);
 
-/** Renova token ao voltar do background */
-useEffect(() => {
+  useEffect(() => {
     const renewToken = async () => {
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-            try {
-                const newToken = await currentUser.getIdToken(true);
-                await AsyncStorage.setItem("@firebaseToken", newToken);
-                console.log("Token renovado ao voltar do background.");
-            } catch (err) {
-                console.log("Erro ao renovar token ao voltar do background:", err);
-            }
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        try {
+          const newToken = await currentUser.getIdToken(true);
+          await AsyncStorage.setItem("@firebaseToken", newToken);
+          console.log("Token renovado ao voltar do background.");
+        } catch (err) {
+          console.log("Erro ao renovar token ao voltar do background:", err);
         }
+      }
     };
 
-    // Configura o evento ao voltar do background
     const appStateListener = AppState.addEventListener("change", (nextAppState) => {
-        if (nextAppState === "active") {
-            renewToken();
-        }
+      if (nextAppState === "active") {
+        renewToken();
+      }
     });
 
     return () => appStateListener.remove();
-}, []);
+  }, []);
 
-
-  /** Se estiver no modo signup, recalcula força da senha */
   useEffect(() => {
     if (mode === "signup") {
       const s = checkPasswordStrength(password);
@@ -322,13 +318,11 @@ useEffect(() => {
     }
   }, [mode, password]);
 
-  /** Muda idioma */
   function changeLanguage(lang: string) {
     i18n.changeLanguage(lang);
     setLanguageModalVisible(false);
   }
 
-  /** Cadastrar (SIGNUP) */
   async function handleSignUp() {
     if (!email || !password || !userId || !pin || !playerName) {
       Alert.alert(t("login.alerts.empty_fields"));
@@ -346,7 +340,6 @@ useEffect(() => {
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-      // salva no Firestore
       const docRef = doc(db, "login", cred.user.uid);
       await setDoc(docRef, {
         email,
@@ -356,7 +349,6 @@ useEffect(() => {
         createdAt: new Date().toISOString(),
       });
 
-      // salva no SecureStore
       await saveLoginData(email, password);
 
       Alert.alert(t("login.alerts.signup_success", { playerId: userId, pin }));
@@ -367,7 +359,6 @@ useEffect(() => {
     }
   }
 
-  /** Login normal */
   async function handleSignIn() {
     if (!email || !password) {
       Alert.alert(t("login.alerts.empty_fields"));
@@ -376,7 +367,7 @@ useEffect(() => {
     setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
-      await saveLoginData(email, password); // salva p/ login rápido
+      await saveLoginData(email, password);
       console.log("SignIn ok:", cred.user.uid);
     } catch (err: any) {
       let msg = t("login.alerts.login_error", { error: "" });
@@ -391,7 +382,6 @@ useEffect(() => {
     }
   }
 
-  /** Reset de senha */
   async function handleResetPassword() {
     if (!email) {
       Alert.alert(
@@ -410,7 +400,6 @@ useEffect(() => {
     }
   }
 
-  /** Tentar login automático */
   async function handleAutoLogin() {
     setLoading(true);
     try {
@@ -422,7 +411,6 @@ useEffect(() => {
     setLoading(false);
   }
 
-  /** Limpar login salvo */
   async function clearSavedLogin() {
     await SecureStore.deleteItemAsync("savedEmail");
     await SecureStore.deleteItemAsync("savedPassword");
@@ -432,12 +420,13 @@ useEffect(() => {
     Alert.alert("Login removido", "Seu login salvo foi apagado.");
   }
 
-  // Se estiver carregando
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={PRIMARY} />
-        <Text style={{ color: SECONDARY, marginTop: 8 }}>{t("login.loading")}</Text>
+      <View style={s.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.PRIMARY} />
+        <Text style={{ color: COLORS.SECONDARY, marginTop: 8 }}>
+          {t("login.loading")}
+        </Text>
       </View>
     );
   }
@@ -445,242 +434,318 @@ useEffect(() => {
   return (
     <ImageBackground
       source={require("../../assets/images/background_login.jpg")}
-      style={styles.background}
+      style={s.background}
     >
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Animated.Image
-            source={require("../../assets/images/logo.jpg")}
-            style={[styles.logo, { transform: [{ scale: logoScale }] }]}
-            resizeMode="contain"
-          />
+        <ScrollView contentContainerStyle={s.scrollContent}>
+          {/* ANIMAÇÃO DO LOGO */}
+          <Animatable.View
+            animation="fadeInDown"
+            duration={800}
+            style={s.logoContainer}
+          >
+            <Animated.Image
+              source={require("../../assets/images/logo.jpg")}
+              style={[s.logo, { transform: [{ scale: logoScale }] }]}
+              resizeMode="contain"
+            />
+          </Animatable.View>
 
-          <Text style={styles.title}>
-            {mode === "signup" ? t("login.title_signup") : t("login.title_login")}
-          </Text>
+          <Animatable.Text animation="fadeInUp" duration={800} style={s.title}>
+            {mode === "signup"
+              ? t("login.title_signup")
+              : t("login.title_login")}
+          </Animatable.Text>
 
-          {/* Modal de idioma */}
+          {/* MODAL DE IDIOMA */}
           <Modal
             animationType="slide"
             transparent
             visible={languageModalVisible}
             onRequestClose={() => setLanguageModalVisible(false)}
           >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContainer}>
-                <Text style={styles.modalTitle}>{t("login.select_language")}</Text>
+            <View style={s.modalOverlay}>
+              <View style={s.modalContainer}>
+                <Text style={s.modalTitle}>{t("login.select_language")}</Text>
                 <FlatList
                   data={languages}
                   keyExtractor={(item) => item.code}
                   renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={styles.listItem}
+                    <Pressable
+                      style={s.listItem}
+                      android_ripple={{ color: "#777" }}
                       onPress={() => changeLanguage(item.code)}
                     >
-                      <Text style={styles.listText}>{item.label}</Text>
-                    </TouchableOpacity>
+                      <Text style={s.listText}>{item.label}</Text>
+                    </Pressable>
                   )}
                 />
                 <TouchableOpacity
-                  style={styles.closeButton}
+                  style={s.closeButton}
                   onPress={() => setLanguageModalVisible(false)}
                 >
-                  <Text style={styles.closeText}>{t("login.cancel")}</Text>
+                  <Text style={s.closeText}>{t("login.cancel")}</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </Modal>
 
-          {/* Modal Banido */}
+          {/* MODAL BANIDO */}
           <Modal
             animationType="fade"
             transparent
             visible={banModalVisible}
             onRequestClose={() => setBanModalVisible(false)}
           >
-            <View style={styles.banOverlay}>
-              <View style={styles.banContainer}>
+            <View style={s.banOverlay}>
+              <Animatable.View
+                animation="zoomIn"
+                duration={400}
+                style={s.banContainer}
+              >
                 <Image
                   source={require("../../assets/images/pikachu_happy.png")}
-                  style={styles.banImage}
+                  style={s.banImage}
                 />
-                <Text style={styles.banTitle}>Banido!</Text>
-                <Text style={styles.banText}>{t("login.alerts.ban_message")}</Text>
+                <Text style={s.banTitle}>Banido!</Text>
+                <Text style={s.banText}>{t("login.alerts.ban_message")}</Text>
                 <TouchableOpacity
                   onPress={() => setBanModalVisible(false)}
-                  style={styles.banButton}
+                  style={s.banButton}
                 >
-                  <Text style={styles.banButtonText}>Ok</Text>
+                  <Text style={s.banButtonText}>Ok</Text>
                 </TouchableOpacity>
-              </View>
+              </Animatable.View>
             </View>
           </Modal>
 
-          {/* Campo Email */}
-          <Text style={styles.label}>{t("login.email_label")}</Text>
-          <TextInput
-            style={styles.input}
-            placeholder={t("login.email_placeholder") || ""}
-            placeholderTextColor={INPUT_BORDER}
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-
-          {/* Campo Senha */}
-          <Text style={styles.label}>{t("login.password_label")}</Text>
-          <View style={styles.inputWithIcon}>
-            <TextInput
-              style={[styles.input, { flex: 1, marginRight: 8 }]}
-              placeholder={t("login.password_placeholder") || ""}
-              placeholderTextColor={INPUT_BORDER}
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={setPassword}
-              autoCapitalize="none"
-            />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-              <Ionicons
-                name={showPassword ? "eye-off" : "eye"}
-                size={24}
-                color={SECONDARY}
-              />
-            </TouchableOpacity>
-          </View>
-
-          {/* Esqueci a senha (apenas no modo login) */}
-          {mode === "login" && (
-            <TouchableOpacity
-              style={{ marginTop: 10, alignSelf: "flex-end" }}
-              onPress={handleResetPassword}
-            >
-              <Text style={styles.forgotText}>{t("login.forgot_password")}</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Se for cadastro, mostra força da senha */}
-          {mode === "signup" && (
-            <Text
-              style={[
-                styles.passwordHint,
-                { color: getPasswordStrengthColor(passwordStrength) },
-              ]}
-            >
-              {t("login.password_strength", { strength: passwordStrength })}
-            </Text>
-          )}
-
-          {/* Campos extras do signup */}
-          {mode === "signup" && (
-            <>
-              <Text style={styles.label}>{t("login.player_name_label")}</Text>
+          {/* FORMULÁRIO DE EMAIL */}
+          <Animatable.View animation="fadeInUp" style={{ width: "100%" }}>
+            <Text style={s.label}>{t("login.email_label")}</Text>
+            <View style={s.inputContainer}>
+              <Ionicons name="mail" size={20} color="#999" style={{ marginLeft: 10, marginRight: 6 }}/>
               <TextInput
-                style={styles.input}
-                placeholder={t("login.player_name_placeholder") || ""}
-                placeholderTextColor={INPUT_BORDER}
-                value={playerName}
-                onChangeText={setPlayerName}
+                style={[s.input, { flex: 1 }]}
+                placeholder={t("login.email_placeholder") || ""}
+                placeholderTextColor={COLORS.INPUT_BORDER}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
               />
+            </View>
 
-              <Text style={styles.label}>{t("login.player_id_label")}</Text>
+            {/* FORMULÁRIO DE SENHA */}
+            <Text style={s.label}>{t("login.password_label")}</Text>
+            <View style={s.inputContainer}>
+              <Ionicons name="lock-closed" size={20} color="#999" style={{ marginLeft: 10, marginRight: 6 }}/>
               <TextInput
-                style={styles.input}
-                placeholder={t("login.player_id_placeholder") || ""}
-                placeholderTextColor={INPUT_BORDER}
-                value={userId}
-                onChangeText={setUserId}
-                keyboardType="numeric"
+                style={[s.input, { flex: 1 }]}
+                placeholder={t("login.password_placeholder") || ""}
+                placeholderTextColor={COLORS.INPUT_BORDER}
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={setPassword}
+                autoCapitalize="none"
               />
-
-              <Text style={styles.label}>{t("login.pin_label")}</Text>
-              <View style={styles.inputWithIcon}>
-                <TextInput
-                  style={[styles.input, { flex: 1, marginRight: 8 }]}
-                  placeholder={t("login.pin_placeholder") || ""}
-                  placeholderTextColor={INPUT_BORDER}
-                  secureTextEntry={!showPin}
-                  value={pin}
-                  onChangeText={setPin}
-                  keyboardType="numeric"
-                />
-                <TouchableOpacity onPress={() => setShowPin(!showPin)}>
-                  <Ionicons
-                    name={showPin ? "eye-off" : "eye"}
-                    size={24}
-                    color={SECONDARY}
-                  />
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-
-          {/* Botão principal: SIGNUP ou LOGIN */}
-          {mode === "signup" ? (
-            <TouchableOpacity style={styles.signupButton} onPress={handleSignUp}>
-              <Text style={styles.buttonText}>{t("login.signup_button")}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.loginButton} onPress={handleSignIn}>
-              <Text style={styles.buttonText}>{t("login.login_button")}</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Trocar modo */}
-          {mode === "signup" ? (
-            <TouchableOpacity
-              style={{ marginTop: 20 }}
-              onPress={() => setMode("login")}
-            >
-              <Text style={{ color: SECONDARY }}>{t("login.link_to_login")}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={{ marginTop: 20 }}
-              onPress={() => setMode("signup")}
-            >
-              <Text style={{ color: SECONDARY }}>{t("login.link_to_signup")}</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Se tivermos login salvo, botão de autoLogin */}
-          {hasSavedLogin && (
-            <View style={{ marginTop: 24 }}>
-              <Text style={{ color: SECONDARY, marginBottom: 8 }}>
-                Você tem um login salvo:
-              </Text>
-              <TouchableOpacity style={styles.autoLoginButton} onPress={handleAutoLogin}>
-                <Ionicons name="log-in" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                <Text style={styles.autoLoginText}>Entrar como {savedEmail}</Text>
-              </TouchableOpacity>
               <TouchableOpacity
-                style={styles.forgetSavedButton}
-                onPress={clearSavedLogin}
+                style={{ marginRight: 10 }}
+                onPress={() => setShowPassword(!showPassword)}
               >
-                <Ionicons name="trash-outline" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                <Text style={{ color: "#FFF", fontWeight: "bold" }}>Esquecer esse login</Text>
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={COLORS.SECONDARY}
+                />
               </TouchableOpacity>
             </View>
+
+            {/* Botão "Esqueci a senha" apenas no modo Login */}
+            {mode === "login" && (
+              <TouchableOpacity
+                style={s.forgotButton}
+                onPress={handleResetPassword}
+              >
+                <Text style={s.forgotText}>{t("login.forgot_password")}</Text>
+              </TouchableOpacity>
           )}
 
-          {/* Botão mudar idioma */}
-          <TouchableOpacity
-            style={styles.languageButton}
-            onPress={() => setLanguageModalVisible(true)}
-          >
-            <Text style={styles.languageButtonText}>Mudar idioma</Text>
-          </TouchableOpacity>
+            {/* Força da senha se for SIGNUP */}
+            {mode === "signup" && (
+              <Text
+                style={[
+                  s.passwordHint,
+                  { color: getPasswordStrengthColor(passwordStrength) },
+                ]}
+              >
+                {t("login.password_strength", { strength: passwordStrength })}
+              </Text>
+            )}
+
+            {/* CAMPOS EXTRAS SE FOR SIGNUP */}
+            {mode === "signup" && (
+              <>
+                <Text style={s.label}>{t("login.player_name_label")}</Text>
+                <View style={s.inputContainer}>
+                  <Ionicons
+                    name="person-outline"
+                    size={20}
+                    color="#999"
+                    style={{ marginLeft: 10, marginRight: 6 }}
+                  />
+                  <TextInput
+                    style={[s.input, { flex: 1 }]}
+                    placeholder={t("login.player_name_placeholder") || ""}
+                    placeholderTextColor={COLORS.INPUT_BORDER}
+                    value={playerName}
+                    onChangeText={setPlayerName}
+                  />
+                </View>
+
+                <Text style={s.label}>{t("login.player_id_label")}</Text>
+                <View style={s.inputContainer}>
+                  <Ionicons
+                    name="finger-print"
+                    size={20}
+                    color="#999"
+                    style={{ marginLeft: 10, marginRight: 6 }}
+                  />
+                  <TextInput
+                    style={[s.input, { flex: 1 }]}
+                    placeholder={t("login.player_id_placeholder") || ""}
+                    placeholderTextColor={COLORS.INPUT_BORDER}
+                    value={userId}
+                    onChangeText={setUserId}
+                    keyboardType="numeric"
+                  />
+                </View>
+
+                <Text style={s.label}>{t("login.pin_label")}</Text>
+                <View style={s.inputContainer}>
+                  <Ionicons
+                    name="key-outline"
+                    size={20}
+                    color="#999"
+                    style={{ marginLeft: 10, marginRight: 6 }}
+                  />
+                  <TextInput
+                    style={[s.input, { flex: 1 }]}
+                    placeholder={t("login.pin_placeholder") || ""}
+                    placeholderTextColor={COLORS.INPUT_BORDER}
+                    secureTextEntry={!showPin}
+                    value={pin}
+                    onChangeText={setPin}
+                    keyboardType="numeric"
+                  />
+                  <TouchableOpacity
+                    style={{ marginRight: 10 }}
+                    onPress={() => setShowPin(!showPin)}
+                  >
+                    <Ionicons
+                      name={showPin ? "eye-off-outline" : "eye-outline"}
+                      size={20}
+                      color={COLORS.SECONDARY}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {/* BOTÃO PRINCIPAL: SIGNUP ou LOGIN */}
+            <Animatable.View
+              animation="bounceIn"
+              delay={300}
+              style={{
+                marginTop: 20,
+                alignItems: "center",
+              }}
+            >
+              {mode === "signup" ? (
+                <TouchableOpacity style={s.signupButton} onPress={handleSignUp}>
+                  <Ionicons name="person-add-outline" size={18} color="#FFF" style={{ marginRight: 6 }}/>
+                  <Text style={s.buttonText}>{t("login.signup_button")}</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={s.loginButton} onPress={handleSignIn}>
+                  <Ionicons name="log-in-outline" size={18} color="#FFF" style={{ marginRight: 6 }}/>
+                  <Text style={s.buttonText}>{t("login.login_button")}</Text>
+                </TouchableOpacity>
+              )}
+            </Animatable.View>
+
+            {/* LINK PARA TROCAR DE MODO */}
+            <TouchableOpacity
+              style={{ marginTop: 20, alignSelf: "center" }}
+              onPress={() => setMode(mode === "signup" ? "login" : "signup")}
+            >
+              <Text style={{ color: COLORS.SECONDARY }}>
+                {mode === "signup"
+                  ? t("login.link_to_login")
+                  : t("login.link_to_signup")}
+              </Text>
+            </TouchableOpacity>
+
+            {/* LOGIN SALVO -> BOTÃO AUTOLOGIN */}
+            {hasSavedLogin && (
+              <View style={{ marginTop: 24 }}>
+                <Text style={{ color: COLORS.SECONDARY, marginBottom: 8 }}>
+                  Você tem um login salvo:
+                </Text>
+                <TouchableOpacity
+                  style={s.autoLoginButton}
+                  onPress={handleAutoLogin}
+                >
+                  <Ionicons
+                    name="play-circle-outline"
+                    size={16}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={s.autoLoginText}>
+                    Entrar como {savedEmail}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.forgetSavedButton}
+                  onPress={clearSavedLogin}
+                >
+                  <Ionicons
+                    name="trash-outline"
+                    size={16}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                    Esquecer esse login
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* BOTÃO MUDAR IDIOMA */}
+            <View style={{ marginTop: 20, alignItems: "flex-end" }}>
+              <TouchableOpacity
+                style={s.languageButton}
+                onPress={() => setLanguageModalVisible(true)}
+              >
+                <Ionicons name="language-outline" size={16} color="#FFF" style={{ marginRight: 8 }}/>
+                <Text style={s.languageButtonText}>Mudar idioma</Text>
+              </TouchableOpacity>
+            </View>
+          </Animatable.View>
         </ScrollView>
       </KeyboardAvoidingView>
     </ImageBackground>
   );
 }
 
-// ==================== ESTILOS ====================
-const styles = StyleSheet.create({
+//////////////////////////////////////
+// ESTILOS
+//////////////////////////////////////
+const s = StyleSheet.create({
   background: {
     flex: 1,
     width,
@@ -689,7 +754,7 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: BACKGROUND,
+    backgroundColor: COLORS.BACKGROUND,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -698,71 +763,78 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexGrow: 1,
   },
+  logoContainer: {
+    alignItems: "center",
+    marginBottom: 10,
+  },
   logo: {
     width: width * 0.45,
     height: height * 0.2,
     marginTop: 30,
-    marginBottom: 24,
+    marginBottom: 10,
   },
   title: {
-    color: PRIMARY,
-    fontSize: 28,
+    color: COLORS.PRIMARY,
+    fontSize: 26,
     fontWeight: "bold",
     textAlign: "center",
-    marginBottom: 24,
+    marginBottom: 16,
     textTransform: "uppercase",
   },
   label: {
-    alignSelf: "flex-start",
-    marginLeft: 5,
-    color: SECONDARY,
-    fontSize: 16,
-    marginTop: 12,
+    color: COLORS.SECONDARY,
+    fontSize: 15,
+    marginTop: 14,
+    marginLeft: 6,
+    fontWeight: "600",
   },
-  input: {
-    borderWidth: 1,
-    borderColor: INPUT_BORDER,
-    padding: 10,
-    marginTop: 4,
-    borderRadius: 8,
-    color: SECONDARY,
-    fontSize: 16,
-    backgroundColor: INPUT_BG,
-    width: "100%",
-  },
-  inputWithIcon: {
+  inputContainer: {
     flexDirection: "row",
     alignItems: "center",
-    width: "100%",
+    backgroundColor: COLORS.INPUT_BG,
+    borderColor: COLORS.INPUT_BORDER,
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  input: {
+    color: COLORS.SECONDARY,
+    fontSize: 15,
+    paddingVertical: 10,
+  },
+  forgotButton: {
+    marginTop: 8,
+    alignSelf: "flex-end",
   },
   forgotText: {
-    color: ACCENT,
-    fontSize: 14,
+    color: COLORS.ACCENT,
+    fontSize: 13,
     textDecorationLine: "underline",
-    alignSelf: "center",
-    marginTop: 10,
   },
   passwordHint: {
-    fontSize: 14,
+    fontSize: 13,
     marginTop: 8,
     alignSelf: "center",
+    fontWeight: "bold",
   },
   signupButton: {
-    backgroundColor: ACCENT,
+    backgroundColor: COLORS.ACCENT,
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 12,
-    paddingHorizontal: 40,
-    borderRadius: 8,
-    marginTop: 18,
+    paddingHorizontal: 32,
+    borderRadius: 30,
   },
   loginButton: {
-    backgroundColor: PRIMARY,
+    backgroundColor: COLORS.PRIMARY,
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 12,
-    paddingHorizontal: 40,
-    borderRadius: 8,
-    marginTop: 18,
+    paddingHorizontal: 32,
+    borderRadius: 30,
   },
   buttonText: {
-    color: SECONDARY,
+    color: COLORS.SECONDARY,
     fontSize: 16,
     fontWeight: "bold",
   },
@@ -788,12 +860,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   languageButton: {
-    alignSelf: "flex-end",
-    marginTop: 14,
-    backgroundColor: "#000",
+    backgroundColor: "#444",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 8,
+    borderRadius: 6,
   },
   languageButtonText: {
     color: "#FFF",
@@ -808,12 +880,12 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: "80%",
-    backgroundColor: "#292929",
+    backgroundColor: COLORS.INPUT_BG,
     borderRadius: 8,
     padding: 20,
   },
   modalTitle: {
-    color: "#FFFFFF",
+    color: COLORS.SECONDARY,
     fontSize: 18,
     fontWeight: "bold",
     textAlign: "center",
@@ -827,7 +899,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   listText: {
-    color: "#FFFFFF",
+    color: COLORS.SECONDARY,
     fontSize: 16,
     textAlign: "center",
   },
@@ -836,7 +908,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: "center",
     borderRadius: 8,
-    backgroundColor: "#E3350D",
+    backgroundColor: COLORS.PRIMARY,
   },
   closeText: {
     color: "#FFFFFF",
@@ -874,7 +946,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   banButton: {
-    backgroundColor: "#E3350D",
+    backgroundColor: COLORS.PRIMARY,
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 8,
