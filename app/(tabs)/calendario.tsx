@@ -59,6 +59,8 @@ interface Torneio {
   eventType: string;
   judgeAccepted?: boolean;
   maxVagas?: number;
+  inscricoesDataInicio?: string; // <-- ADICIONADO AQUI
+  inscricoesDataFim?: string; // <-- ADICIONADO AQUI
   inscricoesAbertura?: string;
   inscricoesFechamento?: string;
   prioridadeVip?: boolean;
@@ -133,6 +135,9 @@ export default function CalendarScreen() {
   const [editPrioridadeVip, setEditPrioridadeVip] = useState<boolean>(false);
   const [editInscricoesVipAbertura, setEditInscricoesVipAbertura] = useState<string>("");
   const [editInscricoesVipFechamento, setEditInscricoesVipFechamento] = useState<string>("");
+  const [editInscricoesDataInicio, setEditInscricoesDataInicio] = useState("");
+  const [editInscricoesDataFim, setEditInscricoesDataFim] = useState("");
+
 
   // Modal DETALHES
   const [detalhesModalVisible, setDetalhesModalVisible] = useState(false);
@@ -549,16 +554,20 @@ export default function CalendarScreen() {
           name: editName.trim(),
           date: editDate,
           time: editTime,
+          createdBy: await AsyncStorage.getItem("@userId"),
           judge: editJudge,
-          judgeAccepted: false,
           headJudge: editHeadJudge,
           eventType: editEventType,
+          judgeAccepted: false,
           maxVagas: editMaxVagas,
+          inscricoesDataInicio: editInscricoesDataInicio,
+          inscricoesDataFim: editInscricoesDataFim,
           inscricoesAbertura: editInscricoesAbertura,
           inscricoesFechamento: editInscricoesFechamento,
           prioridadeVip: editPrioridadeVip,
           inscricoesVipAbertura: editInscricoesVipAbertura,
           inscricoesVipFechamento: editInscricoesVipFechamento,
+          timestamp: serverTimestamp(),
         });
       } else {
         // Criar
@@ -572,6 +581,8 @@ export default function CalendarScreen() {
           eventType: editEventType,
           judgeAccepted: false,
           maxVagas: editMaxVagas,
+          inscricoesDataInicio: editInscricoesDataInicio,
+          inscricoesDataFim: editInscricoesDataFim,
           inscricoesAbertura: editInscricoesAbertura,
           inscricoesFechamento: editInscricoesFechamento,
           prioridadeVip: editPrioridadeVip,
@@ -615,33 +626,47 @@ export default function CalendarScreen() {
   }
 
   // ==================== INSCRIÇÕES ====================
-  async function handleInscrever(t: Torneio) {
-    const agora = moment();
-    if (!leagueStored) {
-      Alert.alert("Erro", "Liga não selecionada.");
+async function handleInscrever(t: Torneio) {
+  const agora = moment();
+  if (!leagueStored) {
+    Alert.alert("Erro", "Liga não selecionada.");
+    return;
+  }
+
+  // Verificação de data das inscrições antes do horário
+  const dataInicio = t.inscricoesDataInicio ? moment(t.inscricoesDataInicio, "DD/MM/YYYY") : null;
+  const dataFim = t.inscricoesDataFim ? moment(t.inscricoesDataFim, "DD/MM/YYYY") : null;
+
+  if (dataInicio && agora.isBefore(dataInicio)) {
+    Alert.alert("Inscrições Ainda Não Abertas", `As inscrições começam em ${t.inscricoesDataInicio}.`);
+    return;
+  }
+  if (dataFim && agora.isAfter(dataFim)) {
+    Alert.alert("Inscrições Encerradas", "O período de inscrições já passou.");
+    return;
+  }
+
+  // Verificação de horários VIP
+  if (t.prioridadeVip && isVip(playerId)) {
+    if (t.inscricoesVipAbertura && agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))) {
+      Alert.alert("Inscrições VIP Não Abertas", `Abrem às ${t.inscricoesVipAbertura}.`);
       return;
     }
-
-    // Verificação de horários VIP
-    if (t.prioridadeVip && isVip(playerId)) {
-      if (t.inscricoesVipAbertura && agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))) {
-        Alert.alert("Inscrições VIP Não Abertas", `Abrem às ${t.inscricoesVipAbertura}.`);
-        return;
-      }
-      if (t.inscricoesVipFechamento && agora.isAfter(moment(t.inscricoesVipFechamento, "HH:mm"))) {
-        Alert.alert("Inscrições VIP Encerradas", "As inscrições VIP foram encerradas.");
-        return;
-      }
-    } else {
-      if (t.inscricoesAbertura && agora.isBefore(moment(t.inscricoesAbertura, "HH:mm"))) {
-        Alert.alert("Inscrições Não Abertas", `Abrem às ${t.inscricoesAbertura}.`);
-        return;
-      }
-      if (t.inscricoesFechamento && agora.isAfter(moment(t.inscricoesFechamento, "HH:mm"))) {
-        Alert.alert("Inscrições Encerradas", "Não é mais possível se inscrever.");
-        return;
-      }
+    if (t.inscricoesVipFechamento && agora.isAfter(moment(t.inscricoesVipFechamento, "HH:mm"))) {
+      Alert.alert("Inscrições VIP Encerradas", "As inscrições VIP foram encerradas.");
+      return;
     }
+  } else {
+    // Validar horário dentro da data válida
+    if (t.inscricoesAbertura && agora.isBefore(moment(t.inscricoesAbertura, "HH:mm"))) {
+      Alert.alert("Inscrições Não Abertas", `Abrem às ${t.inscricoesAbertura}.`);
+      return;
+    }
+    if (t.inscricoesFechamento && agora.isAfter(moment(t.inscricoesFechamento, "HH:mm"))) {
+      Alert.alert("Inscrições Encerradas", "Não é mais possível se inscrever.");
+      return;
+    }
+  }
 
     // Verificar se já inscrito
     const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
@@ -1347,6 +1372,29 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
                     value={editMaxVagas?.toString() || ""}
                     onChangeText={(v) => setEditMaxVagas(Number(v) || null)}
                   />
+
+                  <Text style={styles.modalLabel}>Data de Abertura das Inscrições</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editInscricoesDataInicio}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskDate(txt, setEditInscricoesDataInicio)}
+                    maxLength={10}
+                    placeholder="Ex: 10/03/2025"
+                    placeholderTextColor="#777"
+                  />
+
+                  <Text style={styles.modalLabel}>Data de Fechamento das Inscrições</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editInscricoesDataFim}
+                    keyboardType="numeric"
+                    onChangeText={(txt) => handleMaskDate(txt, setEditInscricoesDataFim)}
+                    maxLength={10}
+                    placeholder="Ex: 14/03/2025"
+                    placeholderTextColor="#777"
+                  />
+
 
                   {/* Abertura e Fechamento */}
                   <Text style={styles.modalLabel}>Abertura Inscrições (HH:MM)</Text>
