@@ -167,6 +167,8 @@ export default function TorneioScreen() {
       }
       const jsonTorneio = await res.json();
 
+      // console.log("📌 [DEBUG] Dados recebidos da API:", jsonTorneio);
+
       // Se não houver rodadas, avisa
       if (!jsonTorneio.round || Object.keys(jsonTorneio.round).length === 0) {
         console.log("⚠️ Nenhum torneio em andamento nesta liga.");
@@ -214,7 +216,8 @@ export default function TorneioScreen() {
         }
       }
 
-      // Se não achou mesa, não está jogando
+      console.log("📌 [DEBUG] Atualizando Estado -> Mesa:", foundMesa, "Oponente:", foundOpponent);
+
       if (!foundMesa) {
         console.log(`⚠️ Usuário não está jogando na rodada ${maxRound}.`);
         setMesaNumber(null);
@@ -222,8 +225,29 @@ export default function TorneioScreen() {
         setNotPlaying(true);
         setLoading(false);
       } else {
-        setMesaNumber(foundMesa);
-        setOpponentName(foundOpponent ?? null);
+        console.log(`✅ Mesa encontrada: ${foundMesa}, Oponente: ${foundOpponent}`);
+      
+        // Reseta os valores para forçar a atualização
+        setMesaNumber(null);
+        setOpponentName(null);
+        setNotPlaying(false);
+      
+        // 🔥 Obtém o nome do usuário autenticado antes de salvar no AsyncStorage
+        const storedUserName = await AsyncStorage.getItem("@userName");
+        const player1Name = storedUserName || "Jogador 1"; // Se não encontrar, define um padrão
+      
+        // 🔥 Salva os nomes corretamente no AsyncStorage
+        if (foundMesa && foundOpponent) {
+          console.log(`📌 [DEBUG] Salvando novos nomes no AsyncStorage: ${foundOpponent} e ${player1Name}`);
+          await AsyncStorage.setItem("@player1Name", player1Name);
+          await AsyncStorage.setItem("@player2Name", foundOpponent);
+        }
+      
+        // Pequeno delay para garantir que o React perceba a mudança
+        setTimeout(() => {
+          setMesaNumber(foundMesa);
+          setOpponentName(foundOpponent ?? null);
+        }, 10);
 
         // link da mesa
         const link = `https://Doprado.pythonanywhere.com/${leagueId}/mesa/${foundMesa}`;

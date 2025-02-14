@@ -851,51 +851,82 @@ useEffect(() => {
 
     if (!leagueStored) return;
     const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
-    onSnapshot(colRef, (snap) => {
-      const arr: Inscricao[] = [];
-      snap.forEach((ds) => {
-        arr.push({
-          userId: ds.id,
-          deckId: ds.data().deckId,
-          createdAt: ds.data().createdAt || "",
-        });
-      });
-      arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
-      setInscricoes(arr);
+   // 📌 Dentro da função onde ocorre o erro
+onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
+  const arr: Inscricao[] = [];
+  snap.forEach((ds) => {
+    arr.push({
+      userId: ds.id,
+      deckId: ds.data().deckId,
+      createdAt: ds.data().createdAt || "",
+    });
+  });
+  arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
+  setInscricoes(arr);
 
-      // Carrega info do Deck / Jogador
-      const deckIdsSet = new Set<string>();
-      const userIdsSet = new Set<string>();
-      arr.forEach((i) => {
-        if (i.deckId) deckIdsSet.add(i.deckId);
-        userIdsSet.add(i.userId);
-      });
+  // Carrega info do Deck / Jogador
+  const userIdsSet = new Set<string>();
+  const deckQueries: Promise<void>[] = [];
 
-      deckIdsSet.forEach(async (dkId) => {
-        const dRef = doc(db, "decks", dkId);
-        const dSnap = await getDoc(dRef);
-        if (dSnap.exists()) {
-          const nm = dSnap.data().name || `Deck ${dkId}`;
-          setDeckNameMap((prev) => ({ ...prev, [dkId]: nm }));
-        }
-      });
+          arr.forEach((i) => {
+            if (i.deckId) {
+              deckQueries.push(
+                (async () => {
+                  const playerDeckRef = doc(db, `players/${i.userId}/decks/${i.deckId}`);
+                  const playerDeckSnap = await getDoc(playerDeckRef);
 
-      userIdsSet.forEach(async (uId) => {
-        if (!playerNameMap[uId]) {
-          // Tenta achar jogador na subcoleção da league
-          const pRef = doc(db, "leagues", leagueStored, "players", uId);
-          const pSnap = await getDoc(pRef);
-          if (pSnap.exists()) {
-            const nm = pSnap.data().fullname || `Jogador não cadastrado: ${uId}`;
-            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
-          } else {
-            setPlayerNameMap((prev) => ({
-              ...prev,
-              [uId]: `Jogador não cadastrado: ${uId}`,
-            }));
+                  if (playerDeckSnap.exists() && i.deckId) {
+                    const deckName = playerDeckSnap.data().name || `Deck ${i.deckId}`;
+                    setDeckNameMap((prev) => ({
+                      ...prev,
+                      [String(i.deckId)]: deckName,
+                    }));
+                  }
+                })()
+              );
+            }
+            userIdsSet.add(i.userId);
+          });
+
+          // ✅ Agora podemos usar await porque a função onSnapshot foi declarada como async
+          await Promise.all(deckQueries);
+
+          // Busca nomes dos jogadores na liga
+          userIdsSet.forEach(async (uId) => {
+            if (!playerNameMap[uId]) {
+              const pRef = doc(db, "leagues", leagueStored, "players", uId);
+              const pSnap = await getDoc(pRef);
+              if (pSnap.exists()) {
+                const nm = pSnap.data().fullname || `Jogador não cadastrado: ${uId}`;
+                setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+              } else {
+                setPlayerNameMap((prev) => ({
+                  ...prev,
+                  [uId]: `Jogador não cadastrado: ${uId}`,
+                }));
+              }
+            }
+          });
+
+        // Executa todas as buscas de decks ao mesmo tempo
+        await Promise.all(deckQueries);
+
+        // Busca nomes dos jogadores na liga
+        userIdsSet.forEach(async (uId) => {
+          if (!playerNameMap[uId]) {
+            const pRef = doc(db, "leagues", leagueStored, "players", uId);
+            const pSnap = await getDoc(pRef);
+            if (pSnap.exists()) {
+              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${uId}`;
+              setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+            } else {
+              setPlayerNameMap((prev) => ({
+                ...prev,
+                [uId]: `Jogador não cadastrado: ${uId}`,
+              }));
+            }
           }
-        }
-      });
+        });
     });
 
     // Lista de espera
@@ -1094,11 +1125,18 @@ useEffect(() => {
   }
 
   // =========================== DECKS (PDF) ===========================
-  async function loadDeckCards(deckId: string) {
+  async function loadDeckCards(inscritoId: string, deckId: string) {
     try {
-      const deckRef = doc(db, "decks", deckId);
+      if (!inscritoId) {
+        console.error("Erro: inscritoId não definido ao carregar o deck.");
+        return;
+      }
+  
+      const deckRef = doc(db, `players/${inscritoId}/decks/${deckId}`);
       const deckSnap = await getDoc(deckRef);
+  
       if (!deckSnap.exists()) {
+        console.warn(`Deck ${deckId} não encontrado para o usuário ${playerId}.`);
         setDeckCards([]);
         return;
       }
@@ -1397,10 +1435,13 @@ useEffect(() => {
                     placeholderTextColor="#777"
                   />
 
-                  <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
-                    <Text style={{ color: "#fff", marginRight: 10 }}>Prioridade VIP</Text>
-                    <Switch value={editPrioridadeVip} onValueChange={setEditPrioridadeVip} />
-                  </View>
+                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
+                  <Text style={{ color: "#fff", marginRight: 10 }}>Prioridade VIP</Text>
+                  <Switch
+                    value={editPrioridadeVip}
+                    onValueChange={setEditPrioridadeVip}
+                  />
+                </View>
 
                   {editPrioridadeVip && (
                     <>
@@ -1428,6 +1469,7 @@ useEffect(() => {
                     </>
                   )}
 
+                <View style={{ flex: 1, justifyContent: "flex-end", paddingBottom: 20 }}>
                   <View style={[styles.modalButtons, { marginTop: 20 }]}>
                     <TouchableOpacity
                       style={[styles.button, { backgroundColor: "#999" }]}
@@ -1439,6 +1481,7 @@ useEffect(() => {
                       <Text style={styles.buttonText}>Salvar</Text>
                     </TouchableOpacity>
                   </View>
+                </View>
                 </View>
               </TouchableWithoutFeedback>
             </ScrollView>
@@ -1558,7 +1601,7 @@ useEffect(() => {
                     onPress={() => {
                       if (ins.deckId) {
                         setSelectedDeckIdForPdf(ins.deckId);
-                        loadDeckCards(ins.deckId);
+                        loadDeckCards(ins.userId, ins.deckId);
                         setDeckPdfModalVisible(true);
                       }
                     }}
