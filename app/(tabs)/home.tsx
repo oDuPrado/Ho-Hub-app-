@@ -802,7 +802,7 @@ export default function HomeScreen() {
                 color="#E3350D"
                 style={{ marginRight: 10 }}
               />
-              <Text style={styles.showAllText}>Mostrar todas as Ligas</Text>
+              <Text style={styles.showAllText}>Mostrar todas as Cidades</Text>
             </TouchableOpacity>
 
             {!showAllLeagues && (

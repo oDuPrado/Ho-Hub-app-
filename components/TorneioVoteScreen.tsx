@@ -68,18 +68,21 @@ export default function TorneioVoteScreen({
       // Se os nomes não foram passados via props, tenta buscá-los do AsyncStorage
       async function fetchPlayers() {
         console.log("🔍 Buscando nomes dos jogadores...");
-  
+      
         if (!p1Name) {
           const storedP1 = await AsyncStorage.getItem("@player1Name");
-          setPlayer1Name(storedP1 || "Jogador 1");
-          console.log("✅ Nome do Jogador 1 obtido:", storedP1);
+          console.log("📌 [DEBUG] Valor salvo no AsyncStorage para Player 1:", storedP1);
+          setPlayer1Name(storedP1 || "Jogador 1"); // Se vier `null`, define como "Jogador 1"
         }
-  
+      
         if (!p2Name) {
           const storedP2 = await AsyncStorage.getItem("@player2Name");
-          setPlayer2Name(storedP2 || "Jogador 2");
-          console.log("✅ Nome do Jogador 2 obtido:", storedP2);
+          console.log("📌 [DEBUG] Valor salvo no AsyncStorage para Player 2:", storedP2);
+          setPlayer2Name(storedP2 || "Jogador 2"); // Se vier `null`, define como "Jogador 2"
         }
+      
+        console.log("✅ Nome do Jogador 1 definido:", player1Name);
+        console.log("✅ Nome do Jogador 2 definido:", player2Name);
       }
   
       fetchPlayers();

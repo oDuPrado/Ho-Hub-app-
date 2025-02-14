@@ -6,16 +6,18 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Platform,
+  KeyboardAvoidingView,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useTranslation } from "react-i18next"; // <--- i18n
+import { useTranslation } from "react-i18next";
 import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
 
-const SENDGRID_API_KEY = "SUA_API_KEY_AQUI"; // lembre de ocultar
+const SENDGRID_API_KEY = "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"; // Lembre de ocultar essa chave em produção
 
 export default function SuggestionScreen() {
-  const { t } = useTranslation(); // <--- i18n
+  const { t } = useTranslation();
 
   const [userName, setUserName] = useState("");
   const [userId, setUserId] = useState("");
@@ -57,12 +59,12 @@ export default function SuggestionScreen() {
       const emailBody = {
         personalizations: [
           {
-            to: [{ email: "seu-email@exemplo.com" }],
+            to: [{ email: "ma.macedo11@hotmail.com" }],
             subject: subject,
           },
         ],
         from: {
-          email: "sender@exemplo.com",
+          email: "ma.macedo11@hotmail.com",
           name: userName,
         },
         content: [
@@ -97,7 +99,6 @@ Mensagem: ${message}`,
       const now = Date.now();
       setLastSent(now);
       await AsyncStorage.setItem("@lastSentEmail", now.toString());
-
       setMessage("");
     } catch (error) {
       console.error("Erro ao enviar e-mail:", error);
@@ -106,7 +107,10 @@ Mensagem: ${message}`,
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.safe}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
       <Animatable.View
         animation="bounceInDown"
         duration={800}
@@ -116,39 +120,41 @@ Mensagem: ${message}`,
         <Text style={styles.header}>{t("sugestao.header")}</Text>
       </Animatable.View>
 
-      <Text style={styles.label}>{t("sugestao.labels.subject")}</Text>
-      <TextInput
-        style={styles.input}
-        value={subject}
-        onChangeText={setSubject}
-        placeholder={t("sugestao.placeholders.subject") || ""}
-        placeholderTextColor="#999"
-      />
+      <Animatable.View animation="fadeInUp" duration={800} style={styles.formContainer}>
+        <Text style={styles.label}>{t("sugestao.labels.subject")}</Text>
+        <TextInput
+          style={styles.input}
+          value={subject}
+          onChangeText={setSubject}
+          placeholder={t("sugestao.placeholders.subject") || ""}
+          placeholderTextColor="#999"
+        />
 
-      <Text style={styles.label}>{t("sugestao.labels.message")}</Text>
-      <TextInput
-        style={[styles.input, styles.textArea]}
-        value={message}
-        onChangeText={setMessage}
-        placeholder={t("sugestao.placeholders.message") || ""}
-        placeholderTextColor="#999"
-        multiline
-        numberOfLines={6}
-      />
+        <Text style={styles.label}>{t("sugestao.labels.message")}</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          value={message}
+          onChangeText={setMessage}
+          placeholder={t("sugestao.placeholders.message") || ""}
+          placeholderTextColor="#999"
+          multiline
+          numberOfLines={6}
+        />
 
-      <Animatable.View animation="pulse" iterationCount="infinite" duration={1500}>
-        <TouchableOpacity style={styles.button} onPress={handleSendEmail}>
-          <Ionicons name="send" size={20} color="#FFFFFF" style={{ marginRight: 6 }} />
-          <Text style={styles.buttonText}>{t("sugestao.buttons.send")}</Text>
-        </TouchableOpacity>
+        <Animatable.View animation="pulse" iterationCount="infinite" duration={1500}>
+          <TouchableOpacity style={styles.button} onPress={handleSendEmail}>
+            <Ionicons name="send" size={20} color="#FFFFFF" style={styles.sendIcon} />
+            <Text style={styles.buttonText}>{t("sugestao.buttons.send")}</Text>
+          </TouchableOpacity>
+        </Animatable.View>
+
+        {!canSendEmail() && (
+          <Animatable.Text animation="fadeIn" duration={800} style={styles.warning}>
+            {t("sugestao.warnings.daily_limit")}
+          </Animatable.Text>
+        )}
       </Animatable.View>
-
-      {!canSendEmail() && (
-        <Animatable.Text animation="fadeIn" duration={800} style={styles.warning}>
-          {t("sugestao.warnings.daily_limit")}
-        </Animatable.Text>
-      )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -158,25 +164,36 @@ const WHITE = "#FFFFFF";
 const BORDER = "#4D4D4D";
 
 const styles = StyleSheet.create({
-  container: {
+  safe: {
     flex: 1,
     backgroundColor: DARK,
     padding: 20,
+    justifyContent: "center",
   },
   headerContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 30,
     justifyContent: "center",
   },
   headerIcon: {
     marginRight: 10,
   },
   header: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "bold",
     color: "#FFD700",
     textAlign: "center",
+  },
+  formContainer: {
+    backgroundColor: "#292929",
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 4,
   },
   label: {
     color: WHITE,
@@ -184,7 +201,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    backgroundColor: "#292929",
+    backgroundColor: "#3A3A3A",
     borderRadius: 8,
     padding: 12,
     color: WHITE,
@@ -203,8 +220,11 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
-    marginTop: 10,
     justifyContent: "center",
+    marginTop: 10,
+  },
+  sendIcon: {
+    marginRight: 6,
   },
   buttonText: {
     color: WHITE,

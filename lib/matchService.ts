@@ -303,22 +303,117 @@ export async function fetchAllStatsByFilter(userId: string): Promise<PlayerStats
   }
 }
 
+
 /**
- * Busca Rival do usuário de acordo com o filtro:
+ * Calcula o maior rival do jogador com base no `/stats/classics`
  */
 export async function fetchRivalByFilter(userId: string): Promise<RivalData | null> {
   try {
+    // 🔥 1️⃣ Busca os filtros armazenados
     const filterType = await AsyncStorage.getItem("@filterType");
+    const cityStored = await AsyncStorage.getItem("@selectedCity");
     const leagueStored = await AsyncStorage.getItem("@leagueId");
 
-    if (filterType === "league" && leagueStored) {
-      return await fetchPlayerRival(leagueStored, userId);
+    let leaguesToFetch: string[] = [];
+
+    if (!filterType || filterType === "all") {
+      // 🔥 Busca todas as ligas do Firebase
+      const leaguesSnap = await getDocs(collection(db, "leagues"));
+      leaguesSnap.forEach((docSnap) => {
+        leaguesToFetch.push(docSnap.id);
+      });
+    } else if (filterType === "city" && cityStored) {
+      // 🔥 Busca ligas de uma cidade específica
+      const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
+      const citySnapshot = await getDocs(qCity);
+      citySnapshot.forEach((docSnap) => {
+        leaguesToFetch.push(docSnap.id);
+      });
+    } else if (filterType === "league" && leagueStored) {
+      // 🔥 Usa apenas a liga selecionada
+      leaguesToFetch.push(leagueStored);
     } else {
-      console.log("Rival não disponível para city/all. Retornando null.");
+      console.warn("⚠️ Nenhuma liga válida encontrada para calcular o rival.");
       return null;
     }
+
+    if (leaguesToFetch.length === 0) {
+      console.log("⚠️ Nenhuma liga correspondente encontrada.");
+      return null;
+    }
+
+    let topRivalId = "";
+    let topScore = -Infinity;
+    let finalStats = {
+      matches: 0,
+      userWins: 0,
+      rivalWins: 0,
+      draws: 0,
+      lastWinner: "empate",
+      wrPercentage: 0,
+    };
+
+    let updatedAt = null;
+
+    // 🔄 2️⃣ Percorre todas as ligas e busca os dados de classics
+    for (const lid of leaguesToFetch) {
+      const classicsData = await fetchPlayerClassicsStats(lid, userId);
+      if (!classicsData || !classicsData.opponents) continue;
+
+      updatedAt = classicsData.updatedAt || null;
+
+      for (const oppId in classicsData.opponents) {
+        const matchData = classicsData.opponents[oppId];
+
+        const totalMatches = matchData.matches;
+        const userWins = matchData.wins;
+        const rivalWins = matchData.losses;
+        const draws = matchData.draws;
+        const lastWinner = userWins > rivalWins ? "user" : rivalWins > userWins ? "rival" : "empate";
+
+        const winDiff = Math.abs(userWins - rivalWins);
+        const balanceFactor = 1 / (1 + winDiff); // Se for 0 (empate), isso vale 1
+
+        // 🔥 Fórmula de rivalidade:
+        const score = totalMatches * balanceFactor + (lastWinner === "rival" ? 0.5 : 0);
+
+        if (score > topScore) {
+          topScore = score;
+          topRivalId = oppId;
+          finalStats = {
+            matches: totalMatches,
+            userWins,
+            rivalWins,
+            draws,
+            lastWinner,
+            wrPercentage: totalMatches > 0 ? (userWins / totalMatches) * 100 : 0,
+          };
+        }
+      }
+    }
+
+    if (!topRivalId) {
+      console.warn("⚠️ Nenhum rival encontrado para esse jogador.");
+      return null;
+    }
+
+    // 🔥 3️⃣ Buscar o nome do rival no Firebase
+    const rivalRef = doc(db, `leagues/${leaguesToFetch[0]}/players/${topRivalId}`);
+    const rivalSnap = await getDoc(rivalRef);
+    const rivalName = rivalSnap.exists() ? rivalSnap.data()?.fullname || `User ${topRivalId}` : `User ${topRivalId}`;
+
+    return {
+      rivalId: topRivalId,
+      rivalName,
+      matches: finalStats.matches,
+      userWins: finalStats.userWins,
+      rivalWins: finalStats.rivalWins,
+      lastWinner: finalStats.lastWinner as "user" | "rival" | "empate", // 👈 Forçando o tipo correto
+      wrPercentage: finalStats.wrPercentage,
+      updatedAt,
+    };    
   } catch (err) {
-    console.error("Erro ao buscar rival:", err);
+    console.error("❌ Erro ao calcular rival com classics:", err);
     return null;
   }
 }

@@ -249,6 +249,12 @@ async function loadTradesForLeague(lId: string, isActive: boolean, cache: TradeP
             try {
               const docRef = doc(db, `leagues/${leagueStored}/trades`, post.id);
               await deleteDoc(docRef);
+  
+              // 🔥 1️⃣ Remove do estado local (posts e cachedPosts)
+              setPosts((prev) => prev.filter((p) => p.id !== post.id));
+              setCachedPosts((prev) => (prev ? prev.filter((p) => p.id !== post.id) : null));
+  
+              // 🔥 2️⃣ Mostra alerta de sucesso
               Alert.alert("Sucesso", "Carta excluída.");
             } catch (err) {
               console.log("Erro ao excluir card:", err);
@@ -259,6 +265,7 @@ async function loadTradesForLeague(lId: string, isActive: boolean, cache: TradeP
       ]
     );
   }
+  
 
   /** Abre chat com o user */
   function handleOpenChat(targetName: string) {
