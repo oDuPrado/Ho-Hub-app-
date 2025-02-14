@@ -86,23 +86,25 @@ interface DeckData {
 }
 
 export default function CalendarScreen() {
+  // =========== STATES / HOOKS ===========
   const [playerId, setPlayerId] = useState("");
   const [isHost, setIsHost] = useState(false);
 
-  // Variáveis de FILTRO
-  const [filterType, setFilterType] = useState<"all"|"city"|"league"|"">("");
+  // Filtros
+  const [filterType, setFilterType] = useState<"all" | "city" | "league" | "">("");
   const [cityStored, setCityStored] = useState("");
   const [leagueStored, setLeagueStored] = useState("");
 
+  // Dados
   const [torneios, setTorneios] = useState<Torneio[]>([]);
   const [currentMonth, setCurrentMonth] = useState(moment());
 
-  // Mapeamentos de nomes (para exibir fullname)
+  // Mapeamento de nomes
   const [judgeMap, setJudgeMap] = useState<Record<string, string>>({});
   const [headJudgeMap, setHeadJudgeMap] = useState<Record<string, string>>({});
   const [playerNameMap, setPlayerNameMap] = useState<Record<string, string>>({});
 
-  // Opções de Judge e HeadJudge
+  // Opções de Juiz
   const [judgeOptions, setJudgeOptions] = useState<{ userId: string; fullname: string }[]>([]);
   const [headJudgeOptions, setHeadJudgeOptions] = useState<{ userId: string; fullname: string }[]>([]);
 
@@ -110,8 +112,8 @@ export default function CalendarScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  const [editDate, setEditDate] = useState("");   // dd/mm/aaaa
-  const [editTime, setEditTime] = useState("");   // HH:MM
+  const [editDate, setEditDate] = useState("");
+  const [editTime, setEditTime] = useState("");
   const [editJudge, setEditJudge] = useState("");
   const [editHeadJudge, setEditHeadJudge] = useState("");
   const [editEventType, setEditEventType] = useState("Cup");
@@ -121,13 +123,8 @@ export default function CalendarScreen() {
   const [headJudgeSelectModal, setHeadJudgeSelectModal] = useState(false);
   const [eventTypeSelectModal, setEventTypeSelectModal] = useState(false);
 
-  const eventTypesList = [
-    "Challenge",
-    "Cup",
-    "Liga Local",
-    "Pré-Release",
-    "Evento Especial",
-  ];
+  // Listas de Tipos
+  const eventTypesList = ["Challenge", "Cup", "Liga Local", "Pré-Release", "Evento Especial"];
 
   // Extras
   const [editMaxVagas, setEditMaxVagas] = useState<number | null>(null);
@@ -141,12 +138,12 @@ export default function CalendarScreen() {
   const [detalhesModalVisible, setDetalhesModalVisible] = useState(false);
   const [detalhesTorneio, setDetalhesTorneio] = useState<Torneio | null>(null);
 
-  // Sub-modal INSCRIÇÕES
+  // Modal INSCRIÇÕES
   const [inscricoesModalVisible, setInscricoesModalVisible] = useState(false);
   const [inscricoes, setInscricoes] = useState<Inscricao[]>([]);
   const [deckNameMap, setDeckNameMap] = useState<Record<string, string>>({});
 
-  // Sub-modal de PDF do Deck
+  // Modal Deck PDF
   const [deckPdfModalVisible, setDeckPdfModalVisible] = useState(false);
   const [selectedDeckIdForPdf, setSelectedDeckIdForPdf] = useState("");
 
@@ -160,7 +157,7 @@ export default function CalendarScreen() {
   const [espera, setEspera] = useState<Espera[]>([]);
   const [esperaModalVisible, setEsperaModalVisible] = useState(false);
 
-  // Cartas do deck
+  // Deck Cards
   const [deckCards, setDeckCards] = useState<
     {
       category: string;
@@ -174,36 +171,25 @@ export default function CalendarScreen() {
   const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState<boolean>(false);
 
+  // =========== LIFECYCLE ==============
   useEffect(() => {
     moment.locale("pt-br");
-
     (async () => {
       try {
         const pid = await AsyncStorage.getItem("@userId");
         if (pid) {
           setPlayerId(pid);
           setIsHost(HOST_PLAYER_IDS.includes(pid));
-        } else {
-          // Se não tiver user logado, poderia redirecionar para login
         }
-
-        const fType = (await AsyncStorage.getItem("@filterType")) as
-          | "all"
-          | "city"
-          | "league"
-          | ""
-          | null;
+        const fType = (await AsyncStorage.getItem("@filterType")) || "all";
         const cStored = (await AsyncStorage.getItem("@selectedCity")) || "";
         const lStored = (await AsyncStorage.getItem("@leagueId")) || "";
 
-        setFilterType(fType || "all");
+        setFilterType(fType as any);
         setCityStored(cStored);
         setLeagueStored(lStored);
 
-        // Carregar Judge e HeadJudge via roles
         await loadJudgeData(lStored);
-
-        // Carregar sets p/ imagens
         loadSetIdMap();
       } catch (error) {
         console.log("Erro no fetch inicial:", error);
@@ -211,57 +197,42 @@ export default function CalendarScreen() {
     })();
   }, []);
 
-useFocusEffect(
-  React.useCallback(() => {
-    (async () => {
-      try {
-        console.log("🔄 Tela Calendário aberta - Atualizando filtros e torneios...");
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        try {
+          console.log("🔄 Tela Calendário aberta - Atualizando filtros e torneios...");
 
-        // Obtém os filtros armazenados
-        const fType = (await AsyncStorage.getItem("@filterType")) as
-          | "all"
-          | "city"
-          | "league"
-          | ""
-          | null;
-        const cStored = (await AsyncStorage.getItem("@selectedCity")) || "";
-        const lStored = (await AsyncStorage.getItem("@leagueId")) || "";
+          const fType = (await AsyncStorage.getItem("@filterType")) || "all";
+          const cStored = (await AsyncStorage.getItem("@selectedCity")) || "";
+          const lStored = (await AsyncStorage.getItem("@leagueId")) || "";
 
-        // Atualiza os estados com os valores mais recentes
-        setFilterType(fType || "all");
-        setCityStored(cStored);
-        setLeagueStored(lStored);
+          setFilterType(fType as any);
+          setCityStored(cStored);
+          setLeagueStored(lStored);
 
-        console.log("📌 Novo Filter Type:", fType);
-        console.log("📌 Nova League ID:", lStored);
-        console.log("📌 Nova Cidade:", cStored);
+          console.log("📌 Novo Filter Type:", fType);
+          console.log("📌 Nova League ID:", lStored);
+          console.log("📌 Nova Cidade:", cStored);
 
-        // Recarrega os torneios com base nos filtros atualizados
-        loadTorneios();
-      } catch (error) {
-        console.log("❌ Erro ao atualizar filtros ao focar na tela Calendário:", error);
-      }
-    })();
-  }, [])
-);
+          loadTorneios();
+        } catch (error) {
+          console.log("❌ Erro ao atualizar filtros ao focar:", error);
+        }
+      })();
+    }, [])
+  );
 
+  useEffect(() => {
+    console.log("🔄 Atualizando torneios - Filtros:", filterType, leagueStored, cityStored);
+    loadTorneios();
+  }, [currentMonth, filterType, cityStored, leagueStored]);
 
-  // Efeito que observa currentMonth ou filterType, etc.
-  // Atualiza torneios quando algum filtro ou mês mudar
-useEffect(() => {
-  console.log("🔄 Atualizando torneios - Filtros:");
-  console.log("📍 Filter Type:", filterType);
-  console.log("📍 League ID:", leagueStored);
-  console.log("📍 City:", cityStored);
-  
-  loadTorneios();
-}, [currentMonth, filterType, cityStored, leagueStored]);; // <-- Removi cityStored se não for necessário
+  // ============ FUNÇÕES DE AJUDA ============
 
   async function loadJudgeData(currLeagueId: string) {
     try {
       if (!currLeagueId) return;
-
-      // Buscar "judge"
       const jArray = await fetchRoleMembers(currLeagueId, "judge");
       const jMapObj: Record<string, string> = {};
       jArray.forEach((j) => {
@@ -270,7 +241,6 @@ useEffect(() => {
       setJudgeOptions(jArray);
       setJudgeMap(jMapObj);
 
-      // Buscar "head"
       const hjArray = await fetchRoleMembers(currLeagueId, "head");
       const hjMapObj: Record<string, string> = {};
       hjArray.forEach((hj) => {
@@ -283,197 +253,6 @@ useEffect(() => {
     }
   }
 
-  // ============== Carrega Torneios (Respeitando Filtro) ==============
-  async function loadTorneios() {
-    try {
-      // 1️⃣ Recupera os valores mais recentes do filtro e do leagueId do AsyncStorage
-      const filterType = await AsyncStorage.getItem("@filterType");
-      const leagueStored = await AsyncStorage.getItem("@leagueId");
-      const cityStored = await AsyncStorage.getItem("@selectedCity");
-  
-      // Log para depuração: imprime os valores atuais do filtro e da liga
-      console.log("🔍 Filter Type atualizado:", filterType);
-      console.log("🔍 League ID atualizado:", leagueStored);
-      console.log("🔍 Cidade armazenada:", cityStored);
-  
-      // 2️⃣ Verifica o tipo de filtro e realiza a busca de torneios de acordo com ele
-      if (filterType === "league" && leagueStored) {
-        // Caso: Filtro "league" (liga específica)
-        console.log("📡 Buscando torneios na liga:", leagueStored);
-        const colRef = collection(db, "leagues", leagueStored, "calendar");
-        onSnapshot(colRef, (snap) => {
-          const arr: Torneio[] = [];
-          snap.forEach((docSnap) => {
-            const d = docSnap.data();
-            arr.push({
-              id: docSnap.id,
-              name: d.name,
-              date: d.date,
-              time: d.time,
-              createdBy: d.createdBy,
-              judge: d.judge || "",
-              headJudge: d.headJudge || "",
-              eventType: d.eventType || "Cup",
-              judgeAccepted: d.judgeAccepted || false,
-              maxVagas: d.maxVagas || null,
-              inscricoesAbertura: d.inscricoesAbertura || "",
-              inscricoesFechamento: d.inscricoesFechamento || "",
-              prioridadeVip: d.prioridadeVip || false,
-              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
-              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
-            });
-          });
-          // 3️⃣ Aplica filtro por data (mês atual)
-          const start = currentMonth.clone().startOf("month");
-          const end = currentMonth.clone().endOf("month");
-          const filtered = arr.filter((t) => {
-            const dt = moment(t.date, "DD/MM/YYYY");
-            return dt.isBetween(start, end, undefined, "[]");
-          });
-          console.log(`✅ Torneios encontrados na liga ${leagueStored}:`, filtered.length);
-          setTorneios(filtered);
-  
-          // 4️⃣ Para cada torneio filtrado, busca o nome do criador (fullname) na subcoleção "players"
-          filtered.forEach(async (tor) => {
-            if (tor.createdBy && !playerNameMap[tor.createdBy]) {
-              const pRef = doc(db, "leagues", leagueStored, "players", tor.createdBy);
-              const pSnap = await getDoc(pRef);
-              if (pSnap.exists()) {
-                const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
-                setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
-              } else {
-                setPlayerNameMap((prev) => ({
-                  ...prev,
-                  [tor.createdBy]: `Jogador não cadastrado: ${tor.createdBy}`,
-                }));
-              }
-            }
-          });
-        });
-      } else if (filterType === "city" && cityStored) {
-        // Caso: Filtro "city" – pega todas as ligas da cidade armazenada
-        console.log("📡 Buscando torneios nas ligas da cidade:", cityStored);
-        const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
-        const citySnap = await getDocs(qCity);
-        let arrGlobal: Torneio[] = [];
-        // Percorre cada liga encontrada na cidade
-        for (const leagueDoc of citySnap.docs) {
-          const lId = leagueDoc.id;
-          const colRef = collection(db, "leagues", lId, "calendar");
-          const colSnap = await getDocs(colRef);
-          colSnap.forEach((docSnap) => {
-            const d = docSnap.data();
-            arrGlobal.push({
-              id: docSnap.id,
-              name: d.name,
-              date: d.date,
-              time: d.time,
-              createdBy: d.createdBy,
-              judge: d.judge || "",
-              headJudge: d.headJudge || "",
-              eventType: d.eventType || "Cup",
-              judgeAccepted: d.judgeAccepted || false,
-              maxVagas: d.maxVagas || null,
-              inscricoesAbertura: d.inscricoesAbertura || "",
-              inscricoesFechamento: d.inscricoesFechamento || "",
-              prioridadeVip: d.prioridadeVip || false,
-              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
-              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
-            });
-          });
-        }
-        // Aplica filtro por mês
-        const start = currentMonth.clone().startOf("month");
-        const end = currentMonth.clone().endOf("month");
-        const filtered = arrGlobal.filter((t) => {
-          const dt = moment(t.date, "DD/MM/YYYY");
-          return dt.isBetween(start, end, undefined, "[]");
-        });
-        console.log(`✅ Torneios encontrados na cidade ${cityStored}:`, filtered.length);
-        setTorneios(filtered);
-  
-        // Para cada torneio, busca o nome do criador usando a liga onde foi criado (simplificação)
-        filtered.forEach(async (tor) => {
-          // Como não temos o leagueId direto no torneio, usaremos o primeiro league da cidade
-          const lId = citySnap.docs[0]?.id || "";
-          if (tor.createdBy && !playerNameMap[tor.createdBy]) {
-            const pRef = doc(db, "leagues", lId, "players", tor.createdBy);
-            const pSnap = await getDoc(pRef);
-            if (pSnap.exists()) {
-              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
-              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
-            } else {
-              setPlayerNameMap((prev) => ({
-                ...prev,
-                [tor.createdBy]: `Jogador não cadastrado: ${tor.createdBy}`,
-              }));
-            }
-          }
-        });
-      } else if (filterType === "all") {
-        // Caso: Filtro "all" – busca torneios de todas as ligas
-        console.log("📡 Buscando torneios de todas as ligas");
-        const leaguesSnap = await getDocs(collection(db, "leagues"));
-        let arrGlobal: Torneio[] = [];
-        for (const leagueDoc of leaguesSnap.docs) {
-          const lId = leagueDoc.id;
-          const colRef = collection(db, "leagues", lId, "calendar");
-          const colSnap = await getDocs(colRef);
-          colSnap.forEach((docSnap) => {
-            const d = docSnap.data();
-            arrGlobal.push({
-              id: docSnap.id,
-              name: d.name,
-              date: d.date,
-              time: d.time,
-              createdBy: d.createdBy,
-              judge: d.judge || "",
-              headJudge: d.headJudge || "",
-              eventType: d.eventType || "Cup",
-              judgeAccepted: d.judgeAccepted || false,
-              maxVagas: d.maxVagas || null,
-              inscricoesAbertura: d.inscricoesAbertura || "",
-              inscricoesFechamento: d.inscricoesFechamento || "",
-              prioridadeVip: d.prioridadeVip || false,
-              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
-              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
-            });
-          });
-        }
-        // Filtra pelo mês atual
-        const start = currentMonth.clone().startOf("month");
-        const end = currentMonth.clone().endOf("month");
-        const filtered = arrGlobal.filter((t) => {
-          const dt = moment(t.date, "DD/MM/YYYY");
-          return dt.isBetween(start, end, undefined, "[]");
-        });
-        console.log(`✅ Torneios encontrados (all):`, filtered.length);
-        setTorneios(filtered);
-  
-        // Para cada torneio, tenta buscar o nome do criador em qualquer liga
-        filtered.forEach(async (tor) => {
-          const leaguesSnap2 = await getDocs(collection(db, "leagues"));
-          for (const lDoc of leaguesSnap2.docs) {
-            const pRef = doc(db, "leagues", lDoc.id, "players", tor.createdBy);
-            const pSnap = await getDoc(pRef);
-            if (pSnap.exists()) {
-              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
-              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
-              break;
-            }
-          }
-        });
-      } else {
-        // Se não houver um filterType válido, define torneios como vazio
-        console.log("⚠️ Nenhum filtro válido encontrado.");
-        setTorneios([]);
-      }
-    } catch (err) {
-      console.log("❌ Erro ao carregar torneios:", err);
-    }
-  }
-  
-  // =========================== loadSetIdMap ===========================
   async function loadSetIdMap() {
     try {
       const response = await fetch("https://api.pokemontcg.io/v2/sets");
@@ -501,72 +280,172 @@ useEffect(() => {
     }
   }
 
-  // =========================== NAVEGAÇÃO DE MÊS ===========================
-  function handlePrevMonth() {
-    setCurrentMonth((prev) => prev.clone().subtract(1, "month"));
-  }
-  function handleNextMonth() {
-    setCurrentMonth((prev) => prev.clone().add(1, "month"));
+  function isVip(pid: string): boolean {
+    return vipPlayers.includes(pid);
   }
 
-  // =========================== CRIAR/EDITAR TORN ===========================
-  async function openCreateModal() {
+  // ==================== LOAD TORNEIOS / FILTRO ====================
+  async function loadTorneios() {
     try {
-      // Obtém os valores armazenados
-      const filterType = await AsyncStorage.getItem("@filterType");
-      const leagueStored = await AsyncStorage.getItem("@leagueId");
-  
-      // Log dos valores armazenados
-      console.log("🔍 Filter Type:", filterType);
-      console.log("🔍 League ID armazenado:", leagueStored);
-  
-      // Se o filtro não for "league" ou não houver um leagueId válido, exibe alerta
-      if (filterType !== "league" || !leagueStored) {
-        Alert.alert(
-          "Filtro inválido",
-          "Para criar torneio, selecione uma liga específica primeiro."
-        );
-        return;
+      const filterT = await AsyncStorage.getItem("@filterType");
+      const leagueSt = await AsyncStorage.getItem("@leagueId");
+      const citySt = await AsyncStorage.getItem("@selectedCity");
+
+      if (filterT === "league" && leagueSt) {
+        // Liga específica
+        const colRef = collection(db, "leagues", leagueSt, "calendar");
+        onSnapshot(colRef, (snap) => {
+          const arr: Torneio[] = [];
+          snap.forEach((docSnap) => {
+            const d = docSnap.data();
+            arr.push({
+              id: docSnap.id,
+              name: d.name,
+              date: d.date,
+              time: d.time,
+              createdBy: d.createdBy,
+              judge: d.judge || "",
+              headJudge: d.headJudge || "",
+              eventType: d.eventType || "Cup",
+              judgeAccepted: d.judgeAccepted || false,
+              maxVagas: d.maxVagas || null,
+              inscricoesAbertura: d.inscricoesAbertura || "",
+              inscricoesFechamento: d.inscricoesFechamento || "",
+              prioridadeVip: d.prioridadeVip || false,
+              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+            });
+          });
+
+          const start = currentMonth.clone().startOf("month");
+          const end = currentMonth.clone().endOf("month");
+          const filtered = arr.filter((t) => {
+            const dt = moment(t.date, "DD/MM/YYYY");
+            return dt.isBetween(start, end, undefined, "[]");
+          });
+          setTorneios(filtered);
+
+          filtered.forEach(async (tor) => {
+            if (tor.createdBy && !playerNameMap[tor.createdBy]) {
+              const pRef = doc(db, "leagues", leagueSt, "players", tor.createdBy);
+              const pSnap = await getDoc(pRef);
+              if (pSnap.exists()) {
+                const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
+                setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
+              }
+            }
+          });
+        });
+      } else if (filterT === "city" && citySt) {
+        // Liga da cidade
+        const qCity = query(collection(db, "leagues"), where("city", "==", citySt));
+        const citySnap = await getDocs(qCity);
+        let arrGlobal: Torneio[] = [];
+
+        for (const leagueDoc of citySnap.docs) {
+          const lId = leagueDoc.id;
+          const colRef = collection(db, "leagues", lId, "calendar");
+          const colSnap = await getDocs(colRef);
+          colSnap.forEach((docSnap) => {
+            const d = docSnap.data();
+            arrGlobal.push({
+              id: docSnap.id,
+              name: d.name,
+              date: d.date,
+              time: d.time,
+              createdBy: d.createdBy,
+              judge: d.judge || "",
+              headJudge: d.headJudge || "",
+              eventType: d.eventType || "Cup",
+              judgeAccepted: d.judgeAccepted || false,
+              maxVagas: d.maxVagas || null,
+              inscricoesAbertura: d.inscricoesAbertura || "",
+              inscricoesFechamento: d.inscricoesFechamento || "",
+              prioridadeVip: d.prioridadeVip || false,
+              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+            });
+          });
+        }
+        const start = currentMonth.clone().startOf("month");
+        const end = currentMonth.clone().endOf("month");
+        const filtered = arrGlobal.filter((t) => {
+          const dt = moment(t.date, "DD/MM/YYYY");
+          return dt.isBetween(start, end, undefined, "[]");
+        });
+        setTorneios(filtered);
+
+        filtered.forEach(async (tor) => {
+          const lId = citySnap.docs[0]?.id || "";
+          if (tor.createdBy && !playerNameMap[tor.createdBy]) {
+            const pRef = doc(db, "leagues", lId, "players", tor.createdBy);
+            const pSnap = await getDoc(pRef);
+            if (pSnap.exists()) {
+              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
+              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
+            }
+          }
+        });
+      } else if (filterT === "all") {
+        // Todas as ligas
+        const leaguesSnap = await getDocs(collection(db, "leagues"));
+        let arrGlobal: Torneio[] = [];
+
+        for (const leagueDoc of leaguesSnap.docs) {
+          const lId = leagueDoc.id;
+          const colRef = collection(db, "leagues", lId, "calendar");
+          const colSnap = await getDocs(colRef);
+          colSnap.forEach((docSnap) => {
+            const d = docSnap.data();
+            arrGlobal.push({
+              id: docSnap.id,
+              name: d.name,
+              date: d.date,
+              time: d.time,
+              createdBy: d.createdBy,
+              judge: d.judge || "",
+              headJudge: d.headJudge || "",
+              eventType: d.eventType || "Cup",
+              judgeAccepted: d.judgeAccepted || false,
+              maxVagas: d.maxVagas || null,
+              inscricoesAbertura: d.inscricoesAbertura || "",
+              inscricoesFechamento: d.inscricoesFechamento || "",
+              prioridadeVip: d.prioridadeVip || false,
+              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+            });
+          });
+        }
+        const start = currentMonth.clone().startOf("month");
+        const end = currentMonth.clone().endOf("month");
+        const filtered = arrGlobal.filter((t) => {
+          const dt = moment(t.date, "DD/MM/YYYY");
+          return dt.isBetween(start, end, undefined, "[]");
+        });
+        setTorneios(filtered);
+
+        filtered.forEach(async (tor) => {
+          const leaguesSnap2 = await getDocs(collection(db, "leagues"));
+          for (const lDoc of leaguesSnap2.docs) {
+            const pRef = doc(db, "leagues", lDoc.id, "players", tor.createdBy);
+            const pSnap = await getDoc(pRef);
+            if (pSnap.exists()) {
+              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
+              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
+              break;
+            }
+          }
+        });
+      } else {
+        // Nenhum filtro
+        setTorneios([]);
       }
-  
-      // Configuração inicial do torneio
-      setEditId(null);
-      setEditName("");
-      setEditDate(moment().format("DD/MM/YYYY"));
-      setEditTime("10:00");
-      setEditJudge("");
-      setEditHeadJudge("");
-      setEditEventType("Cup");
-      setEditMaxVagas(null);
-      setEditInscricoesAbertura("");
-      setEditInscricoesFechamento("");
-      setEditPrioridadeVip(false);
-      setEditInscricoesVipAbertura("");
-      setEditInscricoesVipFechamento("");
-  
-      setModalVisible(true);
-    } catch (error) {
-      console.error("❌ Erro ao abrir modal de criação de torneio:", error);
+    } catch (err) {
+      console.log("❌ Erro ao carregar torneios:", err);
     }
   }
 
-  function openEditModal(t: Torneio) {
-    setEditId(t.id);
-    setEditName(t.name);
-    setEditDate(t.date);
-    setEditTime(t.time);
-    setEditJudge(t.judge);
-    setEditHeadJudge(t.headJudge);
-    setEditEventType(t.eventType);
-    setEditMaxVagas(t.maxVagas ?? null);
-    setEditInscricoesAbertura(t.inscricoesAbertura ?? "");
-    setEditInscricoesFechamento(t.inscricoesFechamento ?? "");
-    setEditPrioridadeVip(t.prioridadeVip ?? false);
-    setEditInscricoesVipAbertura(t.inscricoesVipAbertura ?? "");
-    setEditInscricoesVipFechamento(t.inscricoesVipFechamento ?? "");
-    setModalVisible(true);
-  }
-
+  // ===================== MÁSCARAS =====================
   function handleMaskDate(text: string, setFunc: (val: string) => void) {
     let cleaned = text.replace(/\D/g, "");
     if (cleaned.length > 8) cleaned = cleaned.slice(0, 8);
@@ -577,8 +456,7 @@ useEffect(() => {
     } else if (cleaned.length <= 4) {
       formatted = cleaned.slice(0, 2) + "/" + cleaned.slice(2);
     } else {
-      formatted =
-        cleaned.slice(0, 2) + "/" + cleaned.slice(2, 4) + "/" + cleaned.slice(4);
+      formatted = cleaned.slice(0, 2) + "/" + cleaned.slice(2, 4) + "/" + cleaned.slice(4);
     }
     setFunc(formatted);
   }
@@ -596,25 +474,76 @@ useEffect(() => {
     setFunc(formatted);
   }
 
-  async function handleSaveTorneio() {
+  // ===================== NAVEGAÇÃO DE MÊS =====================
+  function handlePrevMonth() {
+    setCurrentMonth((prev) => prev.clone().subtract(1, "month"));
+  }
+  function handleNextMonth() {
+    setCurrentMonth((prev) => prev.clone().add(1, "month"));
+  }
+
+  // ===================== CRIAR/EDITAR TORN =====================
+  async function openCreateModal() {
     try {
-      // Recupera o ID da liga selecionada antes de criar o torneio
-      const leagueId = await AsyncStorage.getItem("@leagueId");
-  
-      // Se por algum motivo não tiver um ID de liga válido, exibe um erro
-      if (!leagueId) {
-        Alert.alert("Erro", "Não foi possível obter a liga para criar o torneio.");
-        console.error("❌ ERRO: Tentativa de criar torneio sem League ID!");
+      const filterType = await AsyncStorage.getItem("@filterType");
+      const leagueSt = await AsyncStorage.getItem("@leagueId");
+
+      if (filterType !== "league" || !leagueSt) {
+        Alert.alert("Filtro inválido", "Selecione uma liga específica primeiro.");
         return;
       }
-  
-      console.log("📌 Criando torneio na liga:", leagueId);
-  
-      // Caminho correto para salvar na liga selecionada
+
+      // Reset de campos
+      setEditId(null);
+      setEditName("");
+      setEditDate(moment().format("DD/MM/YYYY"));
+      setEditTime("10:00");
+      setEditJudge("");
+      setEditHeadJudge("");
+      setEditEventType("Cup");
+      setEditMaxVagas(null);
+      setEditInscricoesAbertura("");
+      setEditInscricoesFechamento("");
+      setEditPrioridadeVip(false);
+      setEditInscricoesVipAbertura("");
+      setEditInscricoesVipFechamento("");
+
+      setModalVisible(true);
+    } catch (error) {
+      console.error("Erro ao abrir modal:", error);
+    }
+  }
+
+  function openEditModal(t: Torneio) {
+    setEditId(t.id);
+    setEditName(t.name);
+    setEditDate(t.date);
+    setEditTime(t.time);
+    setEditJudge(t.judge);
+    setEditHeadJudge(t.headJudge);
+    setEditEventType(t.eventType);
+    setEditMaxVagas(t.maxVagas ?? null);
+    setEditInscricoesAbertura(t.inscricoesAbertura ?? "");
+    setEditInscricoesFechamento(t.inscricoesFechamento ?? "");
+    setEditPrioridadeVip(t.prioridadeVip ?? false);
+    setEditInscricoesVipAbertura(t.inscricoesVipAbertura ?? "");
+    setEditInscricoesVipFechamento(t.inscricoesVipFechamento ?? "");
+
+    setModalVisible(true);
+  }
+
+  async function handleSaveTorneio() {
+    try {
+      const leagueId = await AsyncStorage.getItem("@leagueId");
+      if (!leagueId) {
+        Alert.alert("Erro", "Nenhuma liga selecionada.");
+        return;
+      }
+
       const colRef = collection(db, `leagues/${leagueId}/calendar`);
-  
+
       if (editId) {
-        // Se for edição de torneio existente
+        // Editar
         const docRef = doc(colRef, editId);
         await updateDoc(docRef, {
           name: editName.trim(),
@@ -631,14 +560,13 @@ useEffect(() => {
           inscricoesVipAbertura: editInscricoesVipAbertura,
           inscricoesVipFechamento: editInscricoesVipFechamento,
         });
-        console.log(`✏️ Torneio ${editId} atualizado na liga ${leagueId}`);
       } else {
-        // Criar novo torneio
+        // Criar
         const docRef = await addDoc(colRef, {
           name: editName.trim(),
           date: editDate,
           time: editTime,
-          createdBy: await AsyncStorage.getItem("@userId"), // Obtém ID do usuário logado
+          createdBy: await AsyncStorage.getItem("@userId"),
           judge: editJudge,
           headJudge: editHeadJudge,
           eventType: editEventType,
@@ -651,70 +579,50 @@ useEffect(() => {
           inscricoesVipFechamento: editInscricoesVipFechamento,
           timestamp: serverTimestamp(),
         });
-  
-        console.log(`✅ Novo torneio criado na liga ${leagueId}: ${docRef.id}`);
+        console.log("Torneio criado:", docRef.id);
       }
-  
+
       setModalVisible(false);
     } catch (err) {
-      console.error("❌ Erro ao salvar torneio:", err);
+      console.error("Erro ao salvar torneio:", err);
       Alert.alert("Erro", "Falha ao salvar o torneio.");
     }
-  }  
-
-  async function sendNotificationToJudge(judgeId: string, torneioId: string, torneioName: string) {
-    try {
-      const notifRef = doc(collection(db, "players", judgeId, "notifications"));
-      await setDoc(notifRef, {
-        type: "judge_invite",
-        torneioId,
-        torneioName,
-        message: `Você foi convidado para ser juiz do torneio: ${torneioName}`,
-        timestamp: serverTimestamp(),
-      });
-    } catch (err) {
-      console.log("Erro ao notificar juiz:", err);
-    }
   }
 
-  // =========================== EXCLUIR TORN ===========================
+  // ==================== DELETAR TORN ====================
   async function handleDeleteTorneio(torneio: Torneio) {
-    Alert.alert(
-      "Confirmação",
-      `Deseja excluir o torneio "${torneio.name}"?`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Excluir",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              if (!leagueStored) {
-                Alert.alert("Erro", "Sem leagueId para excluir torneio.");
-                return;
-              }
-              const colRef = collection(db, "leagues", leagueStored, "calendar");
-              const docRef = doc(colRef, torneio.id);
-              await deleteDoc(docRef);
-            } catch (err) {
-              console.log("Erro handleDeleteTorneio:", err);
-              Alert.alert("Erro", "Falha ao excluir torneio.");
+    Alert.alert("Confirmação", `Excluir o torneio "${torneio.name}"?`, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Excluir",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            if (!leagueStored) {
+              Alert.alert("Erro", "Sem leagueId para excluir torneio.");
+              return;
             }
-          },
+            const colRef = collection(db, "leagues", leagueStored, "calendar");
+            const docRef = doc(colRef, torneio.id);
+            await deleteDoc(docRef);
+          } catch (err) {
+            console.log("Erro ao excluir torneio:", err);
+            Alert.alert("Erro", "Falha ao excluir torneio.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   }
 
-  // =========================== INSCRIÇÕES ===========================
-  function isVip(pid: string): boolean {
-    return vipPlayers.includes(pid);
-  }
-
+  // ==================== INSCRIÇÕES ====================
   async function handleInscrever(t: Torneio) {
     const agora = moment();
+    if (!leagueStored) {
+      Alert.alert("Erro", "Liga não selecionada.");
+      return;
+    }
 
-    // Checa VIP
+    // Verificação de horários VIP
     if (t.prioridadeVip && isVip(playerId)) {
       if (t.inscricoesVipAbertura && agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))) {
         Alert.alert("Inscrições VIP Não Abertas", `Abrem às ${t.inscricoesVipAbertura}.`);
@@ -735,12 +643,7 @@ useEffect(() => {
       }
     }
 
-    if (!leagueStored) {
-      Alert.alert("Erro", "Filtro inválido ou leagueId não selecionada.");
-      return;
-    }
-
-    // Verifica se já está inscrito
+    // Verificar se já inscrito
     const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
     const snap = await getDoc(doc(colRef, playerId));
     if (snap.exists()) {
@@ -748,45 +651,43 @@ useEffect(() => {
       return;
     }
 
-    // Verifica limite de vagas
+    // Verificar limite de vagas
     const allDocs = await getDocs(colRef);
     const totalInscricoes: Inscricao[] = [];
-    allDocs.forEach((docSnap) => {
+    allDocs.forEach((ds) => {
       totalInscricoes.push({
-        userId: docSnap.id,
-        deckId: docSnap.data().deckId,
-        createdAt: docSnap.data().createdAt || "",
+        userId: ds.id,
+        deckId: ds.data().deckId,
+        createdAt: ds.data().createdAt || "",
       });
     });
 
     if (t.maxVagas && totalInscricoes.length >= t.maxVagas) {
-      // Tenta lista de espera
       handleWaitlist(t, isVip(playerId));
       return;
     }
 
-    // Se chegou aqui, abre modal p/ escolher deck
     setDetalhesTorneio(t);
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
 
     const decksRef = collection(db, `players/${playerId}/decks`);
-      onSnapshot(decksRef, (resp) => {
-        const arr: DeckData[] = [];
-        resp.forEach((docSnap) => {
-          arr.push({
-            id: docSnap.id,
-            name: docSnap.data().name || `Deck ${docSnap.id}`,
-            playerId: playerId, // Agora o playerId já é o mesmo do caminho
-          });
+    onSnapshot(decksRef, (resp) => {
+      const arr: DeckData[] = [];
+      resp.forEach((docSnap) => {
+        arr.push({
+          id: docSnap.id,
+          name: docSnap.data().name || `Deck ${docSnap.id}`,
+          playerId,
         });
-        setUserDecks(arr);
       });
-      setInscricaoModalVisible(true);
-      }
+      setUserDecks(arr);
+    });
+    setInscricaoModalVisible(true);
+  }
 
   async function handleWaitlist(t: Torneio, vip: boolean) {
-    Alert.alert("Lista de Espera", "O torneio está lotado. Você foi adicionado à lista de espera.");
+    Alert.alert("Lista de Espera", "Torneio lotado. Adicionado à lista de espera.");
     if (!leagueStored) return;
     const waitColRef = collection(db, "leagues", leagueStored, "calendar", t.id, "espera");
     await setDoc(doc(waitColRef, playerId), {
@@ -797,27 +698,24 @@ useEffect(() => {
   }
 
   async function handleSalvarInscricao() {
-    if (!inscricaoTorneioId || !detalhesTorneio) {
-      return;
-    }
+    if (!inscricaoTorneioId || !detalhesTorneio) return;
     if (!leagueStored) {
-      Alert.alert("Erro", "Nenhuma liga selecionada para esta inscrição.");
+      Alert.alert("Erro", "Liga não selecionada.");
       return;
     }
 
-    // Se não for "Liga Local", precisa de deck
     if (detalhesTorneio.eventType !== "Liga Local" && !selectedDeckId) {
-      Alert.alert("Erro", "Selecione um deck para se inscrever ou verifique tipo de evento.");
+      Alert.alert("Erro", "Selecione um deck ou verifique o tipo de evento.");
       return;
     }
 
     try {
       const colRef = collection(db, "leagues", leagueStored, "calendar", inscricaoTorneioId, "inscricoes");
       const docRef = doc(colRef, playerId);
-      // Verifica se por acaso acabou de se inscrever (anti-lag)
+
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        Alert.alert("Aviso", "Você já se inscreveu neste torneio (possível duplicado).");
+        Alert.alert("Aviso", "Você já se inscreveu neste torneio.");
         setInscricaoModalVisible(false);
         return;
       }
@@ -835,7 +733,7 @@ useEffect(() => {
     }
   }
 
-  // =========================== DETALHES DO TORNEIO ===========================
+  // ================== DETALHES ==================
   function handleOpenDetalhes(t: Torneio) {
     setDetalhesTorneio(t);
     setDetalhesModalVisible(true);
@@ -845,88 +743,65 @@ useEffect(() => {
     setDetalhesTorneio(null);
   }
 
-  // =========================== LISTA INSCRICOES ===========================
+  // ================== INSCRIÇÕES ==================
   async function openInscricoesModal(t: Torneio) {
     setDetalhesTorneio(t);
 
     if (!leagueStored) return;
     const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
-   // 📌 Dentro da função onde ocorre o erro
-onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
-  const arr: Inscricao[] = [];
-  snap.forEach((ds) => {
-    arr.push({
-      userId: ds.id,
-      deckId: ds.data().deckId,
-      createdAt: ds.data().createdAt || "",
-    });
-  });
-  arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
-  setInscricoes(arr);
 
-  // Carrega info do Deck / Jogador
-  const userIdsSet = new Set<string>();
-  const deckQueries: Promise<void>[] = [];
+    onSnapshot(colRef, async (snap) => {
+      const arr: Inscricao[] = [];
+      snap.forEach((ds) => {
+        arr.push({
+          userId: ds.id,
+          deckId: ds.data().deckId,
+          createdAt: ds.data().createdAt || "",
+        });
+      });
+      arr.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
+      setInscricoes(arr);
 
-          arr.forEach((i) => {
-            if (i.deckId) {
-              deckQueries.push(
-                (async () => {
-                  const playerDeckRef = doc(db, `players/${i.userId}/decks/${i.deckId}`);
-                  const playerDeckSnap = await getDoc(playerDeckRef);
+      const userIdsSet = new Set<string>();
+      const deckQueries: Promise<void>[] = [];
 
-                  if (playerDeckSnap.exists() && i.deckId) {
-                    const deckName = playerDeckSnap.data().name || `Deck ${i.deckId}`;
-                    setDeckNameMap((prev) => ({
-                      ...prev,
-                      [String(i.deckId)]: deckName,
-                    }));
-                  }
-                })()
-              );
-            }
-            userIdsSet.add(i.userId);
-          });
+      arr.forEach((i) => {
+        if (i.deckId) {
+          deckQueries.push(
+            (async () => {
+              const playerDeckRef = doc(db, `players/${i.userId}/decks/${i.deckId}`);
+              const playerDeckSnap = await getDoc(playerDeckRef);
 
-          // ✅ Agora podemos usar await porque a função onSnapshot foi declarada como async
-          await Promise.all(deckQueries);
-
-          // Busca nomes dos jogadores na liga
-          userIdsSet.forEach(async (uId) => {
-            if (!playerNameMap[uId]) {
-              const pRef = doc(db, "leagues", leagueStored, "players", uId);
-              const pSnap = await getDoc(pRef);
-              if (pSnap.exists()) {
-                const nm = pSnap.data().fullname || `Jogador não cadastrado: ${uId}`;
-                setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
-              } else {
-                setPlayerNameMap((prev) => ({
+              if (playerDeckSnap.exists() && i.deckId) {
+                const deckName = playerDeckSnap.data().name || `Deck ${i.deckId}`;
+                setDeckNameMap((prev) => ({
                   ...prev,
-                  [uId]: `Jogador não cadastrado: ${uId}`,
+                  [String(i.deckId)]: deckName,
                 }));
               }
-            }
-          });
+            })()
+          );
+        }
+        userIdsSet.add(i.userId);
+      });
 
-        // Executa todas as buscas de decks ao mesmo tempo
-        await Promise.all(deckQueries);
+      await Promise.all(deckQueries);
 
-        // Busca nomes dos jogadores na liga
-        userIdsSet.forEach(async (uId) => {
-          if (!playerNameMap[uId]) {
-            const pRef = doc(db, "leagues", leagueStored, "players", uId);
-            const pSnap = await getDoc(pRef);
-            if (pSnap.exists()) {
-              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${uId}`;
-              setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
-            } else {
-              setPlayerNameMap((prev) => ({
-                ...prev,
-                [uId]: `Jogador não cadastrado: ${uId}`,
-              }));
-            }
+      userIdsSet.forEach(async (uId) => {
+        if (!playerNameMap[uId]) {
+          const pRef = doc(db, "leagues", leagueStored, "players", uId);
+          const pSnap = await getDoc(pRef);
+          if (pSnap.exists()) {
+            const nm = pSnap.data().fullname || `Jogador não cadastrado: ${uId}`;
+            setPlayerNameMap((prev) => ({ ...prev, [uId]: nm }));
+          } else {
+            setPlayerNameMap((prev) => ({
+              ...prev,
+              [uId]: `Jogador não cadastrado: ${uId}`,
+            }));
           }
-        });
+        }
+      });
     });
 
     // Lista de espera
@@ -948,7 +823,6 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
       });
       setEspera(arr);
 
-      // Carregar nome
       arr.forEach(async (obj) => {
         if (!playerNameMap[obj.userId]) {
           const pRef = doc(db, "leagues", leagueStored, "players", obj.userId);
@@ -978,15 +852,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
   async function handleExcluirInscricao(tournamentId: string, pId: string) {
     if (!leagueStored) return;
     try {
-      const inscricaoRef = doc(
-        db,
-        "leagues",
-        leagueStored,
-        "calendar",
-        tournamentId,
-        "inscricoes",
-        pId
-      );
+      const inscricaoRef = doc(db, "leagues", leagueStored, "calendar", tournamentId, "inscricoes", pId);
       await deleteDoc(inscricaoRef);
       Alert.alert("Sucesso", "Inscrição excluída!");
       await handleSubirListaEspera(tournamentId);
@@ -1065,78 +931,154 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
         timestamp: serverTimestamp(),
       });
     } catch (err) {
-      console.log("Erro ao notificar jogador sobre lista de espera:", err);
+      console.log("Erro ao notificar jogador:", err);
     }
   }
 
-  // =========================== CONFIRMAR/RECUSAR JUIZ ===========================
-  async function confirmJudge(tournament: Torneio) {
-    if (!leagueStored) return;
-    try {
-      const docRef = doc(db, "leagues", leagueStored, "calendar", tournament.id);
-      await updateDoc(docRef, { judgeAccepted: true });
+  // ================= CONFIRMAR/RECUSAR JUIZ =================
+  // ================= CONFIRMAR/RECUSAR JUIZ =================
+async function confirmJudge(tournament: Torneio) {
+  if (!leagueStored) return;
+  try {
+    const docRef = doc(db, "leagues", leagueStored, "calendar", tournament.id);
+    await updateDoc(docRef, { judgeAccepted: true });
 
-      Alert.alert("Sucesso", `Você confirmou como juiz no torneio: ${tournament.name}`);
-      sendNotifToHost(
-        tournament.createdBy,
-        tournament.id,
-        tournament.name,
-        "O juiz confirmou presença no torneio."
+    // Exclui a notificação do Firebase
+    await deleteJudgeNotification(tournament.judge, tournament.id);
+
+    Alert.alert("Sucesso", `Você confirmou como juiz em: ${tournament.name}`);
+    sendNotifToHost(
+      tournament.createdBy,
+      tournament.id,
+      tournament.name,
+      "O juiz confirmou presença no torneio."
+    );
+  } catch (err) {
+    console.log("Erro confirmJudge:", err);
+    Alert.alert("Erro", "Falha ao confirmar juiz.");
+  }
+}
+
+async function declineJudge(tournament: Torneio) {
+  if (!leagueStored) return;
+  try {
+    const docRef = doc(db, "leagues", leagueStored, "calendar", tournament.id);
+    await updateDoc(docRef, { judge: "", judgeAccepted: false });
+
+    // Exclui a notificação do Firebase
+    await deleteJudgeNotification(tournament.judge, tournament.id);
+
+    Alert.alert("Sucesso", `Você recusou ser juiz em: ${tournament.name}`);
+    sendNotifToHost(
+      tournament.createdBy,
+      tournament.id,
+      tournament.name,
+      "O juiz recusou participar do torneio."
+    );
+  } catch (err) {
+    console.log("Erro declineJudge:", err);
+    Alert.alert("Erro", "Falha ao recusar juiz.");
+  }
+}
+
+async function sendNotifToHost(hostId: string, torneioId: string, torneioName: string, message: string) {
+  if (!hostId) return;
+  try {
+    const notifRef = doc(collection(db, "players", hostId, "notifications"));
+    await setDoc(notifRef, {
+      type: "judge_response",
+      torneioId,
+      torneioName,
+      message,
+      timestamp: serverTimestamp(),
+    });
+  } catch (err) {
+    console.log("Erro ao notificar host:", err);
+  }
+}
+
+// ================= EXCLUIR NOTIFICAÇÃO DO JUIZ =================
+async function deleteJudgeNotification(judgeId: string, torneioId: string) {
+  if (!judgeId) return;
+  try {
+    const notifColRef = collection(db, "players", judgeId, "notifications");
+    const notifSnap = await getDocs(notifColRef);
+
+    notifSnap.forEach(async (docSnap) => {
+      const notifData = docSnap.data();
+      if (notifData.type === "judge_invite" && notifData.torneioId === torneioId) {
+        await deleteDoc(doc(notifColRef, docSnap.id));
+        console.log(`Notificação do juiz ${judgeId} para torneio ${torneioId} removida.`);
+      }
+    });
+  } catch (err) {
+    console.log("Erro ao excluir notificação do juiz:", err);
+  }
+}
+
+// ================= LIMPAR NOTIFICAÇÕES ANTIGAS OTIMIZADO =================
+async function cleanOldNotifications() {
+  try {
+    const today = moment().format("DD/MM/YYYY");
+    
+    // Verifica se já fez limpeza hoje
+    const lastCleanup = await AsyncStorage.getItem("@lastCleanup");
+    if (lastCleanup === today) {
+      console.log("✅ Limpeza já foi feita hoje, ignorando...");
+      return;
+    }
+
+    console.log("🧹 Limpando notificações de torneios passados...");
+
+    // Atualiza a última limpeza
+    await AsyncStorage.setItem("@lastCleanup", today);
+
+    // Filtra apenas os jogadores que têm notificações de torneios antigos
+    const playersSnap = await getDocs(collection(db, "players"));
+    for (const playerDoc of playersSnap.docs) {
+      const playerId = playerDoc.id;
+
+      // Busca notificações apenas de torneios antigos
+      const notifQuery = query(
+        collection(db, "players", playerId, "notifications"),
+        where("date", "<", today) // Filtra torneios passados
       );
-    } catch (err) {
-      console.log("Erro confirmJudge:", err);
-      Alert.alert("Erro", "Falha ao confirmar juiz.");
-    }
-  }
 
-  async function declineJudge(tournament: Torneio) {
-    if (!leagueStored) return;
-    try {
-      const docRef = doc(db, "leagues", leagueStored, "calendar", tournament.id);
-      await updateDoc(docRef, { judge: "", judgeAccepted: false });
-
-      Alert.alert("Sucesso", `Você recusou ser juiz no torneio: ${tournament.name}`);
-      sendNotifToHost(
-        tournament.createdBy,
-        tournament.id,
-        tournament.name,
-        "O juiz recusou participar do torneio."
+      const notifSnap = await getDocs(notifQuery);
+      
+      // Remove notificações antigas
+      const deletePromises = notifSnap.docs.map((notifDoc) => 
+        deleteDoc(doc(db, "players", playerId, "notifications", notifDoc.id))
       );
-    } catch (err) {
-      console.log("Erro declineJudge:", err);
-      Alert.alert("Erro", "Falha ao recusar juiz.");
-    }
-  }
 
-  async function sendNotifToHost(hostId: string, torneioId: string, torneioName: string, message: string) {
-    if (!hostId) return;
-    try {
-      const notifRef = doc(collection(db, "players", hostId, "notifications"));
-      await setDoc(notifRef, {
-        type: "judge_response",
-        torneioId,
-        torneioName,
-        message,
-        timestamp: serverTimestamp(),
-      });
-    } catch (err) {
-      console.log("Erro ao notificar host:", err);
+      await Promise.all(deletePromises);
+      console.log(`🗑️ Notificações antigas removidas para ${playerId}`);
     }
-  }
 
-  // =========================== DECKS (PDF) ===========================
+    console.log("✅ Limpeza de notificações concluída.");
+  } catch (err) {
+    console.log("Erro ao limpar notificações antigas:", err);
+  }
+}
+
+// ============== CHAMA A LIMPEZA AUTOMÁTICA ==============
+useEffect(() => {
+  cleanOldNotifications(); // Executa apenas uma vez ao iniciar o app
+}, []);
+
+  // =================== DECKS (PDF) ===================
   async function loadDeckCards(inscritoId: string, deckId: string) {
     try {
       if (!inscritoId) {
         console.error("Erro: inscritoId não definido ao carregar o deck.");
         return;
       }
-  
+
       const deckRef = doc(db, `players/${inscritoId}/decks/${deckId}`);
       const deckSnap = await getDoc(deckRef);
-  
+
       if (!deckSnap.exists()) {
-        console.warn(`Deck ${deckId} não encontrado para o usuário ${playerId}.`);
+        console.warn(`Deck ${deckId} não encontrado para o usuário ${inscritoId}.`);
         setDeckCards([]);
         return;
       }
@@ -1205,7 +1147,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
     }
   }
 
-  // =========================== RENDER ===========================
+  // ================== RENDER (layout) ==================
   function renderCard(tor: Torneio) {
     const dt = moment(tor.date, "DD/MM/YYYY");
     const isFuture = dt.isSameOrAfter(moment(), "day");
@@ -1219,24 +1161,33 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
       playerNameMap[tor.createdBy] || `Jogador não cadastrado: ${tor.createdBy}`;
 
     return (
-      <Animatable.View style={styles.card} key={`t-${tor.id}`} animation="fadeInUp" duration={700}>
-        <Text style={styles.cardTitle}>{tor.name}</Text>
+      <Animatable.View
+        style={styles.card}
+        key={`t-${tor.id}`}
+        animation="fadeInUp"
+        duration={700}
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle}>{tor.name}</Text>
+          <Ionicons name="calendar-outline" size={20} color="#fff" />
+        </View>
         <Text style={styles.cardSub}>
-          <MaterialCommunityIcons name="calendar" size={14} color="#ccc" />
+          <MaterialCommunityIcons name="clock-outline" size={14} color="#ccc" />
           {"  "}
           {tor.date} às {tor.time} | [{eventLabel}]
         </Text>
+
         <Text style={styles.cardSub}>
-          Criado por: {creatorFullname}
+          Criador: <Text style={{ color: "#fff" }}>{creatorFullname}</Text>
           {"\n"}
-          Juiz: {judgeName}
-          {tor.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
-          {"\n"}
-          Head Judge: {headJudgeName}
+          Juiz: <Text style={{ color: "#fff" }}>{judgeName}</Text>
+          {tor.judgeAccepted ? " (Ok)" : " (Pendente)"}
+          {"  "}
+          | Head: <Text style={{ color: "#fff" }}>{headJudgeName}</Text>
         </Text>
 
         {isThisJudgePending && (
-          <View style={{ flexDirection: "row", marginTop: 8 }}>
+          <View style={styles.cardActionsRow}>
             <TouchableOpacity
               style={[styles.buttonSmall, { marginRight: 8 }]}
               onPress={() => confirmJudge(tor)}
@@ -1253,46 +1204,52 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
         )}
 
         {isHost && (
-          <View style={{ flexDirection: "row", marginTop: 6 }}>
+          <View style={styles.cardActionsRow}>
             <TouchableOpacity
               style={[styles.buttonSmall, { marginRight: 8 }]}
               onPress={() => openEditModal(tor)}
             >
-              <Text style={styles.buttonSmallText}>Editar</Text>
+              <Ionicons name="pencil" size={16} color="#FFF" />
+              <Text style={styles.buttonSmallText}> Editar</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.buttonSmall, { backgroundColor: "#FF3333" }]}
               onPress={() => handleDeleteTorneio(tor)}
             >
-              <Text style={styles.buttonSmallText}>Excluir</Text>
+              <Ionicons name="trash" size={16} color="#FFF" />
+              <Text style={styles.buttonSmallText}> Excluir</Text>
             </TouchableOpacity>
           </View>
         )}
 
+        {/* Botões de Inscrever / Detalhes */}
         {isFuture ? (
-          <View style={{ flexDirection: "row", marginTop: 8 }}>
+          <View style={styles.cardActionsRow}>
             {canAccessDetails && (
               <TouchableOpacity
-                style={[styles.inscreverButton, { marginRight: 8 }]}
+                style={[styles.cardActionButton, { marginRight: 8 }]}
                 onPress={() => handleOpenDetalhes(tor)}
               >
-                <Ionicons name="information-circle" size={16} color="#fff" />
-                <Text style={styles.inscreverButtonText}>  Detalhes</Text>
+                <Ionicons name="information-circle" size={18} color="#FFF" />
+                <Text style={styles.cardActionButtonText}>  Detalhes</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.inscreverButton} onPress={() => handleInscrever(tor)}>
-              <Ionicons name="checkmark-circle" size={16} color="#fff" />
-              <Text style={styles.inscreverButtonText}>  Inscrever</Text>
+            <TouchableOpacity
+              style={styles.cardActionButton}
+              onPress={() => handleInscrever(tor)}
+            >
+              <Ionicons name="checkmark-circle" size={18} color="#FFF" />
+              <Text style={styles.cardActionButtonText}>  Inscrever</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <TouchableOpacity
-            style={[styles.inscreverButton, { backgroundColor: "#777", marginTop: 8 }]}
+            style={[styles.cardActionButton, { backgroundColor: "#777", marginTop: 8 }]}
             onPress={() => (canAccessDetails ? handleOpenDetalhes(tor) : null)}
           >
-            <Ionicons name="checkmark-done-circle" size={16} color="#fff" />
-            <Text style={styles.inscreverButtonText}>
-              {canAccessDetails ? "Detalhes (Já ocorreu)" : "Já ocorreu"}
+            <Ionicons name="checkmark-done-circle" size={18} color="#FFF" />
+            <Text style={styles.cardActionButtonText}>
+              {canAccessDetails ? " Detalhes (Ocorrido)" : " Já ocorreu"}
             </Text>
           </TouchableOpacity>
         )}
@@ -1300,29 +1257,51 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
     );
   }
 
+  // ============== RENDER FINAL ==================
   return (
     <SafeAreaView style={styles.safe}>
-      {/* HEADER MÊS */}
-      <View style={[styles.header, { justifyContent: "space-between" }]}>
-        <TouchableOpacity onPress={handlePrevMonth} style={{ paddingHorizontal: 20 }}>
-          <Ionicons name="chevron-back" size={26} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{currentMonth.format("MMMM [de] YYYY")}</Text>
-        <TouchableOpacity onPress={handleNextMonth} style={{ paddingHorizontal: 20 }}>
-          <Ionicons name="chevron-forward" size={26} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      {/* HEADER */}
+      <Animatable.View
+        style={styles.headerContainer}
+        animation="fadeInDown"
+        duration={600}
+      >
+        <View style={styles.monthNavigation}>
+          <TouchableOpacity onPress={handlePrevMonth} style={styles.navArrow}>
+            <Ionicons name="chevron-back" size={28} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {currentMonth.format("MMMM [de] YYYY")}
+          </Text>
+          <TouchableOpacity onPress={handleNextMonth} style={styles.navArrow}>
+            <Ionicons name="chevron-forward" size={28} color="#fff" />
+          </TouchableOpacity>
+        </View>
 
-      {isHost && (
-        <TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
-          <MaterialCommunityIcons name="plus" size={20} color="#FFF" />
-          <Text style={styles.createButtonText}>  Criar Torneio</Text>
-        </TouchableOpacity>
-      )}
+        {isHost && (
+          <TouchableOpacity style={styles.createButton} onPress={openCreateModal}>
+            <MaterialCommunityIcons name="plus" size={20} color="#FFF" />
+            <Text style={styles.createButtonText}> Criar Torneio</Text>
+          </TouchableOpacity>
+        )}
+      </Animatable.View>
 
-      <ScrollView style={{ flex: 1, marginTop: 10 }}>
-        {torneios.map((t) => renderCard(t))}
-      </ScrollView>
+      {/* LISTA DE TORNEIOS */}
+<Animatable.View animation="fadeInUp" duration={800} style={{ flex: 1 }}>
+  <ScrollView style={{ flex: 1, marginTop: 6 }}>
+    {torneios.map((t) => renderCard(t))}
+    {torneios.length === 0 && (
+      <Animatable.View
+        style={styles.emptyContainer}
+        animation="fadeIn"
+        duration={600}
+      >
+        <Ionicons name="alert-circle" size={40} color="#aaa" />
+        <Text style={styles.emptyText}>Nenhum torneio encontrado neste mês.</Text>
+      </Animatable.View>
+    )}
+  </ScrollView>
+</Animatable.View>
 
       {/* MODAL CRIAR/EDITAR */}
       <Modal
@@ -1330,18 +1309,19 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
         animationType="slide"
         onRequestClose={() => setModalVisible(false)}
       >
-        <SafeAreaView style={[styles.modalContainer]}>
+        <SafeAreaView style={styles.modalContainer}>
           <KeyboardAvoidingView
             style={{ flex: 1 }}
             behavior={Platform.OS === "ios" ? "padding" : "height"}
           >
-            <ScrollView style={{ padding: 16 }}>
+            <ScrollView contentContainerStyle={styles.formScroll}>
               <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
                 <View>
                   <Text style={styles.modalTitle}>
                     {editId ? "Editar Torneio" : "Criar Torneio"}
                   </Text>
 
+                  {/* Nome */}
                   <Text style={styles.modalLabel}>Nome do Torneio</Text>
                   <TextInput
                     style={styles.modalInput}
@@ -1349,6 +1329,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     onChangeText={setEditName}
                   />
 
+                  {/* Data */}
                   <Text style={styles.modalLabel}>Data (DD/MM/AAAA)</Text>
                   <TextInput
                     style={styles.modalInput}
@@ -1360,6 +1341,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     placeholderTextColor="#777"
                   />
 
+                  {/* Horário */}
                   <Text style={styles.modalLabel}>Horário (HH:MM)</Text>
                   <TextInput
                     style={styles.modalInput}
@@ -1371,6 +1353,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     placeholderTextColor="#777"
                   />
 
+                  {/* Tipo de Evento */}
                   <Text style={styles.modalLabel}>Tipo de Evento</Text>
                   <TouchableOpacity
                     style={[styles.modalInput, styles.selectFakeInput]}
@@ -1379,6 +1362,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     <Text style={{ color: "#fff" }}>{editEventType}</Text>
                   </TouchableOpacity>
 
+                  {/* Juiz */}
                   <Text style={styles.modalLabel}>Juiz</Text>
                   <TouchableOpacity
                     style={[styles.modalInput, styles.selectFakeInput]}
@@ -1392,6 +1376,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     </Text>
                   </TouchableOpacity>
 
+                  {/* Head Judge */}
                   <Text style={styles.modalLabel}>Head Judge</Text>
                   <TouchableOpacity
                     style={[styles.modalInput, styles.selectFakeInput]}
@@ -1405,6 +1390,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     </Text>
                   </TouchableOpacity>
 
+                  {/* Máximo de Vagas */}
                   <Text style={styles.modalLabel}>Máximo de Vagas</Text>
                   <TextInput
                     style={styles.modalInput}
@@ -1413,6 +1399,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     onChangeText={(v) => setEditMaxVagas(Number(v) || null)}
                   />
 
+                  {/* Abertura e Fechamento */}
                   <Text style={styles.modalLabel}>Abertura Inscrições (HH:MM)</Text>
                   <TextInput
                     style={styles.modalInput}
@@ -1435,13 +1422,14 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     placeholderTextColor="#777"
                   />
 
-                <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
-                  <Text style={{ color: "#fff", marginRight: 10 }}>Prioridade VIP</Text>
-                  <Switch
-                    value={editPrioridadeVip}
-                    onValueChange={setEditPrioridadeVip}
-                  />
-                </View>
+                  {/* Switch VIP */}
+                  <View style={styles.vipRow}>
+                    <Text style={styles.modalLabelVIP}>Prioridade VIP</Text>
+                    <Switch
+                      value={editPrioridadeVip}
+                      onValueChange={setEditPrioridadeVip}
+                    />
+                  </View>
 
                   {editPrioridadeVip && (
                     <>
@@ -1469,19 +1457,21 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     </>
                   )}
 
-                <View style={{ flex: 1, justifyContent: "flex-end", paddingBottom: 20 }}>
-                  <View style={[styles.modalButtons, { marginTop: 20 }]}>
+                  <View style={{ height: 30 }} />
+                  {/* BOTÕES */}
+                  <View style={styles.modalButtons}>
                     <TouchableOpacity
-                      style={[styles.button, { backgroundColor: "#999" }]}
+                      style={[styles.button, { backgroundColor: "#999", marginRight: 20 }]}
                       onPress={() => setModalVisible(false)}
                     >
-                      <Text style={styles.buttonText}>Cancelar</Text>
+                      <Ionicons name="close-circle" size={16} color="#FFF" />
+                      <Text style={styles.buttonText}> Cancelar</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.button} onPress={handleSaveTorneio}>
-                      <Text style={styles.buttonText}>Salvar</Text>
+                      <Ionicons name="save" size={16} color="#FFF" />
+                      <Text style={styles.buttonText}> Salvar</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
                 </View>
               </TouchableWithoutFeedback>
             </ScrollView>
@@ -1489,13 +1479,13 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
         </SafeAreaView>
       </Modal>
 
-      {/* MODAL DETALHES (fullscreen) */}
+      {/* MODAL DETALHES */}
       <Modal
         visible={detalhesModalVisible}
         animationType="slide"
         onRequestClose={closeDetalhes}
       >
-        <SafeAreaView style={{ flex: 1, backgroundColor: "#1E1E1E" }}>
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: DARK }]}>
           <ScrollView contentContainerStyle={{ padding: 16 }}>
             {detalhesTorneio && (
               <>
@@ -1515,14 +1505,14 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
 
                 <Text style={styles.modalLabel}>Juiz:</Text>
                 <Text style={styles.modalInput}>
-                  {judgeMap[detalhesTorneio.judge] || `Jogador não cadastrado: ${detalhesTorneio.judge}`}
+                  {judgeMap[detalhesTorneio.judge] || `Jogador: ${detalhesTorneio.judge}`}
                   {detalhesTorneio.judgeAccepted ? " (Confirmado)" : " (Pendente)"}
                 </Text>
 
                 <Text style={styles.modalLabel}>Head Judge:</Text>
                 <Text style={styles.modalInput}>
                   {headJudgeMap[detalhesTorneio.headJudge] ||
-                    `Jogador não cadastrado: ${detalhesTorneio.headJudge}`}
+                    `Jogador: ${detalhesTorneio.headJudge}`}
                 </Text>
 
                 <Text style={styles.modalLabel}>Máx. Vagas:</Text>
@@ -1557,14 +1547,16 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                   style={[styles.button, { marginTop: 20 }]}
                   onPress={() => openInscricoesModal(detalhesTorneio)}
                 >
-                  <Text style={styles.buttonText}>Ver Inscrições</Text>
+                  <Ionicons name="people" size={16} color="#FFF" />
+                  <Text style={styles.buttonText}> Ver Inscrições</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
                   onPress={closeDetalhes}
                 >
-                  <Text style={styles.buttonText}>Fechar</Text>
+                  <Ionicons name="close" size={16} color="#FFF" />
+                  <Text style={styles.buttonText}> Fechar</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -1582,17 +1574,15 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
           <ScrollView style={{ padding: 16 }}>
             <Text style={styles.modalTitle}>Inscrições / Decks</Text>
             {inscricoes.length === 0 ? (
-              <Text style={{ color: "#ccc", marginVertical: 10 }}>
-                Nenhuma inscrição encontrada.
-              </Text>
+              <View style={styles.emptyContainer}>
+                <Ionicons name="people-outline" size={40} color="#999" />
+                <Text style={styles.emptyText}>Nenhuma inscrição encontrada.</Text>
+              </View>
             ) : (
               inscricoes.map((ins, idx) => (
                 <Animatable.View
                   key={`ins-${idx}`}
-                  style={[
-                    styles.inscricaoItem,
-                    { flexDirection: "row", justifyContent: "space-between" },
-                  ]}
+                  style={[styles.inscricaoItem, styles.rowSpace]}
                   animation="fadeInUp"
                   duration={600}
                 >
@@ -1607,7 +1597,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                     }}
                   >
                     <Text style={styles.inscricaoItemText}>
-                      Jogador: {playerNameMap[ins.userId] || `Jogador não cadastrado: ${ins.userId}`}
+                      Jogador: {playerNameMap[ins.userId] || `Jog: ${ins.userId}`}
                     </Text>
                     <Text style={styles.inscricaoItemText}>
                       Deck: {ins.deckId ? deckNameMap[ins.deckId] || `(Deck ${ins.deckId})` : "Sem deck"}
@@ -1620,16 +1610,10 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                   {isHost && (
                     <TouchableOpacity
                       onPress={() => handleExcluirInscricao(detalhesTorneio?.id || "", ins.userId)}
-                      style={{
-                        backgroundColor: "#fe5f55",
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: 4,
-                        alignSelf: "center",
-                        marginLeft: 10,
-                      }}
+                      style={styles.deleteButton}
                     >
-                      <Text style={{ color: "#fff", fontWeight: "bold" }}>Excluir</Text>
+                      <Ionicons name="trash" size={16} color="#FFF" />
+                      <Text style={styles.deleteButtonText}>Excluir</Text>
                     </TouchableOpacity>
                   )}
                 </Animatable.View>
@@ -1640,14 +1624,16 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
               style={[styles.button, { marginTop: 20 }]}
               onPress={closeInscricoesModal}
             >
-              <Text style={styles.buttonText}>Fechar</Text>
+              <Ionicons name="close" size={16} color="#FFF" />
+              <Text style={styles.buttonText}> Fechar</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.button, { marginTop: 10, backgroundColor: "#777" }]}
               onPress={() => setEsperaModalVisible(true)}
             >
-              <Text style={styles.buttonText}>Lista de Espera</Text>
+              <Ionicons name="list" size={16} color="#FFF" />
+              <Text style={styles.buttonText}> Lista de Espera</Text>
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
@@ -1663,9 +1649,10 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
           <ScrollView style={{ padding: 16 }}>
             <Text style={styles.modalTitle}>Lista de Espera</Text>
             {espera.length === 0 ? (
-              <Text style={{ color: "#ccc", marginVertical: 10 }}>
-                Nenhum jogador na lista de espera.
-              </Text>
+              <View style={styles.emptyContainer}>
+                <Ionicons name="time-outline" size={40} color="#999" />
+                <Text style={styles.emptyText}>Nenhum jogador na lista de espera.</Text>
+              </View>
             ) : (
               espera.map((e, idx) => (
                 <Animatable.View
@@ -1675,7 +1662,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                   duration={600}
                 >
                   <Text style={styles.inscricaoItemText}>
-                    Jogador: {playerNameMap[e.userId] || `Jogador não cadastrado: ${e.userId}`}
+                    Jogador: {playerNameMap[e.userId] || `Jog: ${e.userId}`}
                   </Text>
                   <Text style={styles.inscricaoItemText}>VIP: {e.vip ? "Sim" : "Não"}</Text>
                   <Text style={styles.inscricaoItemText}>
@@ -1688,7 +1675,8 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
               style={[styles.button, { marginTop: 20 }]}
               onPress={() => setEsperaModalVisible(false)}
             >
-              <Text style={styles.buttonText}>Fechar</Text>
+              <Ionicons name="close" size={16} color="#FFF" />
+              <Text style={styles.buttonText}> Fechar</Text>
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
@@ -1706,9 +1694,10 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
 
             {detalhesTorneio?.eventType !== "Liga Local" ? (
               userDecks.length === 0 ? (
-                <Text style={{ color: "#fff", marginBottom: 10 }}>
-                  Você não possui decks cadastrados.
-                </Text>
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="albums-outline" size={40} color="#999" />
+                  <Text style={styles.emptyText}>Você não possui decks cadastrados.</Text>
+                </View>
               ) : (
                 userDecks.map((dk) => (
                   <TouchableOpacity
@@ -1727,7 +1716,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
               )
             ) : (
               <Text style={{ color: "#ccc", marginBottom: 10 }}>
-                Este tipo de torneio (Liga Local) não exige deck.
+                Este tipo de torneio não exige deck.
               </Text>
             )}
 
@@ -1736,10 +1725,12 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
                 style={[styles.button, { backgroundColor: "#999" }]}
                 onPress={() => setInscricaoModalVisible(false)}
               >
-                <Text style={styles.buttonText}>Cancelar</Text>
+                <Ionicons name="close" size={16} color="#FFF" />
+                <Text style={styles.buttonText}> Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.button} onPress={handleSalvarInscricao}>
-                <Text style={styles.buttonText}>Salvar</Text>
+                <Ionicons name="checkmark" size={16} color="#FFF" />
+                <Text style={styles.buttonText}> Salvar</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -1806,18 +1797,20 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
             style={[styles.button, { margin: 16 }]}
             onPress={() => setDeckPdfModalVisible(false)}
           >
-            <Text style={styles.buttonText}>Fechar</Text>
+            <Ionicons name="close" size={16} color="#FFF" />
+            <Text style={styles.buttonText}> Fechar</Text>
           </TouchableOpacity>
         </SafeAreaView>
       </Modal>
 
+      {/* SELECT MODALS (Judge, HeadJudge, EventType) */}
       {renderJudgeSelectModal()}
       {renderHeadJudgeSelectModal()}
       {renderEventTypeSelectModal()}
     </SafeAreaView>
   );
+  // ================== FIM DO RETURN ==================
 
-  // =========================== SELEÇÃO DE JUÍZ, HEAD, EVENT TYPE ===========================
   function renderJudgeSelectModal() {
     return (
       <Modal
@@ -1831,7 +1824,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
           activeOpacity={1}
           onPressOut={() => setJudgeSelectModal(false)}
         >
-          <View style={[styles.selectModalInner]}>
+          <View style={styles.selectModalInner}>
             <ScrollView>
               <TouchableOpacity
                 style={styles.selectScrollItem}
@@ -1860,6 +1853,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
       </Modal>
     );
   }
+
   function renderHeadJudgeSelectModal() {
     return (
       <Modal
@@ -1873,7 +1867,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
           activeOpacity={1}
           onPressOut={() => setHeadJudgeSelectModal(false)}
         >
-          <View style={[styles.selectModalInner]}>
+          <View style={styles.selectModalInner}>
             <ScrollView>
               <TouchableOpacity
                 style={styles.selectScrollItem}
@@ -1902,6 +1896,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
       </Modal>
     );
   }
+
   function renderEventTypeSelectModal() {
     return (
       <Modal
@@ -1937,7 +1932,7 @@ onSnapshot(colRef, async (snap) => {  // 🔥 Agora a função é async!
   }
 }
 
-// ================ FUNÇÕES AUXILIARES ================
+// ============== HELPER ==============
 function formatIsoDate(isoStr: string) {
   if (!isoStr) return "";
   const m = moment(isoStr);
@@ -1945,93 +1940,145 @@ function formatIsoDate(isoStr: string) {
   return m.format("DD/MM/YYYY HH:mm");
 }
 
-// ================ ESTILOS ================
+// ============== ESTILOS ==============
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const SECONDARY = "#FFFFFF";
 const GRAY = "#333333";
 
 const styles = StyleSheet.create({
+  // Container principal da tela
   safe: {
     flex: 1,
     backgroundColor: DARK,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
+  // Cabeçalho do calendário
+  headerContainer: {
     backgroundColor: DARK,
     paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#444",
+  },
+  monthNavigation: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  navArrow: {
+    padding: 6,
   },
   headerTitle: {
     color: SECONDARY,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "bold",
     textTransform: "capitalize",
   },
+  // Botão para criar novo torneio
   createButton: {
-    backgroundColor: PRIMARY,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    paddingVertical: 10,
-    borderRadius: 8,
     flexDirection: "row",
+    backgroundColor: PRIMARY,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignSelf: "flex-end",
+    marginTop: 10,
     alignItems: "center",
-    justifyContent: "center",
   },
   createButtonText: {
     color: SECONDARY,
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 15,
   },
+  // Cartões de torneio
   card: {
     backgroundColor: GRAY,
     marginHorizontal: 16,
-    marginVertical: 6,
+    marginVertical: 8,
+    borderRadius: 10,
     padding: 12,
-    borderRadius: 8,
+    // Sombra para iOS e elevação para Android (cria profundidade)
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
   },
   cardTitle: {
     color: PRIMARY,
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "bold",
-    marginBottom: 2,
   },
   cardSub: {
     color: "#ccc",
     fontSize: 13,
     marginVertical: 2,
   },
+  cardActionsRow: {
+    flexDirection: "row",
+    marginTop: 6,
+    alignItems: "center",
+  },
+  // Estilo para distribuir itens com espaço entre eles
+  rowSpace: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  // Botões pequenos dentro dos cartões
   buttonSmall: {
     backgroundColor: "#555",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
     borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
   },
   buttonSmallText: {
     color: SECONDARY,
     fontWeight: "bold",
+    marginLeft: 4,
   },
-  inscreverButton: {
+  // Botão de ação principal dos cartões (ex: Inscrever/Detalhes)
+  cardActionButton: {
     flexDirection: "row",
     backgroundColor: "#4CAF50",
-    padding: 8,
     borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
     alignItems: "center",
   },
-  inscreverButtonText: {
+  cardActionButtonText: {
     color: SECONDARY,
     fontWeight: "bold",
     marginLeft: 4,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
-    justifyContent: "center",
+  // Container para mensagem de lista vazia
+  emptyContainer: {
+    alignItems: "center",
+    marginVertical: 16,
   },
+  emptyText: {
+    color: "#999",
+    marginTop: 8,
+    fontSize: 15,
+  },
+  // Container principal dos modais
   modalContainer: {
     flex: 1,
     backgroundColor: DARK,
   },
+  // Container de conteúdo dos formulários (ScrollView)
+  formScroll: {
+    paddingBottom: 100,
+    paddingHorizontal: 16,
+  },
+  // Título dos modais
   modalTitle: {
     color: SECONDARY,
     fontSize: 20,
@@ -2039,12 +2086,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginVertical: 16,
   },
+  // Rótulo dos campos de formulário
   modalLabel: {
     color: SECONDARY,
     fontSize: 14,
     marginTop: 12,
     fontWeight: "600",
   },
+  // Rótulo específico para campos VIP (com margem à direita)
+  modalLabelVIP: {
+    color: SECONDARY,
+    fontSize: 14,
+    fontWeight: "600",
+    marginRight: 12,
+  },
+  // Inputs dos modais
   modalInput: {
     backgroundColor: "#4A4A4A",
     color: SECONDARY,
@@ -2054,49 +2110,87 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginVertical: 6,
   },
+  // Estilo para inputs de seleção (ex: juiz, tipo de evento)
+  selectFakeInput: {
+    justifyContent: "center",
+  },
+  // Linha para o switch VIP
+  vipRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  // Container dos botões do modal (Salvar/Cancelar)
   modalButtons: {
     flexDirection: "row",
-    justifyContent: "space-around",
+    justifyContent: "flex-end",
+    marginTop: 10,
   },
+  // Botão padrão do modal
   button: {
+    flexDirection: "row",
     backgroundColor: PRIMARY,
+    borderRadius: 6,
     paddingVertical: 8,
     paddingHorizontal: 16,
-    borderRadius: 6,
+    alignItems: "center",
+    marginLeft: 8,
   },
   buttonText: {
     color: SECONDARY,
     fontWeight: "bold",
   },
-  inscricaoItem: {
-    backgroundColor: "#444",
-    borderRadius: 6,
-    padding: 10,
-    marginVertical: 6,
+  // Botão para exclusão (usado, por exemplo, em inscrições)
+  deleteButton: {
+    backgroundColor: "#fe5f55",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 4,
+    alignSelf: "center",
+    marginLeft: 10,
   },
-  inscricaoItemText: {
+  deleteButtonText: {
     color: "#fff",
-    fontSize: 14,
-  },
-  deckOption: {
-    backgroundColor: "#444",
-    borderRadius: 6,
-    padding: 10,
-    marginVertical: 6,
-  },
-  deckOptionText: {
-    color: SECONDARY,
     fontWeight: "bold",
   },
+  // Estilo para o ScrollView principal, se necessário
+  scrollView: {
+    flex: 1,
+  },
+  // Overlay para modais (para dar efeito de fundo semitransparente)
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  // Container interno dos modais de seleção (ex.: selecionar juiz, evento)
+  selectModalInner: {
+    backgroundColor: "#2B2B2B",
+    marginHorizontal: 30,
+    marginVertical: 100,
+    borderRadius: 8,
+    padding: 10,
+    flex: 1,
+  },
+  // Itens da lista de seleção
+  selectScrollItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#555",
+    paddingVertical: 10,
+  },
+  // Container para o conteúdo dos cartões (imagem + texto)
   cardContent: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
+  // Container para o texto do cartão
   cardText: {
     flex: 1,
     paddingRight: 10,
   },
+  // Container para a imagem do cartão
   cardImageContainer: {
     width: 50,
     height: 50,
@@ -2113,20 +2207,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "center",
   },
-  selectFakeInput: {
-    justifyContent: "center",
-  },
-  selectModalInner: {
-    backgroundColor: "#2B2B2B",
-    marginHorizontal: 30,
-    marginVertical: 100,
-    borderRadius: 8,
+  // Estilos para os itens de inscrição
+  inscricaoItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#444",
     padding: 10,
-    flex: 1,
+    marginVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#666",
   },
-  selectScrollItem: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#555",
-    paddingVertical: 10,
+  inscricaoItemText: {
+    color: "#fff",
+    fontSize: 14,
+  },
+
+  // Estilos para as opções de deck no modal de inscrição
+  deckOption: {
+    backgroundColor: "#555",
+    padding: 12,
+    borderRadius: 6,
+    marginVertical: 5,
+    alignItems: "center",
+  },
+  deckOptionText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
   },
 });
