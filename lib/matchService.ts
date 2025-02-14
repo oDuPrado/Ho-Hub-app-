@@ -1,6 +1,8 @@
-//////////////////////////////////////
+//////////////////////////////////////////
 // ARQUIVO: matchService.ts
-//////////////////////////////////////
+//////////////////////////////////////////
+// ==== INTERFACES ====
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   collection,
@@ -13,6 +15,7 @@ import {
 import { db } from "./firebaseConfig";
 
 // ==== INTERFACES ====
+// Dados das partidas
 export interface MatchData {
   id: string;
   outcomeNumber?: number; // 1 (P1 vence), 2 (P2 vence), 3 (empate), 10 (WO)
@@ -20,7 +23,7 @@ export interface MatchData {
   player2_id?: string;
 }
 
-// Dados agregados para stats
+// Dados agregados para estatísticas do jogador
 export interface PlayerStatsData {
   wins: number;
   losses: number;
@@ -43,21 +46,22 @@ export interface RivalData {
 }
 
 /** 
- * Novíssima interface de Clássicos
+ * Dados agregados de Clássicos, lidos do documento 
+ * /leagues/{leagueId}/players/{playerId}/stats/classics
  */
 export interface ClassicsData {
   opponents: {
     [oppId: string]: {
       matches: number;
-      wins: number;
-      losses: number;
+      wins: number;    // vitórias do jogador
+      losses: number;  // derrotas do jogador (equivalente a vitórias do oponente)
       draws: number;
-    }
+    };
   };
   updatedAt?: any;
 }
 
-/** Tipo de item de histórico */
+// Tipo de item de histórico de torneios
 export interface TournamentHistoryItem {
   tournamentId: string;
   tournamentName: string;
@@ -67,8 +71,8 @@ export interface TournamentHistoryItem {
   date: string; // ISO string
 }
 
-/** 
- * Lê /stats/classics de um jogador.
+/**
+ * Lê o documento /stats/classics de um jogador.
  * Se não existir, retorna null.
  */
 export async function fetchPlayerClassicsStats(
@@ -85,7 +89,6 @@ export async function fetchPlayerClassicsStats(
     return null;
   }
 }
-
 
 /** Lê stats/aggregated */
 export async function fetchPlayerStatsAggregated(
@@ -303,13 +306,12 @@ export async function fetchAllStatsByFilter(userId: string): Promise<PlayerStats
   }
 }
 
-
 /**
  * Calcula o maior rival do jogador com base no `/stats/classics`
  */
 export async function fetchRivalByFilter(userId: string): Promise<RivalData | null> {
   try {
-    // 🔥 1️⃣ Busca os filtros armazenados
+    // 1️⃣ Busca os filtros armazenados
     const filterType = await AsyncStorage.getItem("@filterType");
     const cityStored = await AsyncStorage.getItem("@selectedCity");
     const leagueStored = await AsyncStorage.getItem("@leagueId");
@@ -317,20 +319,17 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
     let leaguesToFetch: string[] = [];
 
     if (!filterType || filterType === "all") {
-      // 🔥 Busca todas as ligas do Firebase
       const leaguesSnap = await getDocs(collection(db, "leagues"));
       leaguesSnap.forEach((docSnap) => {
         leaguesToFetch.push(docSnap.id);
       });
     } else if (filterType === "city" && cityStored) {
-      // 🔥 Busca ligas de uma cidade específica
       const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
       const citySnapshot = await getDocs(qCity);
       citySnapshot.forEach((docSnap) => {
         leaguesToFetch.push(docSnap.id);
       });
     } else if (filterType === "league" && leagueStored) {
-      // 🔥 Usa apenas a liga selecionada
       leaguesToFetch.push(leagueStored);
     } else {
       console.warn("⚠️ Nenhuma liga válida encontrada para calcular o rival.");
@@ -355,7 +354,7 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
 
     let updatedAt = null;
 
-    // 🔄 2️⃣ Percorre todas as ligas e busca os dados de classics
+    // 2️⃣ Percorre todas as ligas e busca os dados de classics
     for (const lid of leaguesToFetch) {
       const classicsData = await fetchPlayerClassicsStats(lid, userId);
       if (!classicsData || !classicsData.opponents) continue;
@@ -372,9 +371,9 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
         const lastWinner = userWins > rivalWins ? "user" : rivalWins > userWins ? "rival" : "empate";
 
         const winDiff = Math.abs(userWins - rivalWins);
-        const balanceFactor = 1 / (1 + winDiff); // Se for 0 (empate), isso vale 1
+        const balanceFactor = 1 / (1 + winDiff); // Se diferença for 0, valor 1
 
-        // 🔥 Fórmula de rivalidade:
+        // Fórmula de rivalidade:
         const score = totalMatches * balanceFactor + (lastWinner === "rival" ? 0.5 : 0);
 
         if (score > topScore) {
@@ -397,7 +396,7 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
       return null;
     }
 
-    // 🔥 3️⃣ Buscar o nome do rival no Firebase
+    // 3️⃣ Buscar o nome do rival no Firebase
     const rivalRef = doc(db, `leagues/${leaguesToFetch[0]}/players/${topRivalId}`);
     const rivalSnap = await getDoc(rivalRef);
     const rivalName = rivalSnap.exists() ? rivalSnap.data()?.fullname || `User ${topRivalId}` : `User ${topRivalId}`;
@@ -408,7 +407,7 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
       matches: finalStats.matches,
       userWins: finalStats.userWins,
       rivalWins: finalStats.rivalWins,
-      lastWinner: finalStats.lastWinner as "user" | "rival" | "empate", // 👈 Forçando o tipo correto
+      lastWinner: finalStats.lastWinner as "user" | "rival" | "empate",
       wrPercentage: finalStats.wrPercentage,
       updatedAt,
     };    
@@ -441,6 +440,43 @@ export async function fetchPlayerHistory(
     return data.latestTournaments as TournamentHistoryItem[];
   } catch (err) {
     console.error("Erro ao buscar histórico:", err);
+    return [];
+  }
+}
+
+/**
+ * NOVA FUNÇÃO:
+ * Usa os dados agregados em /stats/classics para montar as estatísticas de confronto
+ * entre dois jogadores e determinar quais clássicos estão ativos.
+ */
+import { getActiveClassicosForDuo, PlayerVsPlayerStats } from "../app/classicosConfig";
+
+export async function fetchActiveClassicosForDuo(
+  leagueId: string,
+  playerA: string,
+  playerB: string
+): Promise<ReturnType<typeof getActiveClassicosForDuo>> {
+  try {
+    // 1) Ler os dados agregados de /stats/classics do Player A
+    const classicsData = await fetchPlayerClassicsStats(leagueId, playerA);
+    if (!classicsData || !classicsData.opponents[playerB]) {
+      return [];
+    }
+    const statsData = classicsData.opponents[playerB];
+    // Monta o objeto PlayerVsPlayerStats:
+    const stats: PlayerVsPlayerStats = {
+      playerA,
+      playerB,
+      matches: statsData.matches,
+      winsA: statsData.wins,
+      winsB: statsData.losses, // perdas de A são vitórias de B
+      draws: statsData.draws,
+    };
+
+    // 2) Retorna os clássicos ativos com base nas condições definidas
+    return getActiveClassicosForDuo(stats);
+  } catch (error) {
+    console.error("Erro ao calcular Clássicos entre os jogadores:", error);
     return [];
   }
 }

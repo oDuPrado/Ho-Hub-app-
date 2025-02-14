@@ -2,184 +2,239 @@
 // ARQUIVO: classicosConfig.ts
 ////////////////////////////////////////
 
-import { MatchData } from "../lib/matchService";
-
-/** Estatísticas de um confronto entre DOIS jogadores. */
+/**
+ * Estatísticas de um confronto entre dois jogadores,
+ * derivadas de /stats/classics do Firestore.
+ */
 export interface PlayerVsPlayerStats {
   playerA: string;
   playerB: string;
-  matches: number;
-  winsA: number;
-  winsB: number;
-  draws: number;
+  matches: number; // total de partidas
+  winsA: number;   // vitórias do playerA
+  winsB: number;   // vitórias do playerB
+  draws: number;   // empates
 }
 
-/** Estrutura de cada clássico */
+/** Níveis de “tier” para um clássico */
+export type ClassicoTier = "Épico" | "Lendário" | "Arceus";
+
+/** Estrutura de cada item de Clássico */
 export interface ClassicoItem {
   id: number;
   title: string;
   description: string;
-  tier: "Épico" | "Lendário" | "Arceus";
+  tier: ClassicoTier;
   condition: (stats: PlayerVsPlayerStats) => boolean;
 }
 
-/** Lista de clássicos existentes e novos clássicos adicionados */
+/**
+ * Retorna a diferença absoluta de vitórias
+ * entre Player A e Player B.
+ */
+function getWinDifference(stats: PlayerVsPlayerStats): number {
+  return Math.abs(stats.winsA - stats.winsB);
+}
+
+/**
+ * Retorna o winRate do Player A e do Player B.
+ */
+function getWinRates(stats: PlayerVsPlayerStats) {
+  const wrA = stats.matches > 0 ? stats.winsA / stats.matches : 0;
+  const wrB = stats.matches > 0 ? stats.winsB / stats.matches : 0;
+  return { wrA, wrB };
+}
+
+/**
+ * Lista principal dos Clássicos
+ * Mantivemos os 12 antigos (IDs existentes) + 6 novos (2 de cada tier)
+ * A ideia é deixar as condições mais “acirradas” e competitivas.
+ */
 const classicosList: ClassicoItem[] = [
+  // ============================
+  // 12 CLÁSSICOS ANTIGOS (IDs Iguais, Títulos Iguais), com condições mais “intensas”
+  // ============================
+
   {
     id: 101,
     title: "Duelo de Titãs",
-    description: "Duas forças que duelam sem parar, ja tiveram mais de 250 embates!!",
+    description: "Duas forças que duelam sem parar, já tiveram mais de 300 embates!",
     tier: "Épico",
-    condition: (stats) => stats.matches >= 250,
+    condition: (stats) => stats.matches >= 300,
   },
   {
     id: 202,
     title: "Voltando pra EX",
-    description: "Jogadores que tem confrontos demais mas continuam se vendo nos torneios! ",
+    description: "Jogadores que já se enfrentaram bastante, mas mantêm um confronto equilibrado.",
     tier: "Lendário",
-    condition: (stats) =>
-      stats.matches >= 10 && Math.abs(stats.winsA - stats.winsB) <= 2,
+    condition: (stats) => {
+      const difference = getWinDifference(stats);
+      return stats.matches >= 20 && difference <= 3;
+    },
   },
   {
     id: 303,
     title: "Rivalidade nascente",
-    description: "Um embate que esta nascendo, ja se enfretaram 100 vezes!!",
+    description: "Um embate que está ficando sério, já se enfrentaram 150 vezes!",
     tier: "Arceus",
-    condition: (stats) => stats.matches >= 100,
+    condition: (stats) => stats.matches >= 150,
   },
   {
     id: 404,
     title: "Do lixo, ao Luxo",
-    description:
-      "Depois de muitas derrotas, um dos jogadores deu a volta por cima com vitórias 2 consecutivas!",
+    description: "Depois de um começo conturbado, um dos jogadores dobrou as vitórias do outro!",
     tier: "Épico",
     condition: (stats) =>
-      stats.matches >= 8 &&
+      stats.matches >= 15 &&
       (stats.winsA >= stats.winsB * 2 || stats.winsB >= stats.winsA * 2),
   },
   {
     id: 505,
     title: "Duelo dos Melhores",
-    description:
-      "os melhores jogadores, se enfretando varias vezes, buscando o titulo de melhor da liga!.",
+    description: "Grandes batalhas, mais de 200 partidas e vários empates intensos!",
     tier: "Lendário",
-    condition: (stats) => stats.matches >= 150 && stats.draws >= 50,
+    condition: (stats) => stats.matches >= 200 && stats.draws >= 70,
   },
-  // ----- Novos Clássicos Adicionados -----
   {
     id: 606,
     title: "Buscando o topo!!",
-    description:
-      "Uma rivalidade onde ambos jogadores alcançaram, pelo menos, 10 vice-campeonatos em seus confrontos.",
-    tier: "Lendário",
-    condition: (stats) =>
-      stats.matches >= 10 && Math.min(stats.winsA, stats.winsB) >= 10,
+    description: "Uma rivalidade onde ambos já atingiram pelo menos 15 vitórias!",
+    tier: "Arceus",
+    condition: (stats) => {
+      const minWins = Math.min(stats.winsA, stats.winsB);
+      return stats.matches >= 30 && minWins >= 15;
+    },
   },
   {
     id: 707,
     title: "Rivais",
-    description:
-      "Uma rivalidade histórica com mais de 100 confrontos intensos entre os adversários.",
+    description: "Uma rivalidade histórica com mais de 150 confrontos intensos.",
     tier: "Arceus",
-    condition: (stats) => stats.matches > 100,
+    condition: (stats) => stats.matches > 150,
   },
   {
     id: 808,
     title: "Eternos Rivais",
-    description:
-      "Confrontos épicos com mais de 100 partidas e uma disputa equilibrada, com diferença de vitórias inferior a 5.",
+    description: "Se enfrentaram mais de 150 vezes, com diferença de vitórias menor que 8.",
     tier: "Arceus",
-    condition: (stats) =>
-      stats.matches > 100 && Math.abs(stats.winsA - stats.winsB) < 5,
+    condition: (stats) => {
+      const difference = getWinDifference(stats);
+      return stats.matches > 150 && difference < 8;
+    },
   },
   {
     id: 909,
     title: "Ash vs Paul",
-    description:
-      "Uma batalha lendária: mais de 30 confrontos com uma diferença de pelo menos 5 vitórias a favor de um dos lados.",
+    description: "Uma batalha lendária: mais de 60 confrontos e diferença de 10 vitórias pro lado dominante.",
     tier: "Épico",
-    condition: (stats) => stats.matches > 30 && Math.abs(stats.winsA - stats.winsB) >= 5,
+    condition: (stats) => {
+      const difference = getWinDifference(stats);
+      return stats.matches > 60 && difference >= 10;
+    },
   },
   {
     id: 1010,
     title: "Protagonista do Anime",
-    description:
-      "Um duelo digno do protagonista: um dos jogadores conquistou mais de 20 vitórias sobre seu adversário.",
+    description: "Um dos lados alcançou mais de 30 vitórias totais no confronto.",
     tier: "Lendário",
-    condition: (stats) => stats.winsA > 20 || stats.winsB > 20,
+    condition: (stats) => stats.winsA > 30 || stats.winsB > 30,
   },
   {
     id: 1111,
     title: "Contra Sayjins, Você é uma Mosca",
-    description:
-      "Um confronto esmagador: mais de 50 partidas com um win rate de 90% para um dos lados.",
+    description: "Mais de 80 partidas, e um dos lados tem 90% de win rate!",
     tier: "Arceus",
-    condition: (stats) =>
-      stats.matches > 50 &&
-      ((stats.winsA / stats.matches >= 0.9) || (stats.winsB / stats.matches >= 0.9)),
+    condition: (stats) => {
+      const { wrA, wrB } = getWinRates(stats);
+      return stats.matches > 80 && (wrA >= 0.9 || wrB >= 0.9);
+    },
   },
   {
     id: 1212,
     title: "Evolução Conjunta",
-    description:
-      "Se um evolui, o outro evolui junto: mais de 10 confrontos com uma diferença de vitórias é inferior a 2.",
+    description: "Ambos evoluíram quase juntos: +20 partidas e a diferença de vitórias é menor que 3.",
     tier: "Épico",
-    condition: (stats) => stats.matches > 10 && Math.abs(stats.winsA - stats.winsB) < 2,
+    condition: (stats) => {
+      const difference = getWinDifference(stats);
+      return stats.matches > 20 && difference < 3;
+    },
+  },
+
+  // ============================
+  // 6 NOVOS CLÁSSICOS (2 por tier)
+  // ============================
+
+  // (Épico) - 2 novos
+  {
+    id: 1313,
+    title: "Batalha Explosiva",
+    description: "Mais de 80 partidas, mas raros empates. É fogo contra fogo!",
+    tier: "Épico",
+    condition: (stats) => stats.matches >= 80 && stats.draws <= 5,
+  },
+  {
+    id: 1414,
+    title: "Heróis Anônimos",
+    description: "50 partidas ou mais, e praticamente nenhuma diferença de vitórias!",
+    tier: "Épico",
+    condition: (stats) => {
+      const difference = getWinDifference(stats);
+      return stats.matches >= 50 && difference < 2;
+    },
+  },
+
+  // (Lendário) - 2 novos
+  {
+    id: 1515,
+    title: "Confronto do Destino",
+    description: "Duas lendas em convergência: 200 partidas e diferença de vitórias menor ou igual a 2.",
+    tier: "Lendário",
+    condition: (stats) => {
+      const difference = getWinDifference(stats);
+      return stats.matches >= 200 && difference <= 2;
+    },
+  },
+  {
+    id: 1616,
+    title: "Lendas se Encontram",
+    description: "Quando um lado já acumula 150 vitórias, definitivamente é lendário.",
+    tier: "Lendário",
+    condition: (stats) => {
+      const maxWins = Math.max(stats.winsA, stats.winsB);
+      return stats.matches >= 250 && maxWins >= 150;
+    },
+  },
+
+  // (Arceus) - 2 novos
+  {
+    id: 1717,
+    title: "Choque de Dimensões",
+    description: "500 partidas ou mais, mas a diferença de vitórias ainda é menor que 10!",
+    tier: "Arceus",
+    condition: (stats) => {
+      const difference = getWinDifference(stats);
+      return stats.matches >= 500 && difference < 10;
+    },
+  },
+  {
+    id: 1818,
+    title: "Deuses da Arena",
+    description: "Mais de 400 partidas, com um lado acima de 80% e o outro acima de 50%. Poderes divinos!",
+    tier: "Arceus",
+    condition: (stats) => {
+      const { wrA, wrB } = getWinRates(stats);
+      return (
+        stats.matches >= 400 &&
+        ((wrA >= 0.8 && wrB >= 0.5) || (wrB >= 0.8 && wrA >= 0.5))
+      );
+    },
   },
 ];
 
 /**
- * Calcula estatísticas para um confronto específico entre dois jogadores:
- * contabiliza partidas, vitórias de cada lado e empates.
+ * Verifica quais clássicos estão ativos para um determinado
+ * confronto (já computado) entre dois jogadores.
  */
-export function computePlayerVsPlayerStats(
-  allMatches: MatchData[],
-  playerA: string,
-  playerB: string
-): PlayerVsPlayerStats {
-  let matches = 0;
-  let winsA = 0;
-  let winsB = 0;
-  let draws = 0;
-
-  for (const match of allMatches) {
-    if (
-      (match.player1_id === playerA && match.player2_id === playerB) ||
-      (match.player2_id === playerA && match.player1_id === playerB)
-    ) {
-      matches++;
-      const isAplayer1 = match.player1_id === playerA;
-      const outcome = match.outcomeNumber || 0;
-      if (outcome === 1) {
-        isAplayer1 ? winsA++ : winsB++;
-      } else if (outcome === 2) {
-        isAplayer1 ? winsB++ : winsA++;
-      } else if (outcome === 3) {
-        draws++;
-      } else if (outcome === 10) {
-        // WO: quem faltou perdeu
-        isAplayer1 ? winsB++ : winsA++;
-      }
-    }
-  }
-
-  return {
-    playerA,
-    playerB,
-    matches,
-    winsA,
-    winsB,
-    draws,
-  };
-}
-
-/**
- * Retorna quais clássicos estão ativos para um confronto entre dois jogadores,
- * com base nas estatísticas calculadas.
- */
-export function getActiveClassicosForDuo(
-  stats: PlayerVsPlayerStats
-): ClassicoItem[] {
+export function getActiveClassicosForDuo(stats: PlayerVsPlayerStats): ClassicoItem[] {
   return classicosList.filter((classico) => classico.condition(stats));
 }
 
