@@ -645,7 +645,7 @@ export default function PlayerScreen() {
 
       {/* Header (Barra de Pesquisa) */}
       <View style={styles.header}>
-        {searchIconVisible && (
+      {searchIconVisible && false && ( // Adicionei "false" para desativar a exibição do ícone
           <TouchableOpacity style={{ marginRight: 12 }} onPress={handleToggleSearch}>
             <Ionicons name="search" size={24} color="#fff" />
           </TouchableOpacity>
