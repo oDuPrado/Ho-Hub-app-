@@ -5,9 +5,9 @@ import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/fi
 import { db } from "../lib/firebaseConfig";
 
 // ====== Listas estáticas ======
-export const HOST_PLAYER_IDS = ["4729671"];
-export const JUDGE_PLAYER_IDS = ["4729671","4893989"];
-export const HEAD_JUDGE_PLAYER_IDS = ["4729671"];
+export const HOST_PLAYER_IDS = ["4729671","2289116"];
+export const JUDGE_PLAYER_IDS = ["4729671","4893989","2289116","1249618"];
+export const HEAD_JUDGE_PLAYER_IDS = ["4729671","2289116","1249618"];
 export const BAN_PLAYER_IDS = ["5011891", "4567890"];
 export const vipPlayers = ["4729671"];
 export const Authuser = ["4893989","4729671"];

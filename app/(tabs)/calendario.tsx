@@ -1015,57 +1015,6 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
     console.log("Erro ao excluir notificação do juiz:", err);
   }
 }
-
-// ================= LIMPAR NOTIFICAÇÕES ANTIGAS OTIMIZADO =================
-async function cleanOldNotifications() {
-  try {
-    const today = moment().format("DD/MM/YYYY");
-    
-    // Verifica se já fez limpeza hoje
-    const lastCleanup = await AsyncStorage.getItem("@lastCleanup");
-    if (lastCleanup === today) {
-      console.log("✅ Limpeza já foi feita hoje, ignorando...");
-      return;
-    }
-
-    console.log("🧹 Limpando notificações de torneios passados...");
-
-    // Atualiza a última limpeza
-    await AsyncStorage.setItem("@lastCleanup", today);
-
-    // Filtra apenas os jogadores que têm notificações de torneios antigos
-    const playersSnap = await getDocs(collection(db, "players"));
-    for (const playerDoc of playersSnap.docs) {
-      const playerId = playerDoc.id;
-
-      // Busca notificações apenas de torneios antigos
-      const notifQuery = query(
-        collection(db, "players", playerId, "notifications"),
-        where("date", "<", today) // Filtra torneios passados
-      );
-
-      const notifSnap = await getDocs(notifQuery);
-      
-      // Remove notificações antigas
-      const deletePromises = notifSnap.docs.map((notifDoc) => 
-        deleteDoc(doc(db, "players", playerId, "notifications", notifDoc.id))
-      );
-
-      await Promise.all(deletePromises);
-      console.log(`🗑️ Notificações antigas removidas para ${playerId}`);
-    }
-
-    console.log("✅ Limpeza de notificações concluída.");
-  } catch (err) {
-    console.log("Erro ao limpar notificações antigas:", err);
-  }
-}
-
-// ============== CHAMA A LIMPEZA AUTOMÁTICA ==============
-useEffect(() => {
-  cleanOldNotifications(); // Executa apenas uma vez ao iniciar o app
-}, []);
-
   // =================== DECKS (PDF) ===================
   async function loadDeckCards(inscritoId: string, deckId: string) {
     try {
