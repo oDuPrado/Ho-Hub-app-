@@ -119,6 +119,8 @@ export default function CalendarScreen() {
   const [editJudge, setEditJudge] = useState("");
   const [editHeadJudge, setEditHeadJudge] = useState("");
   const [editEventType, setEditEventType] = useState("Cup");
+  const [editInscricoesDataInicio, setEditInscricoesDataInicio] = useState("");
+  const [editInscricoesDataFim, setEditInscricoesDataFim] = useState("");
 
   // Modal de seleção
   const [judgeSelectModal, setJudgeSelectModal] = useState(false);
@@ -135,8 +137,7 @@ export default function CalendarScreen() {
   const [editPrioridadeVip, setEditPrioridadeVip] = useState<boolean>(false);
   const [editInscricoesVipAbertura, setEditInscricoesVipAbertura] = useState<string>("");
   const [editInscricoesVipFechamento, setEditInscricoesVipFechamento] = useState<string>("");
-  const [editInscricoesDataInicio, setEditInscricoesDataInicio] = useState("");
-  const [editInscricoesDataFim, setEditInscricoesDataFim] = useState("");
+ 
 
 
   // Modal DETALHES
@@ -319,8 +320,11 @@ export default function CalendarScreen() {
               prioridadeVip: d.prioridadeVip || false,
               inscricoesVipAbertura: d.inscricoesVipAbertura || "",
               inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+              // **Adiciona aqui os novos campos:**
+              inscricoesDataInicio: d.inscricoesDataInicio || "",
+              inscricoesDataFim: d.inscricoesDataFim || "",
             });
-          });
+          });          
 
           const start = currentMonth.clone().startOf("month");
           const end = currentMonth.clone().endOf("month");
@@ -590,7 +594,6 @@ export default function CalendarScreen() {
           inscricoesVipFechamento: editInscricoesVipFechamento,
           timestamp: serverTimestamp(),
         });
-        console.log("Torneio criado:", docRef.id);
       }
 
       setModalVisible(false);
@@ -626,76 +629,92 @@ export default function CalendarScreen() {
   }
 
   // ==================== INSCRIÇÕES ====================
-async function handleInscrever(t: Torneio) {
-  const agora = moment();
-  if (!leagueStored) {
-    Alert.alert("Erro", "Liga não selecionada.");
-    return;
-  }
-
-  // Verificação de data das inscrições antes do horário
-  const dataInicio = t.inscricoesDataInicio ? moment(t.inscricoesDataInicio, "DD/MM/YYYY") : null;
-  const dataFim = t.inscricoesDataFim ? moment(t.inscricoesDataFim, "DD/MM/YYYY") : null;
-
-  if (dataInicio && agora.isBefore(dataInicio)) {
-    Alert.alert("Inscrições Ainda Não Abertas", `As inscrições começam em ${t.inscricoesDataInicio}.`);
-    return;
-  }
-  if (dataFim && agora.isAfter(dataFim)) {
-    Alert.alert("Inscrições Encerradas", "O período de inscrições já passou.");
-    return;
-  }
-
-  // Verificação de horários VIP
-  if (t.prioridadeVip && isVip(playerId)) {
-    if (t.inscricoesVipAbertura && agora.isBefore(moment(t.inscricoesVipAbertura, "HH:mm"))) {
-      Alert.alert("Inscrições VIP Não Abertas", `Abrem às ${t.inscricoesVipAbertura}.`);
+  async function handleInscrever(t: Torneio) {
+    
+  
+    const agora = moment(); // Data e hora atuais
+  
+  
+    if (!leagueStored) {
+      Alert.alert("Erro", "Liga não selecionada.");
       return;
     }
-    if (t.inscricoesVipFechamento && agora.isAfter(moment(t.inscricoesVipFechamento, "HH:mm"))) {
-      Alert.alert("Inscrições VIP Encerradas", "As inscrições VIP foram encerradas.");
+  
+    // Verificar se o torneio tem datas de inscrição definidas e formatar corretamente
+    const dataInicio = t.inscricoesDataInicio
+      ? moment(`${t.inscricoesDataInicio} ${t.inscricoesAbertura}`, "DD/MM/YYYY HH:mm")
+      : null;
+    const dataFim = t.inscricoesDataFim
+      ? moment(`${t.inscricoesDataFim} ${t.inscricoesFechamento}`, "DD/MM/YYYY HH:mm")
+      : null;
+  
+  
+    // Validar intervalo da data de inscrição (data + horário)
+    if (dataInicio && agora.isBefore(dataInicio)) {
+      Alert.alert(
+        "Inscrições Ainda Não Abertas",
+        `As inscrições começam em ${t.inscricoesDataInicio} às ${t.inscricoesAbertura}.`
+      );
       return;
     }
-  } else {
-    // Validar horário dentro da data válida
-    if (t.inscricoesAbertura && agora.isBefore(moment(t.inscricoesAbertura, "HH:mm"))) {
-      Alert.alert("Inscrições Não Abertas", `Abrem às ${t.inscricoesAbertura}.`);
+    if (dataFim && agora.isAfter(dataFim)) {
+      Alert.alert(
+        "Inscrições Encerradas",
+        `O período de inscrições terminou em ${t.inscricoesDataFim} às ${t.inscricoesFechamento}.`
+      );
       return;
     }
-    if (t.inscricoesFechamento && agora.isAfter(moment(t.inscricoesFechamento, "HH:mm"))) {
-      Alert.alert("Inscrições Encerradas", "Não é mais possível se inscrever.");
-      return;
+  
+    // Verificação de horários VIP (caso aplicável)
+    if (t.prioridadeVip && isVip(playerId)) {
+      const vipInicio = t.inscricoesVipAbertura
+        ? moment(`${t.inscricoesDataInicio} ${t.inscricoesVipAbertura}`, "DD/MM/YYYY HH:mm")
+        : null;
+      const vipFim = t.inscricoesVipFechamento
+        ? moment(`${t.inscricoesDataFim} ${t.inscricoesVipFechamento}`, "DD/MM/YYYY HH:mm")
+        : null;
+  
+      console.log("VIP Início:", vipInicio?.format("DD/MM/YYYY HH:mm"));
+      console.log("VIP Fim:", vipFim?.format("DD/MM/YYYY HH:mm"));
+  
+      if (vipInicio && agora.isBefore(vipInicio)) {
+        Alert.alert(
+          "Inscrições VIP Não Abertas",
+          `As inscrições VIP começam em ${t.inscricoesVipAbertura}.`
+        );
+        return;
+      }
+      if (vipFim && agora.isAfter(vipFim)) {
+        Alert.alert(
+          "Inscrições VIP Encerradas",
+          "As inscrições VIP foram encerradas."
+        );
+        return;
+      }
     }
-  }
-
-    // Verificar se já inscrito
+  
+    // Verificar se já está inscrito
     const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
     const snap = await getDoc(doc(colRef, playerId));
     if (snap.exists()) {
-      Alert.alert("Aviso", "Você já se inscreveu neste torneio.");
+      Alert.alert("Aviso", "Você já está inscrito neste torneio.");
       return;
     }
-
+  
     // Verificar limite de vagas
     const allDocs = await getDocs(colRef);
-    const totalInscricoes: Inscricao[] = [];
-    allDocs.forEach((ds) => {
-      totalInscricoes.push({
-        userId: ds.id,
-        deckId: ds.data().deckId,
-        createdAt: ds.data().createdAt || "",
-      });
-    });
-
-    if (t.maxVagas && totalInscricoes.length >= t.maxVagas) {
+    const totalInscricoes = allDocs.docs.length;
+  
+    if (t.maxVagas && totalInscricoes >= t.maxVagas) {
       handleWaitlist(t, isVip(playerId));
       return;
     }
-
+  
     setDetalhesTorneio(t);
     setInscricaoTorneioId(t.id);
     setSelectedDeckId("");
-
+  
+    // Buscar decks do jogador
     const decksRef = collection(db, `players/${playerId}/decks`);
     onSnapshot(decksRef, (resp) => {
       const arr: DeckData[] = [];
@@ -708,8 +727,9 @@ async function handleInscrever(t: Torneio) {
       });
       setUserDecks(arr);
     });
+  
     setInscricaoModalVisible(true);
-  }
+  }  
 
   async function handleWaitlist(t: Torneio, vip: boolean) {
     Alert.alert("Lista de Espera", "Torneio lotado. Adicionado à lista de espera.");
