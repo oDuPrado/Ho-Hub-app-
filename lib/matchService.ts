@@ -30,6 +30,7 @@ export interface PlayerStatsData {
   draws: number;
   matchesTotal: number;
   opponentsList: string[];
+  tournamentPlacements: TournamentHistoryItem[]; // 🔥 Adicionado aqui
   updatedAt?: any;
 }
 
@@ -249,6 +250,7 @@ export async function fetchAllStatsByFilter(userId: string): Promise<PlayerStats
     draws: 0,
     matchesTotal: 0,
     opponentsList: [],
+    tournamentPlacements: [], // ✅ Adicionando torneios aqui!
   };
 
   try {
@@ -291,14 +293,16 @@ export async function fetchAllStatsByFilter(userId: string): Promise<PlayerStats
         finalStats.draws += aggregated.draws;
         finalStats.matchesTotal += aggregated.matchesTotal;
 
-        const union = new Set([
-          ...finalStats.opponentsList,
-          ...aggregated.opponentsList,
-        ]);
+        const union = new Set([...finalStats.opponentsList, ...aggregated.opponentsList]);
         finalStats.opponentsList = Array.from(union);
       }
-    }
 
+      // 🔥 Buscar histórico de torneios para tournamentPlacements
+      const history = await fetchPlayerHistory(lid, userId);
+      if (history.length > 0) {
+        finalStats.tournamentPlacements.push(...history);
+      }
+    }
     return finalStats;
   } catch (error) {
     console.error("Erro em fetchAllStatsByFilter:", error);
@@ -430,14 +434,35 @@ export async function fetchPlayerHistory(
   try {
     const docRef = doc(db, `leagues/${leagueId}/players/${playerId}/stats`, "history");
     const snap = await getDoc(docRef);
+
     if (!snap.exists()) {
+      console.warn(`Histórico não encontrado para ${playerId} na liga ${leagueId}`);
       return [];
     }
+
     const data = snap.data();
+
     if (!data || !data.latestTournaments) {
+      console.warn("⚠️ Campo 'latestTournaments' não encontrado no histórico.");
       return [];
     }
-    return data.latestTournaments as TournamentHistoryItem[];
+
+    if (!Array.isArray(data.latestTournaments)) {
+      console.error("❌ 'latestTournaments' não é um array!", data.latestTournaments);
+      return [];
+    }
+
+    // 🔥 Certifica que 'place' é extraído corretamente
+    const tournaments = data.latestTournaments.map((t: any) => ({
+      tournamentId: t.tournamentId || "Desconhecido",
+      tournamentName: t.tournamentName || "Torneio Sem Nome",
+      place: t.place ?? -1, // 🔥 Pegando corretamente a colocação
+      totalPlayers: t.totalPlayers ?? 0,
+      roundCount: t.roundCount ?? 0,
+      date: t.date || new Date().toISOString(),
+    }));
+
+    return tournaments;
   } catch (err) {
     console.error("Erro ao buscar histórico:", err);
     return [];

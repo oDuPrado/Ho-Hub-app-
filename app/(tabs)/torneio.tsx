@@ -1,4 +1,6 @@
-// TorneioScreen.tsx
+////////////////////////////////////////
+// ARQUIVO: TorneioScreen.tsx
+////////////////////////////////////////
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View,
@@ -12,38 +14,28 @@ import {
   Platform,
   Modal,
   TextInput,
+  Animated,
+  Easing,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
 import * as Notifications from "expo-notifications";
-import { useTranslation } from "react-i18next";
+import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-
-import {
-  Appbar,
-  Card,
-  Button,
-  ActivityIndicator as PaperActivityIndicator,
-} from "react-native-paper";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
+import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { Button, ActivityIndicator as PaperActivityIndicator } from "react-native-paper";
 
-// Busca hosts + fallback
 import { fetchRoleMembers, HOST_PLAYER_IDS } from "../hosts";
-
-// Modais
 import JudgeScreen from "../../components/TorneioReportsScreen";
 import VoteScreen from "../../components/TorneioVoteScreen";
 
 // =========== [INÍCIO] ADMIN ===========
-// Lista de usuários que podem ver o botão de admin
 const AUTH_USERS = ["4893989", "4729671"];
-
-// IP/URL do servidor Flask no Raspberry (via Tailscale)
-const RASPBERRY_API = "http://100.80.36.66:5000"; // Ajuste para seu IP Tailscale real
+const RASPBERRY_API = "http://100.80.36.66:5000"; // Ajuste para seu IP Tailscale
 // =========== [FIM] ADMIN ==============
 
-// Configurações de Notificações
+// Notificações
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -52,53 +44,56 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Temas e Cores
 const RED = "#E3350D";
 const BLACK = "#1E1E1E";
 const DARK_GRAY = "#292929";
 const WHITE = "#FFFFFF";
+const SCREEN_WIDTH = Dimensions.get("window").width;
 
+/** Componente Principal */
 export default function TorneioScreen() {
   const router = useRouter();
-  const { t } = useTranslation();
 
+  // 1) ESTADOS
   const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState<string>(t("torneio.info.none"));
+  const [userName, setUserName] = useState<string>("Jogador");
   const [mesaNumber, setMesaNumber] = useState<string | null>(null);
   const [currentRound, setCurrentRound] = useState<number | null>(null);
   const [opponentName, setOpponentName] = useState<string | null>(null);
   const [linkReport, setLinkReport] = useState<string | null>(null);
-  const [isHost, setIsHost] = useState(false);
   const [leagueName, setLeagueName] = useState("Torneio");
 
-  // Controle de erros / status
   const [errorModalVisible, setErrorModalVisible] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState("");
   const [noTournament, setNoTournament] = useState(false);
   const [notPlaying, setNotPlaying] = useState(false);
 
-  // Modal de voto
   const [voteModalVisible, setVoteModalVisible] = useState(false);
-
-  // Modal de resultados (JudgeScreen)
   const [reportsModalVisible, setReportsModalVisible] = useState(false);
 
-  // Interval para atualizar periodicamente
+  // Foco da tela
+  const [inFocus, setInFocus] = useState(false);
+
+  // Interval
   const intervalRef = useRef<any>(null);
   const [fetchCount, setFetchCount] = useState(0);
 
-  // =========== [INÍCIO] ADMIN ===========
-  // Estado para saber se o usuário é "admin" (autorizado a ver o painel)
+  // =========== ADMIN ===========
   const [isAuthUser, setIsAuthUser] = useState(false);
-
-  // Controla a exibição do Modal de Admin
   const [adminPanelVisible, setAdminPanelVisible] = useState(false);
-
-  // Estados para mostrar resultado das ações
   const [connectionStatus, setConnectionStatus] = useState("");
   const [consoleOutput, setConsoleOutput] = useState("");
   const [customCommand, setCustomCommand] = useState("");
+  const [isHost, setIsHost] = useState(false);
 
-  // Função para testar conexão (faz GET /ping)
+  // 2) ANIMAÇÕES (Fundo, Ícone Admin, Formas)
+  const fadeAnim = useRef(new Animated.Value(0)).current; // Transição principal da tela
+  const adminIconSpin = useRef(new Animated.Value(0)).current; // Ícone admin
+  const shapeAnim1 = useRef(new Animated.Value(0)).current; // Forma animada #1
+  const shapeAnim2 = useRef(new Animated.Value(0)).current; // Forma animada #2
+
+  // 3) LÓGICA DE ADMIN (IDÊNTICA)
   async function testConnection() {
     try {
       setConnectionStatus("Testando conexão...");
@@ -115,7 +110,6 @@ export default function TorneioScreen() {
     }
   }
 
-  // Função para reiniciar
   async function handleRestart() {
     try {
       const response = await fetch(`${RASPBERRY_API}/restart`, {
@@ -128,7 +122,6 @@ export default function TorneioScreen() {
     }
   }
 
-  // Função para desligar
   async function handleShutdown() {
     try {
       const response = await fetch(`${RASPBERRY_API}/shutdown`, {
@@ -141,7 +134,6 @@ export default function TorneioScreen() {
     }
   }
 
-  // Função para ler console (ps -ef | grep python)
   async function handleShowConsole() {
     try {
       const response = await fetch(`${RASPBERRY_API}/console`);
@@ -152,7 +144,6 @@ export default function TorneioScreen() {
     }
   }
 
-  // Função para executar comando personalizado
   async function handleExecuteCommand() {
     if (!customCommand.trim()) {
       Alert.alert("Atenção", "Digite um comando primeiro.");
@@ -161,9 +152,7 @@ export default function TorneioScreen() {
     try {
       const response = await fetch(`${RASPBERRY_API}/execute`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command: customCommand }),
       });
       const json = await response.json();
@@ -178,18 +167,54 @@ export default function TorneioScreen() {
       setConsoleOutput("Erro ao executar comando.");
     }
   }
-  // =========== [FIM] ADMIN =============
 
-  // === useFocusEffect: toda vez que a tela entra em foco, recarrega ===
+  // 4) USEEFFECTS DE ANIMAÇÃO E FOCUS
+  useEffect(() => {
+    // Fade In
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 800,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+
+    // Ícone admin
+    Animated.loop(
+      Animated.timing(adminIconSpin, {
+        toValue: 1,
+        duration: 5000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+
+    // Formas animadas
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shapeAnim1, { toValue: 1, duration: 5000, useNativeDriver: false }),
+        Animated.timing(shapeAnim1, { toValue: 0, duration: 5000, useNativeDriver: false }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shapeAnim2, { toValue: 1, duration: 7000, useNativeDriver: false }),
+        Animated.timing(shapeAnim2, { toValue: 0, duration: 7000, useNativeDriver: false }),
+      ])
+    ).start();
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      console.log("==> [TorneioScreen] Entrou em foco, atualizando dados...");
+      setInFocus(true);
+      console.log("==> [TorneioScreen] Focus in. Atualizando dados...");
       fetchTournamentData();
-      return () => {};
+      return () => {
+        setInFocus(false);
+      };
     }, [])
   );
 
-  // Primeiro carregamento + interval de 60s
   useEffect(() => {
     requestNotificationPermission();
     fetchTournamentData();
@@ -203,12 +228,11 @@ export default function TorneioScreen() {
     };
   }, []);
 
-  // Sempre que fetchCount mudar, refaz a busca
   useEffect(() => {
     fetchTournamentData();
   }, [fetchCount]);
 
-  // ====== Pede permissão de notificação =====
+  // 5) NOTIFICAÇÕES
   async function requestNotificationPermission() {
     try {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -218,17 +242,14 @@ export default function TorneioScreen() {
         finalStatus = status;
       }
       if (finalStatus !== "granted") {
-        Alert.alert(
-          t("torneio.alerts.attention"),
-          "Permissão de notificações não concedida."
-        );
+        Alert.alert("Atenção", "Permissão de notificações não concedida.");
       }
     } catch (error) {
       console.log("Erro ao solicitar permissões de notificação:", error);
     }
   }
 
-  // =============== Função principal que carrega o torneio ===============
+  // 6) CARREGAMENTO DE DADOS DO TORNEIO (LÓGICA ORIGINAL)
   async function fetchTournamentData() {
     try {
       setLoading(true);
@@ -241,27 +262,22 @@ export default function TorneioScreen() {
       const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
 
       if (!storedId) {
-        showErrorModal(t("torneio.alerts.not_logged_in"));
+        showErrorModal("Você não está logado.");
         setLoading(false);
         return;
       }
-      setUserName(storedName ?? t("torneio.info.none"));
+      setUserName(storedName ?? "Jogador");
 
-      // === [INÍCIO] Verifica se userID está em AUTH_USERS:
       setIsAuthUser(AUTH_USERS.includes(storedId));
-      // === [FIM]
 
-      // Se não houver liga selecionada, erro
       if (!leagueId) {
-        showErrorModal("Nenhuma liga selecionada. Selecione uma liga na pagina home.");
+        showErrorModal("Nenhuma liga selecionada. Selecione na Home.");
         setLoading(false);
         return;
       }
-
-      // Verifica se é host (com fallback)
       await checkIfHostFallback(leagueId, storedId);
 
-      // Consulta ao backend do torneio
+      // Pegando dados do torneio
       const url = `https://doprado.pythonanywhere.com/get-data/${leagueId}`;
       const res = await fetch(url, {
         method: "GET",
@@ -274,17 +290,13 @@ export default function TorneioScreen() {
       }
       const jsonTorneio = await res.json();
 
-      // console.log("📌 [DEBUG] Dados recebidos da API:", jsonTorneio);
-
-      // Se não houver rodadas, avisa
       if (!jsonTorneio.round || Object.keys(jsonTorneio.round).length === 0) {
-        console.log("⚠️ Nenhum torneio em andamento nesta liga.");
+        console.log("⚠️ Nenhum torneio ativo.");
         setNoTournament(true);
         setLoading(false);
         return;
       }
 
-      // Pega a lista de rodadas
       const allRounds = jsonTorneio.round;
       const roundKeys = Object.keys(allRounds).map((rk) => parseInt(rk, 10));
       if (roundKeys.length === 0) {
@@ -293,79 +305,55 @@ export default function TorneioScreen() {
         return;
       }
 
-      // Rodada ativa (maior round)
       const maxRound = Math.max(...roundKeys);
       setCurrentRound(maxRound);
-
-      // Pega a divisão (no caso pega a 1a se existir)
       const divisions = allRounds[maxRound];
       const divKeys = Object.keys(divisions);
       const currentDiv = divKeys[0] ?? "None";
       const tables = divisions[currentDiv].table;
 
-      // Tenta achar a mesa do usuário
       let foundMesa: string | null = null;
       let foundOpponent: string | null = null;
-
       for (const tableId in tables) {
         const matchInfo = tables[tableId];
-        const p1_id = matchInfo.player1_id;
-        const p2_id = matchInfo.player2_id;
-
-        if (p1_id === storedId) {
+        if (matchInfo.player1_id === storedId) {
           foundMesa = tableId;
           foundOpponent = matchInfo.player2;
           break;
-        } else if (p2_id === storedId) {
+        } else if (matchInfo.player2_id === storedId) {
           foundMesa = tableId;
           foundOpponent = matchInfo.player1;
           break;
         }
       }
 
-      console.log("📌 [DEBUG] Atualizando Estado -> Mesa:", foundMesa, "Oponente:", foundOpponent);
-
       if (!foundMesa) {
-        console.log(`⚠️ Usuário não está jogando na rodada ${maxRound}.`);
-        setMesaNumber(null);
-        setOpponentName(null);
+        console.log(`⚠️ Não está jogando na rodada ${maxRound}.`);
         setNotPlaying(true);
         setLoading(false);
       } else {
-        console.log(`✅ Mesa encontrada: ${foundMesa}, Oponente: ${foundOpponent}`);
-      
-        // Reseta os valores para forçar a atualização
         setMesaNumber(null);
         setOpponentName(null);
         setNotPlaying(false);
-      
-        // 🔥 Obtém o nome do usuário autenticado antes de salvar no AsyncStorage
+
         const storedUserName = await AsyncStorage.getItem("@userName");
-        const player1Name = storedUserName || "Jogador 1"; // Se não encontrar, define um padrão
-      
-        // 🔥 Salva os nomes corretamente no AsyncStorage
+        const player1Name = storedUserName || "Jogador 1";
         if (foundMesa && foundOpponent) {
-          console.log(`📌 [DEBUG] Salvando novos nomes no AsyncStorage: ${foundOpponent} e ${player1Name}`);
           await AsyncStorage.setItem("@player1Name", player1Name);
           await AsyncStorage.setItem("@player2Name", foundOpponent);
         }
-      
-        // Pequeno delay para garantir que o React perceba a mudança
         setTimeout(() => {
           setMesaNumber(foundMesa);
           setOpponentName(foundOpponent ?? null);
         }, 10);
 
-        // link da mesa
         const link = `https://doprado.pythonanywhere.com/${leagueId}/mesa/${foundMesa}`;
         setLinkReport(link);
 
-        // Notifica caso rodada seja nova
         await checkRoundAndNotify(maxRound, foundMesa, foundOpponent || "");
-        setLoading(false);
       }
 
-      // Pega info da liga pra exibir no título
+      // Info da liga
       const infoRes = await fetch(`https://doprado.pythonanywhere.com/get-league-info`, {
         method: "GET",
         headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
@@ -374,42 +362,36 @@ export default function TorneioScreen() {
         const infoData = await infoRes.json();
         setLeagueName(infoData.leagueName || "Torneio");
       }
+
+      setLoading(false);
     } catch (err) {
-      console.log("Erro no Torneio:", err);
+      console.log("Erro no torneio:", err);
       showErrorModal("Falha ao carregar dados do torneio.");
       setLoading(false);
     }
   }
 
-  // =============== Fallback do Host ===============
   async function checkIfHostFallback(leagueId: string, storedUserId: string) {
     try {
       let isHostLocal = false;
-
-      // 1. Tenta buscar no Firebase
+      // 1) Tenta buscar no Firebase
       try {
         const hostMembers = await fetchRoleMembers(leagueId, "host");
         if (hostMembers.some((h) => h.userId === storedUserId)) {
           isHostLocal = true;
-          console.log(`✅ Encontrado como host no Firebase (Liga: ${leagueId})`);
         }
-      } catch (error) {
-        console.log("⚠️ Erro ao buscar hosts no Firebase, tentando fallback.", error);
+      } catch {
+        console.log("Erro ao buscar hosts no Firebase, fallback local.");
       }
-
-      // 2. Fallback local
+      // 2) Fallback local
       if (!isHostLocal) {
         if (HOST_PLAYER_IDS.includes(storedUserId)) {
           isHostLocal = true;
-          console.log("🟡 Fallback da lista estática. Usuário é host.");
-        } else {
-          console.log("🚫 Usuário não é host.");
         }
       }
-
       setIsHost(isHostLocal);
     } catch (err) {
-      console.log("❌ Erro no fallback de host:", err);
+      console.log("Erro fallback host:", err);
       setIsHost(false);
     }
   }
@@ -418,15 +400,13 @@ export default function TorneioScreen() {
     try {
       const storedRound = await AsyncStorage.getItem("@lastNotifiedRound");
       const lastNotifiedRound = storedRound ? parseInt(storedRound, 10) : 0;
-
       if (rnd > lastNotifiedRound) {
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: `🔥 ${t("torneio.alerts.new_round")} - Rodada ${rnd}`,
+            title: `Nova Rodada - Rodada ${rnd}`,
             body: oppName
-              ? `🎭 Oponente: ${oppName}\n📍 Mesa: ${mesa}\n🏆 Boa sorte!`
-              : `📍 Você está na mesa ${mesa}.\n🏆 Boa sorte!`,
-            data: { screen: "TorneioScreen" },
+              ? `Oponente: ${oppName}\nMesa: ${mesa}\nBoa Sorte!`
+              : `Você está na mesa ${mesa}.\nBoa Sorte!`,
             color: RED,
             sound: "default",
             vibrate: [200, 100, 200],
@@ -451,13 +431,13 @@ export default function TorneioScreen() {
     router.replace("/(tabs)/home");
   }
 
+  // Relatório / Voto
   function openVoteModal() {
     setVoteModalVisible(true);
   }
-
   function handleOpenReport() {
     if (!linkReport) {
-      Alert.alert(t("torneio.alerts.attention"), t("torneio.alerts.no_table"));
+      Alert.alert("Atenção", "Mesa não encontrada");
       return;
     }
     try {
@@ -468,40 +448,42 @@ export default function TorneioScreen() {
       }
     } catch (err) {
       console.log("Erro ao abrir link:", err);
-      Alert.alert(t("common.error"), "Não foi possível abrir a página de report.");
+      Alert.alert("Erro", "Não foi possível abrir a página de report.");
     }
   }
 
-  // ====================== Render ======================
+  // 7) RENDER
+  // Animação ícone admin
+  const spin = adminIconSpin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  // Formas animadas no fundo
+  const shape1Y = shapeAnim1.interpolate({
+    inputRange: [0, 1],
+    outputRange: [150, -50],
+  });
+  const shape2X = shapeAnim2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-100, SCREEN_WIDTH],
+  });
+
   if (loading) {
     return (
-      <View style={styles.loader}>
+      <Animated.View style={[styles.loader, { opacity: fadeAnim }]}>
         <PaperActivityIndicator animating={true} size="large" color={RED} />
-      </View>
-    );
-  }
-
-  if (noTournament) {
-    // Mensagem de nenhum torneio ativo
-    return (
-      <View style={styles.noTournamentContainer}>
-        <MaterialCommunityIcons name="alert" size={50} color={RED} />
-        <Text style={styles.noTournamentText}>
-          Nenhum torneio em andamento nesta liga.
-        </Text>
-        <TouchableOpacity
-          style={styles.noTournamentButton}
-          onPress={() => router.replace("/(tabs)/home")}
-        >
-          <Text style={styles.noTournamentButtonText}>Voltar</Text>
-        </TouchableOpacity>
-      </View>
+      </Animated.View>
     );
   }
 
   return (
-    <>
-      {/* Modal de Erro */}
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+      {/* ======== Formas animadas de fundo ======== */}
+      <Animated.View style={[styles.shape1, { transform: [{ translateY: shape1Y }] }]} />
+      <Animated.View style={[styles.shape2, { transform: [{ translateX: shape2X }] }]} />
+
+      {/* ======== Modal de Erro ======== */}
       <Modal
         animationType="fade"
         transparent
@@ -535,331 +517,391 @@ export default function TorneioScreen() {
         </Animatable.View>
       </Modal>
 
-      {/* Modal de Voto via App */}
+      {/* ======== Voto + Judge ======== */}
       <VoteScreen
         visible={voteModalVisible}
         onClose={() => setVoteModalVisible(false)}
         mesaId={mesaNumber}
-        leagueId={""} // se precisar
+        leagueId={""}
         opponentName={opponentName || ""}
       />
-
-      {/* Modal de Resultados (JudgeScreen) */}
       <JudgeScreen
         visible={reportsModalVisible}
         onClose={() => setReportsModalVisible(false)}
       />
 
-      {/* ========== MODAL DE ADMIN ========== */}
-<Modal
-  visible={adminPanelVisible}
-  animationType="slide"
-  onRequestClose={() => setAdminPanelVisible(false)}
-  transparent
->
-  <Animatable.View
-    style={styles.adminModalBackground}
-    animation="fadeIn"
-    duration={400}
-  >
-    <Animatable.View
-      style={styles.adminContainer}
-      animation="fadeInUp"
-      duration={600}
-    >
-      <View style={styles.adminHeader}>
-        <Animatable.Text
-          style={styles.adminHeaderText}
-          animation="pulse"
-          easing="ease-out"
-          iterationCount="infinite"
+      {/* ======== ADMIN PANEL ======== */}
+      <Modal
+        visible={adminPanelVisible}
+        animationType="slide"
+        onRequestClose={() => setAdminPanelVisible(false)}
+        transparent
+      >
+        <Animatable.View
+          style={styles.adminModalBackground}
+          animation="fadeIn"
+          duration={400}
         >
-          Painel de Controle
-        </Animatable.Text>
-        <TouchableOpacity onPress={() => setAdminPanelVisible(false)}>
-          <MaterialCommunityIcons name="close-circle-outline" size={36} color="#FFF" />
-        </TouchableOpacity>
-      </View>
+          <Animatable.View
+            style={styles.adminContainer}
+            animation="fadeInUp"
+            duration={600}
+          >
+            <View style={styles.adminHeader}>
+              <Animatable.Text
+                style={styles.adminHeaderText}
+                animation="pulse"
+                easing="ease-out"
+                iterationCount="infinite"
+              >
+                Painel de Controle
+              </Animatable.Text>
+              <TouchableOpacity onPress={() => setAdminPanelVisible(false)}>
+                <MaterialCommunityIcons name="close-circle-outline" size={36} color="#FFF" />
+              </TouchableOpacity>
+            </View>
 
-      <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
-        <Button
-          mode="contained"
-          onPress={testConnection}
-          style={styles.adminButton}
-          labelStyle={styles.adminButtonLabel}
-          icon="wifi"
-        >
-          Conectar/Ping
-        </Button>
-        <Text style={styles.statusText}>{connectionStatus}</Text>
+            <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
+              <Button
+                mode="contained"
+                onPress={testConnection}
+                style={styles.adminButton}
+                labelStyle={styles.adminButtonLabel}
+                icon="wifi"
+              >
+                Conectar/Ping
+              </Button>
+              <Text style={styles.statusText}>{connectionStatus}</Text>
 
-        <Button
-          mode="contained"
-          onPress={handleRestart}
-          style={[styles.adminButton, { backgroundColor: "#E69900" }]}
-          labelStyle={styles.adminButtonLabel}
-          icon="restart"
-        >
-          Reiniciar
-        </Button>
+              <Button
+                mode="contained"
+                onPress={handleRestart}
+                style={[styles.adminButton, { backgroundColor: "#E69900" }]}
+                labelStyle={styles.adminButtonLabel}
+                icon="restart"
+              >
+                Reiniciar
+              </Button>
 
-        <Button
-          mode="contained"
-          onPress={handleShutdown}
-          style={[styles.adminButton, { backgroundColor: "#A81D16" }]}
-          labelStyle={styles.adminButtonLabel}
-          icon="power"
-        >
-          Desligar
-        </Button>
+              <Button
+                mode="contained"
+                onPress={handleShutdown}
+                style={[styles.adminButton, { backgroundColor: "#A81D16" }]}
+                labelStyle={styles.adminButtonLabel}
+                icon="power"
+              >
+                Desligar
+              </Button>
 
-        <Button
-          mode="contained"
-          onPress={handleShowConsole}
-          style={styles.adminButton}
-          labelStyle={styles.adminButtonLabel}
-          icon="console-line"
-        >
-          Ver Console
-        </Button>
+              <Button
+                mode="contained"
+                onPress={handleShowConsole}
+                style={styles.adminButton}
+                labelStyle={styles.adminButtonLabel}
+                icon="console-line"
+              >
+                Ver Console
+              </Button>
 
-        <ScrollView style={styles.consoleArea}>
-          <Text style={{ color: "#FFF" }}>{consoleOutput}</Text>
-        </ScrollView>
+              <ScrollView style={styles.consoleArea}>
+                <Text style={{ color: "#FFF" }}>{consoleOutput}</Text>
+              </ScrollView>
 
-        <Text style={[styles.statusText, { marginTop: 20 }]}>
-          Comando Personalizado:
-        </Text>
-        <TextInput
-          value={customCommand}
-          onChangeText={setCustomCommand}
-          placeholder="Digite um comando (ex: kill 1234)"
-          placeholderTextColor="#CCC"
-          style={styles.commandInput}
-        />
+              <Text style={[styles.statusText, { marginTop: 20 }]}>
+                Comando Personalizado:
+              </Text>
+              <TextInput
+                value={customCommand}
+                onChangeText={setCustomCommand}
+                placeholder="Digite um comando (ex: kill 1234)"
+                placeholderTextColor="#CCC"
+                style={styles.commandInput}
+              />
 
-        <Button
-          mode="contained"
-          onPress={handleExecuteCommand}
-          style={styles.adminButton}
-          labelStyle={styles.adminButtonLabel}
-          icon="code-tags"
-        >
-          Executar Comando
-        </Button>
-      </ScrollView>
-    </Animatable.View>
-  </Animatable.View>
-</Modal>
-{/* ========== FIM DO MODAL DE ADMIN ========== */}
+              <Button
+                mode="contained"
+                onPress={handleExecuteCommand}
+                style={styles.adminButton}
+                labelStyle={styles.adminButtonLabel}
+                icon="code-tags"
+              >
+                Executar Comando
+              </Button>
+            </ScrollView>
+          </Animatable.View>
+        </Animatable.View>
+      </Modal>
 
-
-      {/* AppBar */}
-      <Appbar.Header style={{ backgroundColor: BLACK }}>
+      {/* ======= Header Custom ======= */}
+      <View style={styles.customHeader}>
         <Image
           source={require("../../assets/images/logo.jpg")}
           style={styles.logo}
-          resizeMode="contain"
         />
-        <Appbar.Content
-          title={userName}
-          titleStyle={{ color: RED, fontWeight: "bold", fontSize: 20 }}
-        />
-
-        {/* Ícone especial (laranja) que só aparece se isAuthUser = true */}
+        <Text style={styles.headerUserName}>{userName}</Text>
         {isAuthUser && (
           <TouchableOpacity onPress={() => setAdminPanelVisible(true)}>
-            <MaterialCommunityIcons
-              name="shield-lock"
-              size={32}
-              color="orange"
-              style={{ marginRight: 10 }}
-            />
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <MaterialCommunityIcons
+                name="shield-lock"
+                size={32}
+                color="#FFD700"
+                style={{ marginLeft: 10 }}
+              />
+            </Animated.View>
           </TouchableOpacity>
         )}
-      </Appbar.Header>
+      </View>
 
-      {/* Conteúdo Principal */}
-      <ScrollView style={styles.container}>
-        <Text style={styles.mainTitle}>{leagueName}</Text>
-        <Text style={styles.subTitle}>
-          {t("torneio.info.ongoing_title").toUpperCase()}
-        </Text>
+      {/* Caso não tenha torneio (somente se em foco) */}
+      {noTournament && inFocus && (
+        <View style={styles.noTournamentContainer}>
+          <MaterialCommunityIcons name="alert" size={60} color={RED} />
+          <Text style={styles.noTournamentText}>
+            Nenhum torneio em andamento nesta liga.
+          </Text>
+          <TouchableOpacity
+            style={styles.noTournamentButton}
+            onPress={() => router.replace("/(tabs)/home")}
+          >
+            <Text style={styles.noTournamentButtonText}>Voltar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-        {/* Caso o usuário não esteja jogando */}
-        {notPlaying && (
-          <View style={styles.notPlayingContainer}>
-            <MaterialCommunityIcons name="alert" size={50} color={RED} />
-            <Text style={styles.notPlayingText}>
-              Você não está jogando nesta rodada.
-            </Text>
-            <TouchableOpacity
-              style={styles.noTournamentButton}
-              onPress={() => router.replace("/(tabs)/home")}
-            >
-              <Text style={styles.noTournamentButtonText}>Voltar</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+      {/* Se há torneio... */}
+      {!noTournament && (
+        <ScrollView style={styles.contentContainer}>
+          <Animatable.Text animation="fadeInDown" style={styles.leagueName}>
+            {leagueName}
+          </Animatable.Text>
+          <Animatable.Text animation="fadeIn" style={styles.leagueSub}>
+            Torneio em Andamento
+          </Animatable.Text>
 
-        {!notPlaying && (
-          <>
-            {/* Card do Jogador */}
-            <Card style={styles.card}>
-              <Card.Title
-                title={userName}
-                subtitle={t("torneio.info.player_label")}
-                left={(props) => (
-                  <MaterialCommunityIcons
-                    {...props}
-                    name="account"
-                    size={40}
-                    color={RED}
-                  />
-                )}
-                titleStyle={styles.cardTitle}
-                subtitleStyle={styles.cardSubtitle}
-              />
-            </Card>
-
-            {/* Card do Oponente */}
-            <Card style={styles.card}>
-              <Card.Title
-                title={opponentName ?? t("torneio.alerts.no_opponent")}
-                subtitle={t("torneio.info.opponent_label")}
-                left={(props) => (
-                  <MaterialCommunityIcons
-                    {...props}
-                    name="sword-cross"
-                    size={40}
-                    color={RED}
-                  />
-                )}
-                titleStyle={styles.cardTitle}
-                subtitleStyle={styles.cardSubtitle}
-              />
-            </Card>
-
-            {/* Card da Rodada Atual */}
-            <Card style={styles.card}>
-              <Card.Title
-                title={currentRound ? String(currentRound) : t("torneio.alerts.no_round")}
-                subtitle={t("torneio.info.current_round")}
-                left={(props) => (
-                  <MaterialCommunityIcons
-                    {...props}
-                    name="flag-checkered"
-                    size={40}
-                    color={RED}
-                  />
-                )}
-                titleStyle={styles.cardTitle}
-                subtitleStyle={styles.cardSubtitle}
-              />
-            </Card>
-
-            {/* Card da Mesa */}
-            <Card style={styles.card}>
-              <Card.Title
-                title={mesaNumber ?? t("torneio.info.not_found")}
-                subtitle={t("torneio.info.your_table")}
-                left={(props) => (
-                  <MaterialCommunityIcons
-                    {...props}
-                    name="table"
-                    size={40}
-                    color={RED}
-                  />
-                )}
-                titleStyle={styles.cardTitle}
-                subtitleStyle={styles.cardSubtitle}
-              />
-            </Card>
-
-            {/* Botões de Reportar e Ver Resultados */}
-            <View style={styles.btnContainer}>
-              <Button
-                mode="contained"
-                onPress={openVoteModal}
-                style={styles.btnReport}
-                labelStyle={{ color: WHITE, fontSize: 16 }}
-                icon="check"
+          {/* notPlaying */}
+          {notPlaying && (
+            <View style={styles.notPlayingContainer}>
+              <MaterialCommunityIcons name="alert" size={50} color={RED} />
+              <Text style={styles.notPlayingText}>
+                Você não está jogando nesta rodada.
+              </Text>
+              <TouchableOpacity
+                style={styles.noTournamentButton}
+                onPress={() => router.replace("/(tabs)/home")}
               >
-                Reportar Resultado
-              </Button>
-              {isHost && (
-                <Button
-                  mode="contained"
-                  onPress={() => setReportsModalVisible(true)}
-                  style={[styles.btnReport, { marginTop: 12 }]}
-                  labelStyle={{ color: WHITE, fontSize: 16 }}
-                  icon="chart-bar"
-                >
-                  Ver Resultados
-                </Button>
-              )}
+                <Text style={styles.noTournamentButtonText}>Voltar</Text>
+              </TouchableOpacity>
             </View>
-          </>
-        )}
-      </ScrollView>
-    </>
+          )}
+
+          {/* Se estiver jogando */}
+          {!notPlaying && (
+            <>
+              <Animatable.View animation="fadeInUp" delay={100} style={styles.card}>
+                <MaterialCommunityIcons name="account" size={40} color={RED} />
+                <Text style={styles.cardTitle}>{userName}</Text>
+                <Text style={styles.cardSubtitle}>Jogador</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={200} style={styles.card}>
+                <MaterialCommunityIcons name="sword-cross" size={40} color={RED} />
+                <Text style={styles.cardTitle}>{opponentName || "?"}</Text>
+                <Text style={styles.cardSubtitle}>Oponente</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={300} style={styles.card}>
+                <MaterialCommunityIcons name="flag-checkered" size={40} color={RED} />
+                <Text style={styles.cardTitle}>
+                  {currentRound ? currentRound : "?"}
+                </Text>
+                <Text style={styles.cardSubtitle}>Rodada Atual</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={400} style={styles.card}>
+                <MaterialCommunityIcons name="table" size={40} color={RED} />
+                <Text style={styles.cardTitle}>{mesaNumber || "?"}</Text>
+                <Text style={styles.cardSubtitle}>Sua Mesa</Text>
+              </Animatable.View>
+
+              {/* Botões */}
+              <View style={styles.buttonArea}>
+                <Animatable.View animation="pulse" iterationCount="infinite" style={styles.gradientButton}>
+                  <TouchableOpacity onPress={openVoteModal}>
+                    <Text style={styles.gradientButtonText}>Reportar Resultado</Text>
+                  </TouchableOpacity>
+                </Animatable.View>
+
+                {isHost && (
+                  <View style={[styles.gradientButton, { marginTop: 12 }]}>
+                    <TouchableOpacity onPress={() => setReportsModalVisible(true)}>
+                      <Text style={styles.gradientButtonText}>Ver Resultados</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+        </ScrollView>
+      )}
+    </Animated.View>
   );
 }
 
+// ====================== ESTILOS ======================
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: BLACK,
+  },
   loader: {
     flex: 1,
     backgroundColor: BLACK,
     justifyContent: "center",
     alignItems: "center",
   },
-  container: {
-    flex: 1,
-    backgroundColor: BLACK,
-    padding: 16,
+  // Formas animadas
+  shape1: {
+    position: "absolute",
+    width: 300,
+    height: 300,
+    backgroundColor: "#ff0044",
+    borderRadius: 150,
+    opacity: 0.2,
+    top: -100,
+    left: -50,
+  },
+  shape2: {
+    position: "absolute",
+    width: 200,
+    height: 200,
+    backgroundColor: "#00eaff",
+    borderRadius: 100,
+    opacity: 0.15,
+    bottom: 20,
+  },
+
+  // Header Custom
+  customHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "transparent",
+    padding: 12,
+    marginTop: 10,
   },
   logo: {
     width: 50,
     height: 50,
-    marginRight: 8,
+    marginRight: 10,
   },
-  mainTitle: {
-    color: RED,
-    fontSize: 22,
+  headerUserName: {
+    flex: 1,
+    color: WHITE,
+    fontSize: 20,
     fontWeight: "bold",
     textAlign: "center",
   },
-  subTitle: {
-    color: RED,
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 20,
-    textAlign: "center",
-    marginTop: 4,
+
+  // Conteúdo Principal
+  contentContainer: {
+    padding: 16,
   },
+  leagueName: {
+    color: RED,
+    fontSize: 24,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginTop: 10,
+  },
+  leagueSub: {
+    color: "#f77",
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 20,
+    marginTop: 2,
+  },
+
+  // Cards Futuristas
   card: {
-    marginBottom: 10,
     backgroundColor: DARK_GRAY,
+    borderWidth: 2,
+    borderColor: RED,
+    borderRadius: 16,
+    alignItems: "center",
+    padding: 20,
+    marginBottom: 12,
   },
   cardTitle: {
     color: WHITE,
     fontSize: 18,
     fontWeight: "bold",
+    marginTop: 8,
   },
   cardSubtitle: {
-    color: "#ccc",
+    color: "#CCC",
+    fontSize: 14,
+    marginTop: 4,
   },
-  btnContainer: {
+
+  // Botões com gradiente
+  buttonArea: {
     marginTop: 20,
+    marginBottom: 50,
     alignItems: "center",
   },
-  btnReport: {
+  gradientButton: {
+    width: "70%",
+    paddingVertical: 12,
+    borderRadius: 30,
+    backgroundColor: RED,
+    alignItems: "center",
+  },
+  gradientButtonText: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+
+  // Sem torneio
+  noTournamentContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  noTournamentText: {
+    color: WHITE,
+    fontSize: 16,
+    textAlign: "center",
+    marginVertical: 15,
+    maxWidth: "80%",
+  },
+  noTournamentButton: {
     backgroundColor: RED,
     borderRadius: 8,
-    paddingVertical: 6,
-    width: "70%",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
   },
-  // Erro
+  noTournamentButtonText: {
+    color: WHITE,
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+
+  // Não jogando
+  notPlayingContainer: {
+    alignItems: "center",
+    marginTop: 30,
+  },
+  notPlayingText: {
+    color: WHITE,
+    fontSize: 16,
+    textAlign: "center",
+    marginVertical: 15,
+    maxWidth: "80%",
+  },
+
+  // Modal de Erro
   errorOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.7)",
@@ -897,53 +939,13 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
-  // Nenhum Torneio
-  noTournamentContainer: {
-    flex: 1,
-    backgroundColor: BLACK,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  noTournamentText: {
-    color: WHITE,
-    fontSize: 16,
-    textAlign: "center",
-    marginVertical: 15,
-  },
-  noTournamentButton: {
-    backgroundColor: RED,
-    borderRadius: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  noTournamentButtonText: {
-    color: WHITE,
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-
-  // Não jogando
-  notPlayingContainer: {
-    alignItems: "center",
-    marginTop: 40,
-  },
-  notPlayingText: {
-    color: WHITE,
-    fontSize: 16,
-    textAlign: "center",
-    marginVertical: 15,
-    maxWidth: "80%",
-  },
-
-  // Fundo semitransparente para o modal
+  // ADMIN
   adminModalBackground: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.8)",
     justifyContent: "center",
     alignItems: "center",
   },
-  // Container principal do painel
   adminContainer: {
     width: "90%",
     height: "85%",

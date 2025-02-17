@@ -1,6 +1,3 @@
-//////////////////////////////////////
-// ARQUIVO: templatesConfig.ts
-//////////////////////////////////////
 import { TitleItem } from "./titlesConfig";
 
 export interface TemplateItem {
@@ -72,27 +69,26 @@ export interface TemplateItem {
 }
 
 const templates: TemplateItem[] = [
-  // ===== 5 GRÁTIS =====
   {
     id: 1,
     name: "Fogo",
     description: "Tema quente e cheio de chamas.",
     isFree: true,
     containerStyle: {
-      backgroundColor: "#FFEEE9",   // Tons claros, sugerindo calor
-      borderColor: "#FF4500",      // Um laranja forte
+      backgroundColor: "#FFE6E0",
+      borderColor: "#FF4500",
       borderWidth: 3,
-      borderRadius: 14,
+      borderRadius: 16,
       shadowColor: "#FF5722",
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.4,
-      shadowRadius: 5,
+      shadowRadius: 6,
       elevation: 6,
     },
     textStyle: {
       color: "#BF360C",
       fontWeight: "600",
-      textShadowColor: "rgba(255, 87, 34, 0.3)",
+      textShadowColor: "rgba(255,87,34,0.3)",
       textShadowOffset: { width: 1, height: 1 },
       textShadowRadius: 2,
     },
@@ -103,8 +99,8 @@ const templates: TemplateItem[] = [
     },
     iconName: "fire",
     iconColor: "#FF5722",
-    iconSize: 26,
-    backgroundPattern: "fire-background.png",  // caso queira aplicar textura
+    iconSize: 30,
+    backgroundPattern: "fire-background.png",
   },
   {
     id: 2,
@@ -115,7 +111,7 @@ const templates: TemplateItem[] = [
       backgroundColor: "#E0F7FA",
       borderColor: "#00BCD4",
       borderWidth: 3,
-      borderRadius: 12,
+      borderRadius: 16,
       shadowColor: "#00ACC1",
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.35,
@@ -126,7 +122,7 @@ const templates: TemplateItem[] = [
       color: "#006064",
       fontWeight: "500",
       fontFamily: "sans-serif-medium",
-      textShadowColor: "rgba(0, 188, 212, 0.2)",
+      textShadowColor: "rgba(0,188,212,0.2)",
       textShadowOffset: { width: 1, height: 1 },
       textShadowRadius: 2,
     },
@@ -137,7 +133,7 @@ const templates: TemplateItem[] = [
     },
     iconName: "water",
     iconColor: "#00BCD4",
-    iconSize: 26,
+    iconSize: 30,
     backgroundPattern: "water-waves.png",
   },
   {
@@ -146,20 +142,20 @@ const templates: TemplateItem[] = [
     description: "Tema verde, conectado à natureza.",
     isFree: true,
     containerStyle: {
-      backgroundColor: "#EBFEE7",
+      backgroundColor: "#F0FFE6",
       borderColor: "#4CAF50",
       borderWidth: 3,
-      borderRadius: 10,
+      borderRadius: 16,
       shadowColor: "#4CAF50",
-      shadowOffset: { width: 0, height: 3 },
+      shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.35,
-      shadowRadius: 5,
+      shadowRadius: 6,
       elevation: 6,
     },
     textStyle: {
       color: "#1B5E20",
       fontWeight: "500",
-      textShadowColor: "rgba(76, 175, 80, 0.3)",
+      textShadowColor: "rgba(76,175,80,0.3)",
       textShadowOffset: { width: 1, height: 1 },
       textShadowRadius: 2,
     },
@@ -170,7 +166,7 @@ const templates: TemplateItem[] = [
     },
     iconName: "leaf",
     iconColor: "#66BB6A",
-    iconSize: 26,
+    iconSize: 30,
     backgroundPattern: "grass-pattern.png",
   },
   {
@@ -179,10 +175,10 @@ const templates: TemplateItem[] = [
     description: "Tema cheio de faíscas e tensão!",
     isFree: true,
     containerStyle: {
-      backgroundColor: "#FFFBE5",
+      backgroundColor: "#FFFDE7",
       borderColor: "#FFEB3B",
       borderWidth: 3,
-      borderRadius: 20,
+      borderRadius: 16,
       shadowColor: "#FFD600",
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.4,
@@ -192,7 +188,7 @@ const templates: TemplateItem[] = [
     textStyle: {
       color: "#9E9D24",
       fontWeight: "600",
-      textShadowColor: "rgba(255, 214, 10, 0.3)",
+      textShadowColor: "rgba(255,214,10,0.3)",
       textShadowOffset: { width: 2, height: 2 },
       textShadowRadius: 3,
     },
@@ -203,7 +199,7 @@ const templates: TemplateItem[] = [
     },
     iconName: "bolt",
     iconColor: "#FDD835",
-    iconSize: 26,
+    iconSize: 30,
     backgroundPattern: "electric-pattern.png",
   },
   {
@@ -215,7 +211,7 @@ const templates: TemplateItem[] = [
       backgroundColor: "#F3ECE4",
       borderColor: "#8D6E63",
       borderWidth: 3,
-      borderRadius: 8,
+      borderRadius: 16,
       shadowColor: "#795548",
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.4,
@@ -225,7 +221,7 @@ const templates: TemplateItem[] = [
     textStyle: {
       color: "#4E342E",
       fontWeight: "700",
-      textShadowColor: "rgba(158, 105, 82, 0.4)",
+      textShadowColor: "rgba(158,105,82,0.4)",
       textShadowOffset: { width: 1, height: 1 },
       textShadowRadius: 2,
     },
@@ -236,11 +232,9 @@ const templates: TemplateItem[] = [
     },
     iconName: "mountain",
     iconColor: "#8D6E63",
-    iconSize: 26,
+    iconSize: 30,
     backgroundPattern: "rocky-pattern.png",
   },
-
-  // ===== 3 PREMIUM (não épicos) =====
   {
     id: 401,
     name: "Dragão",
@@ -264,7 +258,7 @@ const templates: TemplateItem[] = [
       fontWeight: "bold",
       fontFamily: "serif",
       fontSize: 16,
-      textShadowColor: "rgba(142, 36, 170, 0.4)",
+      textShadowColor: "rgba(142,36,170,0.4)",
       textShadowOffset: { width: 1, height: 1 },
       textShadowRadius: 3,
     },
@@ -277,7 +271,7 @@ const templates: TemplateItem[] = [
     },
     iconName: "dragon",
     iconColor: "#8E24AA",
-    iconSize: 28,
+    iconSize: 32,
     backgroundPattern: "dragon-scales.png",
   },
   {
@@ -290,7 +284,7 @@ const templates: TemplateItem[] = [
       backgroundColor: "#FFFBE0",
       borderColor: "#FFC107",
       borderWidth: 4,
-      borderRadius: 18,
+      borderRadius: 16,
       shadowColor: "#FFC107",
       shadowOffset: { width: 0, height: 6 },
       shadowOpacity: 0.45,
@@ -303,7 +297,7 @@ const templates: TemplateItem[] = [
       fontWeight: "bold",
       fontFamily: "Optima",
       fontSize: 16,
-      textShadowColor: "rgba(255, 193, 7, 0.4)",
+      textShadowColor: "rgba(255,193,7,0.4)",
       textShadowOffset: { width: 2, height: 2 },
       textShadowRadius: 3,
     },
@@ -329,7 +323,7 @@ const templates: TemplateItem[] = [
       backgroundColor: "#1F1F1F",
       borderColor: "#000000",
       borderWidth: 3,
-      borderRadius: 14,
+      borderRadius: 16,
       shadowColor: "#000000",
       shadowOffset: { width: 0, height: 6 },
       shadowOpacity: 0.6,
@@ -342,7 +336,7 @@ const templates: TemplateItem[] = [
       fontWeight: "bold",
       fontFamily: "monospace",
       fontSize: 16,
-      textShadowColor: "rgba(170, 170, 170, 0.5)",
+      textShadowColor: "rgba(170,170,170,0.5)",
       textShadowOffset: { width: 2, height: 2 },
       textShadowRadius: 3,
     },
@@ -358,8 +352,6 @@ const templates: TemplateItem[] = [
     iconSize: 30,
     backgroundPattern: "shadow-texture.png",
   },
-
-  // ===== 2 ÉPICOS =====
   {
     id: 403,
     name: "Campeão Épico",
@@ -370,7 +362,7 @@ const templates: TemplateItem[] = [
       backgroundColor: "#FEF9E7",
       borderColor: "#FFD700",
       borderWidth: 5,
-      borderRadius: 28,
+      borderRadius: 24,
       shadowColor: "#FFD700",
       shadowOffset: { width: 0, height: 8 },
       shadowOpacity: 0.6,
@@ -383,7 +375,7 @@ const templates: TemplateItem[] = [
       fontStyle: "italic",
       fontFamily: "Copperplate",
       fontSize: 18,
-      textShadowColor: "rgba(139, 69, 19, 0.6)",
+      textShadowColor: "rgba(139,69,19,0.6)",
       textShadowOffset: { width: 2, height: 2 },
       textShadowRadius: 5,
     },
@@ -411,7 +403,7 @@ const templates: TemplateItem[] = [
       backgroundColor: "#FDF5FD",
       borderColor: "#FFD700",
       borderWidth: 6,
-      borderRadius: 32,
+      borderRadius: 28,
       shadowColor: "#4B0082",
       shadowOffset: { width: 0, height: 10 },
       shadowOpacity: 0.7,
@@ -424,7 +416,7 @@ const templates: TemplateItem[] = [
       fontStyle: "italic",
       fontFamily: "Herculanum",
       fontSize: 20,
-      textShadowColor: "rgba(75, 0, 130, 0.6)",
+      textShadowColor: "rgba(75,0,130,0.6)",
       textShadowOffset: { width: 3, height: 3 },
       textShadowRadius: 6,
     },

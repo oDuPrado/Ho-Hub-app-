@@ -1,7 +1,9 @@
-//////////////////////////////////////
-// ARQUIVO: PlayerScreen.tsx
-//////////////////////////////////////
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+} from "react";
 import {
   View,
   Text,
@@ -17,6 +19,8 @@ import {
   ScrollView,
   Image,
   TouchableWithoutFeedback,
+  Dimensions,
+  Vibration,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -27,23 +31,19 @@ import {
   getDocs,
   collection,
   query,
-  where
+  where,
 } from "firebase/firestore";
+import * as Animatable from "react-native-animatable";
+import { Ionicons, FontAwesome5, MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { db } from "../../lib/firebaseConfig";
 
+// Import lógica + configs existentes
 import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 import templates, { TemplateItem } from "../templatesConfig";
-
 import TitlesModal from "../../components/TitlesModal";
 import HistoryModal from "../../components/HistoryModal";
 import TemplateModal from "../../components/TemplateModal";
-
-import * as Animatable from "react-native-animatable";
-import { Ionicons } from "@expo/vector-icons";
-import { FontAwesome5 } from "@expo/vector-icons";
-
-// Importamos do matchService
 import {
   fetchAllMatches,
   fetchAllStatsByFilter,
@@ -51,13 +51,11 @@ import {
   MatchData,
 } from "../../lib/matchService";
 
-/** Estrutura p/ dados do jogador no Firestore. */
+/** PlayerInfo e ConfrontoStats */
 interface PlayerInfo {
   userid: string;
   fullname: string;
 }
-
-/** Estrutura p/ exibir stats de confronto contra outro jogador. */
 interface ConfrontoStats {
   matches: number;
   userWins: number;
@@ -65,7 +63,7 @@ interface ConfrontoStats {
   userDraws: number;
 }
 
-/** Lista de avatares exemplo */
+/** Lista de Avatares */
 const avatarList = [
   { id: 1, uri: require("../../assets/images/avatar/avatar1.jpg") },
   { id: 2, uri: require("../../assets/images/avatar/avatar2.jpg") },
@@ -77,33 +75,47 @@ const avatarList = [
   { id: 8, uri: require("../../assets/images/avatar/avatar8.jpg") },
 ];
 
-/** Mensagens de recomendação conforme stats */
+/** Mensagens de recomendação */
 const recommendationMessages = {
   wins: [
     "Você está batendo mais que Machamp na academia!",
     "Vitórias em alta, continue assim! Quem vai te parar?",
-    "Ninguém segura esse campeão... ou será que segura?"
+    "Ninguém segura esse campeão... ou será que segura?",
   ],
   losses: [
     "Tá apanhando mais que um Magikarp fora d'água!",
     "Derrotas demais? Hora de rever o deck e suas estratégias!",
-    "Faz parte perder... mas perder muito já é teimosia, hein?"
+    "Faz parte perder... mas perder muito já é teimosia, hein?",
   ],
   draws: [
     "Empate? É... faltou um golpe final aí...",
     "Dois titãs colidiram, mas nenhum triunfou... Tente desempatar!",
-    "Se tá empatando tanto, falta agressividade no deck ou sobrou azar?"
+    "Se tá empatando tanto, falta agressividade no deck ou sobrou azar?",
   ],
 };
 
+/** Mensagens de NPCs aleatórios */
+const npcMessages = [
+  "Força sem estratégia é apenas brutalidade!",
+  "A paciência é a chave para surpreender o adversário!",
+  "Já organizou seu deck hoje?",
+  "Rendam-se agora ou preparem-se para lutar!",
+  "Dragões exigem respeito... e muitas vitórias!",
+  "Para vencer, você precisa dominar suas fraquezas!",
+];
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
 export default function PlayerScreen() {
   const router = useRouter();
-  
+
+  // ======================
+  // ESTADOS GERAIS
+  // ======================
   const [userId, setUserId] = useState("");
   const [userName, setUserName] = useState("Jogador");
   const [loading, setLoading] = useState(true);
 
-  // Stats
   const [stats, setStats] = useState<PlayerStats>({
     wins: 0,
     losses: 0,
@@ -113,19 +125,18 @@ export default function PlayerScreen() {
     tournamentPlacements: [],
   });
 
-  // TÍTULOS
   const [unlockedTitles, setUnlockedTitles] = useState<TitleItem[]>([]);
   const [titlesModalVisible, setTitlesModalVisible] = useState(false);
   const [newTitleIndicator, setNewTitleIndicator] = useState(false);
-
-  // HISTÓRICO
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
 
-  // AVATAR
+  // Avatar + Template
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
   const [selectedAvatar, setSelectedAvatar] = useState<any>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number>(1);
+  const [templateModalVisible, setTemplateModalVisible] = useState(false);
 
-  // PESQUISA
+  // PESQUISA (oculto, mas funcional)
   const [searchText, setSearchText] = useState("");
   const [playersResult, setPlayersResult] = useState<PlayerInfo[]>([]);
   const [playerSearchLoading, setPlayerSearchLoading] = useState(false);
@@ -133,135 +144,68 @@ export default function PlayerScreen() {
   const [searchIconVisible, setSearchIconVisible] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // TEMPLATE
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number>(1);
-  const [templateModalVisible, setTemplateModalVisible] = useState(false);
+  // Animações
   const epicIconSpin = useRef(new Animated.Value(0)).current;
-
-  // Balão de recomendação
+  const backgroundAnim = useRef(new Animated.Value(0)).current;
+  const avatarFlipAnim = useRef(new Animated.Value(0)).current;
   const [showRecommendation, setShowRecommendation] = useState(true);
   const [recommendationText, setRecommendationText] = useState("");
 
-  // Filtro (all, city, league)
+  // NPC Aleatório (com fechar)
+  const [npcText, setNpcText] = useState("");
+  const [showNpc, setShowNpc] = useState(true);
+
+  // Frase personalizada do jogador
+  const [playerMessage, setPlayerMessage] = useState("");
+
+  // Flag feedback tátil
+  const [tactileEnabled, setTactileEnabled] = useState(true);
+
+  // Filtro
   const [currentFilter, setCurrentFilter] = useState<string>("all");
 
-  // MODAL de Confronto com outro jogador
+  // Confronto Modal
   const [confrontModalVisible, setConfrontModalVisible] = useState(false);
   const [confrontStats, setConfrontStats] = useState<ConfrontoStats | null>(null);
   const [confrontName, setConfrontName] = useState("");
   const [confrontAvatar, setConfrontAvatar] = useState<any>(null);
   const [confrontTemplate, setConfrontTemplate] = useState<TemplateItem | null>(null);
 
-  // Carrega dados ao focar tela
+  // SWIPE PAGES
+  const [activePage, setActivePage] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+
+  // ======================
+  // USE FOCUS / INIT
+  // ======================
   useFocusEffect(
     useCallback(() => {
       loadPlayerData();
+      loadNPCMessage();
     }, [])
   );
 
-  // =======================
-  // Carrega dados do jogador
-  // =======================
-  const loadPlayerData = async () => {
-    try {
-      setLoading(true);
-      const storedId = await AsyncStorage.getItem("@userId");
-      const storedName = await AsyncStorage.getItem("@userName");
-      if (!storedId) {
-        router.replace("/(auth)/login");
-        return;
-      }
-      setUserId(storedId);
-      setUserName(storedName ?? "Jogador");
+  useEffect(() => {
+    // Anima BG
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(backgroundAnim, {
+          toValue: 1,
+          duration: 4000,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: false,
+        }),
+        Animated.timing(backgroundAnim, {
+          toValue: 0,
+          duration: 4000,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: false,
+        }),
+      ])
+    ).start();
+  }, []);
 
-      // Avatar
-      const storedAvatar = await AsyncStorage.getItem("@userAvatar");
-      if (storedAvatar) {
-        const avId = parseInt(storedAvatar, 10);
-        const found = avatarList.find((av) => av.id === avId);
-        if (found) setSelectedAvatar(found.uri);
-      }
-
-      // Template
-      const storedTemplateId = await AsyncStorage.getItem("@userTemplateId");
-      if (storedTemplateId) {
-        setSelectedTemplateId(parseInt(storedTemplateId, 10));
-      }
-
-      // Filtro
-      const fType = (await AsyncStorage.getItem("@filterType")) || "all";
-      setCurrentFilter(fType);
-
-      // Stats do backend
-      const aggregated = await fetchAllStatsByFilter(storedId);
-      const adaptedStats: PlayerStats = {
-        wins: aggregated.wins,
-        losses: aggregated.losses,
-        draws: aggregated.draws,
-        matchesTotal: aggregated.matchesTotal,
-        uniqueOpponents: aggregated.opponentsList.length,
-        tournamentPlacements: [],
-      };
-      setStats(adaptedStats);
-
-      // Se for league, computa títulos
-      if (fType === "league") {
-        const userTitles = computeLocalTitles(adaptedStats);
-        setUnlockedTitles(userTitles);
-        if (userTitles.some((t) => t.unlocked)) {
-          setNewTitleIndicator(true);
-        }
-      } else {
-        // city ou all => sem títulos
-        setUnlockedTitles([]);
-        setNewTitleIndicator(false);
-      }
-
-      defineRecommendation(adaptedStats);
-    } catch (err) {
-      console.log("Erro init Player:", err);
-      Alert.alert("Erro", "Não foi possível carregar seus dados.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // =======================
-  // Títulos
-  // =======================
-  function computeLocalTitles(ps: PlayerStats): TitleItem[] {
-    return titles.map((t) => {
-      const unlocked = t.condition(ps);
-      return { ...t, unlocked };
-    });
-  }
-
-  // =======================
-  // Recomendação
-  // =======================
-  function defineRecommendation(ps: PlayerStats) {
-    let best = "wins";
-    let maxValue = ps.wins;
-    if (ps.losses > maxValue) {
-      best = "losses";
-      maxValue = ps.losses;
-    }
-    if (ps.draws > maxValue) {
-      best = "draws";
-      maxValue = ps.draws;
-    }
-    const arr = recommendationMessages[best as keyof typeof recommendationMessages];
-    if (arr) {
-      const text = arr[Math.floor(Math.random() * arr.length)];
-      setRecommendationText(text);
-    } else {
-      setRecommendationText("Continue treinando e conquistando vitórias!");
-    }
-  }
-
-  // =======================
-  // Animação pro Template Épico
-  // =======================
+  // Animação épica no ícone do template
   useEffect(() => {
     const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
     if (activeTemplate?.hasEpicAnimation) {
@@ -279,14 +223,158 @@ export default function PlayerScreen() {
     }
   }, [selectedTemplateId]);
 
-  // =======================
-  // Salvar avatar/template
-  // =======================
+  // ======================
+  // CARREGAR DADOS
+  // ======================
+  async function loadPlayerData() {
+    try {
+      setLoading(true);
+      const storedId = await AsyncStorage.getItem("@userId");
+      if (!storedId) {
+        router.replace("/(auth)/login");
+        return;
+      }
+      setUserId(storedId);
+
+      const storedName = await AsyncStorage.getItem("@userName");
+      setUserName(storedName ?? "Jogador");
+
+      const storedAvatar = await AsyncStorage.getItem("@userAvatar");
+      if (storedAvatar) {
+        const avId = parseInt(storedAvatar, 10);
+        const found = avatarList.find((av) => av.id === avId);
+        if (found) setSelectedAvatar(found.uri);
+      }
+
+      const storedTemplateId = await AsyncStorage.getItem("@userTemplateId");
+      if (storedTemplateId) {
+        setSelectedTemplateId(parseInt(storedTemplateId, 10));
+      }
+
+      const storedMsg = await AsyncStorage.getItem("@userMessage");
+      if (storedMsg) {
+        setPlayerMessage(storedMsg);
+      }
+
+      const storedTactile = await AsyncStorage.getItem("@tactileEnabled");
+      if (storedTactile) {
+        setTactileEnabled(storedTactile === "true");
+      }
+
+      const fType = (await AsyncStorage.getItem("@filterType")) || "all";
+      setCurrentFilter(fType);
+
+      const aggregated = await fetchAllStatsByFilter(storedId);
+      const adaptedStats: PlayerStats = {
+        wins: aggregated.wins,
+        losses: aggregated.losses,
+        draws: aggregated.draws,
+        matchesTotal: aggregated.matchesTotal,
+        uniqueOpponents: aggregated.opponentsList.length,
+        tournamentPlacements: aggregated.tournamentPlacements.map((item) => item.place),
+      };
+      setStats(adaptedStats);
+
+      if (fType === "league") {
+        const userTitles = computeLocalTitles(adaptedStats);
+        setUnlockedTitles(userTitles);
+        if (userTitles.some((t) => t.unlocked)) {
+          setNewTitleIndicator(true);
+        }
+      } else {
+        setUnlockedTitles([]);
+        setNewTitleIndicator(false);
+      }
+
+      defineRecommendation(adaptedStats);
+
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível carregar seus dados.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function computeLocalTitles(ps: PlayerStats): TitleItem[] {
+    return titles.map((t) => {
+      const unlocked = t.condition(ps);
+      return { ...t, unlocked };
+    });
+  }
+
+  function defineRecommendation(ps: PlayerStats) {
+    let bestCategory = "wins";
+    let maxVal = ps.wins;
+    if (ps.losses > maxVal) {
+      bestCategory = "losses";
+      maxVal = ps.losses;
+    }
+    if (ps.draws > maxVal) {
+      bestCategory = "draws";
+      maxVal = ps.draws;
+    }
+    const arr = recommendationMessages[bestCategory as keyof typeof recommendationMessages];
+    if (arr && arr.length > 0) {
+      const text = arr[Math.floor(Math.random() * arr.length)];
+      setRecommendationText(text);
+    } else {
+      setRecommendationText("Continue treinando e conquistando vitórias!");
+    }
+  }
+
+  // NPC ALEATÓRIO
+  function loadNPCMessage() {
+    const randomIndex = Math.floor(Math.random() * npcMessages.length);
+    setNpcText(npcMessages[randomIndex]);
+    setShowNpc(true);
+  }
+
+  // ======================
+  // BACKGROUND ANIM
+  // ======================
+  const interpolatedBG = backgroundAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [DARK_BG, "#1A1818"],
+  });
+
+  // ======================
+  // AVATAR EFEITO 3D
+  // ======================
+  const avatarSpinY = avatarFlipAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "180deg"],
+  });
+
+  function flipAvatar() {
+    Animated.sequence([
+      Animated.timing(avatarFlipAnim, {
+        toValue: 1,
+        duration: 350,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+      Animated.timing(avatarFlipAnim, {
+        toValue: 0,
+        duration: 350,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // Somente vibra se tactileEnabled for true
+      if (tactileEnabled) {
+        Vibration.vibrate(10);
+      }
+    });
+  }
+
+  // ======================
+  // SALVAR AVATAR / TEMPLATE
+  // ======================
   async function updatePlayerAvatar(uId: string, avatarId: number) {
     try {
       await setDoc(doc(db, "players", uId), { avatarId }, { merge: true });
     } catch (error) {
-      console.error("Erro ao salvar avatar:", error);
+      // ignore
     }
   }
 
@@ -294,14 +382,33 @@ export default function PlayerScreen() {
     try {
       await setDoc(doc(db, "players", uId), { templateId }, { merge: true });
     } catch (error) {
-      console.error("Erro ao salvar template:", error);
+      // ignore
     }
   }
 
-  // =======================
-  // Barra de Pesquisa
-  // =======================
-  const closeSearchOverlay = () => {
+  // Salvar mensagem do jogador
+  async function savePlayerMessage(msg: string) {
+    setPlayerMessage(msg);
+    await AsyncStorage.setItem("@userMessage", msg);
+    // Vibra se tiver ativado
+    if (tactileEnabled) {
+      Vibration.vibrate(5);
+    }
+  }
+
+  // Salvar flag de feedback tátil
+  async function saveTactileSetting(val: boolean) {
+    setTactileEnabled(val);
+    await AsyncStorage.setItem("@tactileEnabled", val.toString());
+    if (val) {
+      Vibration.vibrate(5);
+    }
+  }
+
+  // ======================
+  // PESQUISA (oculta)
+  // ======================
+  function closeSearchOverlay() {
     Animated.timing(searchBarWidth, {
       toValue: 0,
       duration: 400,
@@ -313,9 +420,9 @@ export default function PlayerScreen() {
       setSearchText("");
       setPlayersResult([]);
     });
-  };
+  }
 
-  const handleToggleSearch = () => {
+  function handleToggleSearch() {
     if (!searchOpen) {
       setSearchOpen(true);
       setSearchIconVisible(false);
@@ -328,9 +435,9 @@ export default function PlayerScreen() {
     } else {
       closeSearchOverlay();
     }
-  };
+  }
 
-  const handleSearchPlayers = async () => {
+  async function handleSearchPlayers() {
     if (!searchText.trim()) {
       Alert.alert("Busca", "Digite algo para buscar.");
       return;
@@ -342,13 +449,12 @@ export default function PlayerScreen() {
       if (filteredPlayers.length === 0) {
         Alert.alert("Busca", "Nenhum jogador encontrado.");
       }
-    } catch (err) {
-      console.log("Erro handleSearchPlayers:", err);
+    } catch {
       Alert.alert("Erro", "Falha na busca de jogadores.");
     } finally {
       setPlayerSearchLoading(false);
     }
-  };
+  }
 
   async function fetchPlayersByFilter(searchTerm: string): Promise<PlayerInfo[]> {
     try {
@@ -358,7 +464,6 @@ export default function PlayerScreen() {
       const arr: PlayerInfo[] = [];
 
       if (!filterType || filterType === "all") {
-        // Buscar em /players
         const allSnap = await getDocs(collection(db, "players"));
         allSnap.forEach((docSnap) => {
           const d = docSnap.data();
@@ -394,15 +499,14 @@ export default function PlayerScreen() {
         });
       }
       return arr;
-    } catch (error) {
-      console.error("Erro ao buscar jogadores pelo filtro:", error);
+    } catch {
       return [];
     }
   }
 
-  // =======================
-  // Confronto: Exibir stats vs outro jogador
-  // =======================
+  // ======================
+  // CONFRONTO
+  // ======================
   async function handleCheckConfronto(opponentId: string, opponentName: string) {
     try {
       setConfrontModalVisible(true);
@@ -411,10 +515,6 @@ export default function PlayerScreen() {
       setConfrontAvatar(null);
       setConfrontTemplate(null);
 
-      // 1) Pega avatar/template do oponente
-      // Observação: se você guarda em doc(db, "players", oppId), consulte lá
-      // Se guarda em doc(db, "leagues/{id}/players"), precisa de outra lógica
-      // Abaixo, supondo doc(db, "players", oppId):
       const docRef = doc(db, "players", opponentId);
       const docSnap = await getDoc(docRef);
       let oppAvId = 1;
@@ -430,9 +530,7 @@ export default function PlayerScreen() {
       const foundT = templates.find((x) => x.id === oppTempId);
       setConfrontTemplate(foundT || null);
 
-      // 2) Pega todas as partidas do FILTRO
       const allMatches = await fetchAllMatches();
-      // 3) Filtra as do user com esse oponente
       const direct = allMatches.filter((mm) => {
         if (!mm.outcomeNumber) return false;
         const isUser1 = mm.player1_id === userId && mm.player2_id === opponentId;
@@ -440,101 +538,298 @@ export default function PlayerScreen() {
         return isUser1 || isUser2;
       });
 
-      // 4) Calcula vitórias/derrotas/empates
-      let userW = 0,
-        userL = 0,
-        userD = 0;
+      let userW = 0;
+      let userL = 0;
+      let userD = 0;
       direct.forEach((mm) => {
         const isUserP1 = mm.player1_id === userId;
         if (mm.outcomeNumber === 1) {
-          // P1 vence
           if (isUserP1) userW++;
           else userL++;
         } else if (mm.outcomeNumber === 2) {
-          // P2 vence
           if (isUserP1) userL++;
           else userW++;
         } else if (mm.outcomeNumber === 3) {
           userD++;
         } else if (mm.outcomeNumber === 10) {
-          // Derrota dupla
           userL++;
         }
       });
-      const conf: ConfrontoStats = {
+
+      setConfrontStats({
         matches: direct.length,
         userWins: userW,
         userLosses: userL,
         userDraws: userD,
-      };
-      setConfrontStats(conf);
-    } catch (error) {
-      console.error("Erro ao calcular confronto:", error);
+      });
+    } catch {
       Alert.alert("Erro", "Não foi possível calcular o confronto.");
     }
   }
 
-  // =======================
-  // TÍTULOS
-  // =======================
-  const handleOpenTitles = () => {
+  // ======================
+  // ABRIR/FECHAR MODAIS
+  // ======================
+  function handleOpenTitles() {
     setTitlesModalVisible(true);
     setNewTitleIndicator(false);
-  };
-
-  // =======================
-  // HISTÓRICO
-  // =======================
-  const handleOpenHistory = () => {
+  }
+  function handleOpenHistory() {
     setHistoryModalVisible(true);
-  };
+  }
 
-  // =======================
-  // AVATAR / TEMPLATE
-  // =======================
-  const handleSelectAvatar = async (avatarUri: any, avId: number) => {
-    setSelectedAvatar(avatarUri);
-    setAvatarModalVisible(false);
-    await AsyncStorage.setItem("@userAvatar", avId.toString());
-    await updatePlayerAvatar(userId, avId);
-  };
+  // ======================
+  // SWIPE ENTRE SEÇÕES
+  // ======================
+  function onScrollEnd(e: any) {
+    const contentOffsetX = e.nativeEvent.contentOffset.x;
+    const pageIndex = Math.round(contentOffsetX / SCREEN_WIDTH);
+    setActivePage(pageIndex);
+  }
 
-  const handleSelectTemplate = async (templateId: number) => {
-    setSelectedTemplateId(templateId);
-    await AsyncStorage.setItem("@userTemplateId", templateId.toString());
-    await updatePlayerTemplate(userId, templateId);
-  };
+  function goToPage(index: number) {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ x: SCREEN_WIDTH * index, y: 0, animated: true });
+    }
+  }
 
-  // =======================
-  // Layout final
-  // =======================
-  const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
-  const fallbackTemplate = templates[0];
-  const usedTemplate = activeTemplate || fallbackTemplate;
-  const templateStyle = usedTemplate.containerStyle || {};
-  const textStyle = usedTemplate.textStyle || { color: "#FFFFFF" };
+  // ======================
+  // SEÇÃO DE PERFIL
+  // ======================
+  function renderProfileSection() {
+    const activeTemplate = templates.find((t) => t.id === selectedTemplateId);
+    const fallbackTemplate = templates[0];
+    const usedTemplate = activeTemplate || fallbackTemplate;
+    const templateStyle = usedTemplate.containerStyle || {};
+    const textStyle = usedTemplate.textStyle || { color: "#FFFFFF" };
 
-  const defaultAvatar = require("../../assets/images/avatar/image.jpg");
-  const currentAvatar = selectedAvatar || defaultAvatar;
+    const spin = epicIconSpin.interpolate({
+      inputRange: [0, 1],
+      outputRange: ["0deg", "360deg"],
+    });
 
-  const spin = epicIconSpin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
-  });
+    const defaultAvatar = require("../../assets/images/avatar/image.jpg");
+    const currentAvatar = selectedAvatar || defaultAvatar;
 
-  const totalMatches = stats.matchesTotal;
-  const wrValue = totalMatches > 0 ? ((stats.wins / totalMatches) * 100).toFixed(1) : "0";
+    const totalMatches = stats.matchesTotal;
+    const wrValue = totalMatches > 0 ? ((stats.wins / totalMatches) * 100).toFixed(1) : "0";
 
-  if (loading) {
+    // Ícones mudam de cor conforme template
+    const iconColor = usedTemplate.iconColor || "#FFF";
+
     return (
-      <View style={styles.loaderContainer}>
-        <ActivityIndicator size="large" color={RED} />
+      <View style={{ width: SCREEN_WIDTH }}>
+        <View style={[styles.playerCard, templateStyle]}>
+          <View style={styles.templateIconContainer}>
+            {usedTemplate.hasEpicAnimation ? (
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <FontAwesome5
+                  name={usedTemplate.iconName}
+                  size={usedTemplate.iconSize || 30}
+                  color={usedTemplate.iconColor}
+                />
+              </Animated.View>
+            ) : (
+              <FontAwesome5
+                name={usedTemplate.iconName}
+                size={usedTemplate.iconSize || 30}
+                color={usedTemplate.iconColor}
+              />
+            )}
+          </View>
+
+          <Text style={[styles.playerName, textStyle]}>{userName}</Text>
+          {usedTemplate.emblemImage && (
+            <Text style={{ color: textStyle.color, marginBottom: 4 }}>
+              [Emblema: {usedTemplate.emblemImage}]
+            </Text>
+          )}
+
+          {/* Avatar interativo */}
+          <TouchableOpacity
+            onPress={() => {
+              flipAvatar();
+              setAvatarModalVisible(true);
+            }}
+            activeOpacity={0.8}
+          >
+            <Animated.Image
+              source={currentAvatar}
+              style={[
+                styles.avatar,
+                { transform: [{ rotateY: avatarSpinY }] },
+              ]}
+            />
+          </TouchableOpacity>
+
+          {/* Frase do Jogador */}
+          {playerMessage ? (
+            <Text style={[styles.playerMessage, { color: textStyle.color }]}>
+              "{playerMessage}"
+            </Text>
+          ) : (
+            <Text style={[styles.playerMessage, { color: textStyle.color, fontStyle: "italic" }]}>
+              (Sem frase personalizada)
+            </Text>
+          )}
+
+          <View style={styles.statsRow}>
+            <View style={styles.statBox}>
+              <MaterialCommunityIcons name="trophy" size={20} color={iconColor} />
+              <Text style={[styles.statLabel, textStyle]}>Vitórias</Text>
+              <Text style={[styles.statValue, textStyle]}>{stats.wins}</Text>
+            </View>
+            <View style={styles.statBox}>
+              <MaterialCommunityIcons name="emoticon-cry-outline" size={20} color={iconColor} />
+              <Text style={[styles.statLabel, textStyle]}>Derrotas</Text>
+              <Text style={[styles.statValue, textStyle]}>{stats.losses}</Text>
+            </View>
+            <View style={styles.statBox}>
+              <MaterialCommunityIcons name="handshake" size={20} color={iconColor} />
+              <Text style={[styles.statLabel, textStyle]}>Empates</Text>
+              <Text style={[styles.statValue, textStyle]}>{stats.draws}</Text>
+            </View>
+          </View>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statBox}>
+              <MaterialCommunityIcons name="gamepad" size={20} color={iconColor} />
+              <Text style={[styles.statLabel, textStyle]}>Partidas</Text>
+              <Text style={[styles.statValue, textStyle]}>{stats.matchesTotal}</Text>
+            </View>
+            <View style={styles.statBox}>
+              <MaterialCommunityIcons name="percent" size={20} color={iconColor} />
+              <Text style={[styles.statLabel, textStyle]}>WinRate</Text>
+              <Text style={[styles.statValue, textStyle]}>{wrValue}%</Text>
+            </View>
+            <View style={styles.statBox}>
+              <MaterialCommunityIcons name="account-group" size={20} color={iconColor} />
+              <Text style={[styles.statLabel, textStyle]}>Oponentes</Text>
+              <Text style={[styles.statValue, textStyle]}>{stats.uniqueOpponents}</Text>
+            </View>
+          </View>
+
+          {/* Balão de recomendação */}
+          {showRecommendation && (
+            <Animatable.View
+              animation="fadeInUp"
+              style={styles.recommendationCard}
+            >
+              <Text style={styles.recommendationText}>{recommendationText}</Text>
+              <TouchableOpacity
+                style={styles.closeRecommendation}
+                onPress={() => setShowRecommendation(false)}
+              >
+                <Ionicons name="close-circle" size={22} color="#FFF" />
+              </TouchableOpacity>
+            </Animatable.View>
+          )}
+        </View>
+
+        {/* Botões de Títulos e Histórico */}
+        <TouchableOpacity
+          style={[styles.titlesButton, { backgroundColor: "#000" }]}
+          onPress={handleOpenTitles}
+          activeOpacity={0.8}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Text style={styles.titlesButtonText}>Ver Títulos</Text>
+            {newTitleIndicator && (
+              <View style={styles.newTitleBadge}>
+                <Text style={styles.newTitleBadgeText}>Novo</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.historyButton, { backgroundColor: "#000" }]}
+          onPress={handleOpenHistory}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.historyButtonText}>Ver Histórico de Torneios</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
+  // ======================
+  // SEÇÃO DE CUSTOMIZAÇÃO
+  // ======================
+  function renderCustomizationSection() {
+    return (
+      <View style={{ width: SCREEN_WIDTH, padding: 20 }}>
+        <Text style={styles.sectionTitle}>Personalização</Text>
+
+        <Text style={styles.customLabel}>Frase do Jogador</Text>
+        <View style={styles.customBox}>
+          <TextInput
+            style={styles.customInput}
+            placeholder="Digite sua frase de perfil..."
+            placeholderTextColor="#888"
+            value={playerMessage}
+            onChangeText={savePlayerMessage}
+          />
+        </View>
+
+        {/* Caixa de feedback tátil */}
+        <Text style={styles.customLabel}>Feedback Tátil</Text>
+        <View style={[styles.customBox, { flexDirection: "row", alignItems: "center" }]}>
+          <Text style={styles.customInput}>
+            {tactileEnabled ? "Ativado" : "Desativado"}
+          </Text>
+          <TouchableOpacity
+            style={styles.toggleTactileButton}
+            onPress={() => saveTactileSetting(!tactileEnabled)}
+          >
+            <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+              {tactileEnabled ? "Desativar" : "Ativar"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Botão para selecionar template */}
+        <Text style={styles.customLabel}>Template (Tema Visual)</Text>
+        <Animatable.View animation="pulse" iterationCount="infinite" style={{ marginTop: 8 }}>
+          <TouchableOpacity
+            style={styles.templateButton}
+            onPress={() => setTemplateModalVisible(true)}
+          >
+            <MaterialCommunityIcons name="brush" size={22} color="#000" />
+            <Text style={{ marginLeft: 6, color: "#000", fontWeight: "bold" }}>Escolher Template</Text>
+          </TouchableOpacity>
+        </Animatable.View>
+      </View>
+    );
+  }
+
+  // ======================
+  // LAYOUT PRINCIPAL
+  // ======================
+  if (loading) {
+    return (
+      <Animated.View style={[styles.loaderContainer, { backgroundColor: interpolatedBG }]}>
+        <ActivityIndicator size="large" color={RED} />
+      </Animated.View>
+    );
+  }
+
   return (
-    <View style={styles.mainContainer}>
+    <Animated.View style={[styles.mainContainer, { backgroundColor: interpolatedBG }]}>
+      {/* NPC Aleatório */}
+      {showNpc && (
+        <View style={styles.npcBanner}>
+          <Text style={styles.npcBannerText}>{npcText}</Text>
+          <TouchableOpacity
+            style={styles.npcClose}
+            onPress={() => setShowNpc(false)}
+          >
+            <Ionicons name="close-circle" size={20} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Modais */}
       <TitlesModal
         visible={titlesModalVisible}
         onClose={() => setTitlesModalVisible(false)}
@@ -545,7 +840,6 @@ export default function PlayerScreen() {
         onClose={() => setHistoryModalVisible(false)}
         userId={userId}
       />
-      {/* Modal do Avatar */}
       <Modal
         visible={avatarModalVisible}
         transparent
@@ -554,37 +848,48 @@ export default function PlayerScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { width: "90%" }]}>
-            <Text style={[styles.modalTitle, { color: textStyle.color }]}>
-              Selecione um Avatar
-            </Text>
+            <Text style={[styles.modalTitle]}>Selecione um Avatar</Text>
             <ScrollView contentContainerStyle={{ flexDirection: "row", flexWrap: "wrap" }}>
               {avatarList.map((av) => (
                 <TouchableOpacity
                   key={av.id}
                   style={styles.avatarChoice}
-                  onPress={() => handleSelectAvatar(av.uri, av.id)}
+                  onPress={async () => {
+                    setSelectedAvatar(av.uri);
+                    setAvatarModalVisible(false);
+                    if (userId) {
+                      await AsyncStorage.setItem("@userAvatar", av.id.toString());
+                      await updatePlayerAvatar(userId, av.id);
+                    }
+                  }}
                 >
                   <Image source={av.uri} style={styles.avatarImage} />
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <Pressable style={styles.closeModalBtn} onPress={() => setAvatarModalVisible(false)}>
+            <Pressable
+              style={styles.closeModalBtn}
+              onPress={() => setAvatarModalVisible(false)}
+            >
               <Text style={styles.closeModalText}>Cancelar</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
-
-      {/* Modal Template */}
       <TemplateModal
         visible={templateModalVisible}
         onClose={() => setTemplateModalVisible(false)}
         unlockedTitles={unlockedTitles}
-        onSelectTemplate={handleSelectTemplate}
+        onSelectTemplate={async (templateId) => {
+          setSelectedTemplateId(templateId);
+          if (userId) {
+            await AsyncStorage.setItem("@userTemplateId", templateId.toString());
+            await updatePlayerTemplate(userId, templateId);
+          }
+        }}
         currentTemplateId={selectedTemplateId}
       />
 
-      {/* Modal de Confronto com outro jogador */}
       <Modal
         visible={confrontModalVisible}
         transparent
@@ -599,14 +904,14 @@ export default function PlayerScreen() {
                   <View style={[styles.confrontTemplate, confrontTemplate.containerStyle || {}]}>
                     <FontAwesome5
                       name={confrontTemplate.iconName}
-                      size={32}
+                      size={confrontTemplate.iconSize || 32}
                       color={confrontTemplate.iconColor}
                     />
                   </View>
                 )}
                 <Text style={styles.confrontName}>{confrontName}</Text>
                 <Image
-                  source={confrontAvatar || defaultAvatar}
+                  source={confrontAvatar || require("../../assets/images/avatar/image.jpg")}
                   style={[styles.confrontAvatar, { borderColor: RED }]}
                 />
                 <View style={styles.confrontStatsRow}>
@@ -643,9 +948,9 @@ export default function PlayerScreen() {
         </View>
       </Modal>
 
-      {/* Header (Barra de Pesquisa) */}
+      {/* Header com search oculta */}
       <View style={styles.header}>
-      {searchIconVisible && false && ( // Adicionei "false" para desativar a exibição do ícone
+        {searchIconVisible && false && (
           <TouchableOpacity style={{ marginRight: 12 }} onPress={handleToggleSearch}>
             <Ionicons name="search" size={24} color="#fff" />
           </TouchableOpacity>
@@ -673,6 +978,7 @@ export default function PlayerScreen() {
           </Animated.View>
         )}
       </View>
+
       {searchOpen && playersResult.length > 0 && (
         <TouchableWithoutFeedback onPress={() => closeSearchOverlay()}>
           <View style={styles.searchOverlay}>
@@ -684,7 +990,6 @@ export default function PlayerScreen() {
                     key={pl.userid}
                     style={styles.searchItem}
                     onPress={() => {
-                      // Ao clicar, mostra modal de confronto
                       handleCheckConfronto(pl.userid, pl.fullname);
                       closeSearchOverlay();
                     }}
@@ -697,123 +1002,79 @@ export default function PlayerScreen() {
         </TouchableWithoutFeedback>
       )}
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
-        <View style={[styles.playerCard, templateStyle]}>
-          <View style={styles.templateIconContainer}>
-            {usedTemplate.hasEpicAnimation ? (
-              <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <FontAwesome5 name={usedTemplate.iconName} size={32} color={usedTemplate.iconColor} />
-              </Animated.View>
-            ) : (
-              <FontAwesome5 name={usedTemplate.iconName} size={32} color={usedTemplate.iconColor} />
-            )}
-          </View>
-          <TouchableOpacity
-            style={styles.gearIconContainer}
-            onPress={() => setTemplateModalVisible(true)}
-          >
-            <Ionicons name="settings-sharp" size={24} color="#000" />
-          </TouchableOpacity>
-          <Text style={[styles.playerName, textStyle]}>{userName}</Text>
-          {usedTemplate.emblemImage && (
-            <Text style={{ color: textStyle.color, marginBottom: 4 }}>
-              [Emblema: {usedTemplate.emblemImage}]
-            </Text>
-          )}
-          <TouchableOpacity onPress={() => setAvatarModalVisible(true)}>
-            <Image source={currentAvatar} style={[styles.avatar, { borderColor: RED }]} />
-          </TouchableOpacity>
-
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, textStyle]}>Vitórias</Text>
-              <Text style={[styles.statValue, textStyle]}>{stats.wins}</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, textStyle]}>Derrotas</Text>
-              <Text style={[styles.statValue, textStyle]}>{stats.losses}</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, textStyle]}>Empates</Text>
-              <Text style={[styles.statValue, textStyle]}>{stats.draws}</Text>
-            </View>
-          </View>
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, textStyle]}>Partidas</Text>
-              <Text style={[styles.statValue, textStyle]}>{stats.matchesTotal}</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, textStyle]}>WinRate</Text>
-              <Text style={[styles.statValue, textStyle]}>{wrValue}%</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, textStyle]}>Oponentes</Text>
-              <Text style={[styles.statValue, textStyle]}>{stats.uniqueOpponents}</Text>
-            </View>
-          </View>
-
-          {showRecommendation && (
-            <Animatable.View animation="fadeInUp" style={styles.recommendationCard}>
-              <Text style={styles.recommendationText}>{recommendationText}</Text>
-              <TouchableOpacity
-                style={styles.closeRecommendation}
-                onPress={() => setShowRecommendation(false)}
-              >
-                <Ionicons name="close-circle" size={24} color="#FFF" />
-              </TouchableOpacity>
-            </Animatable.View>
-          )}
-        </View>
-
-        <TouchableOpacity
-          style={[styles.titlesButton, { backgroundColor: "#000000" }]}
-          onPress={handleOpenTitles}
-        >
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Text style={styles.titlesButtonText}>Ver Títulos</Text>
-            {newTitleIndicator && (
-              <View style={styles.newTitleBadge}>
-                <Text style={styles.newTitleBadgeText}>Novo</Text>
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.historyButton, { backgroundColor: "#000000" }]}
-          onPress={handleOpenHistory}
-        >
-          <Text style={styles.historyButtonText}>Ver Histórico de Torneios</Text>
-        </TouchableOpacity>
+      {/* SCROLLVIEW HORIZONTAL PARA SWIPE ENTRE SEÇÕES */}
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={onScrollEnd}
+      >
+        {renderProfileSection()}
+        {renderCustomizationSection()}
       </ScrollView>
-    </View>
+
+      {/* Dots de navegação */}
+      <View style={styles.dotsContainer}>
+        <TouchableOpacity
+          style={[styles.dot, activePage === 0 && styles.dotActive]}
+          onPress={() => goToPage(0)}
+        />
+        <TouchableOpacity
+          style={[styles.dot, activePage === 1 && styles.dotActive]}
+          onPress={() => goToPage(1)}
+        />
+      </View>
+    </Animated.View>
   );
 }
 
-// ---------------- ESTILOS RivalProfileCard ----------------
+// ======================
+// ESTILOS
+// ======================
 const DARK_BG = "#1E1E1E";
-const CARD_BG = "#292929";
-const BORDER_COLOR = "#4D4D4D";
 const RED = "#E3350D";
 const WHITE = "#FFFFFF";
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: DARK_BG },
-  loaderContainer: { flex: 1, backgroundColor: DARK_BG, justifyContent: "center", alignItems: "center" },
+  mainContainer: {
+    flex: 1,
+  },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  // NPC Banner
+  npcBanner: {
+    backgroundColor: "#333",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  npcBannerText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontStyle: "italic",
+  },
+  npcClose: {
+    marginLeft: 8,
+  },
   header: {
-    marginTop: 40,
+    marginTop: 30,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
     paddingHorizontal: 16,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   searchContainer: {
-    backgroundColor: CARD_BG,
+    backgroundColor: "#292929",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: BORDER_COLOR,
+    borderColor: "#4D4D4D",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 8,
@@ -827,15 +1088,15 @@ const styles = StyleSheet.create({
   },
   searchOverlay: {
     position: "absolute",
-    top: 80,
+    top: 68,
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 999,
+    zIndex: 99,
   },
   searchResultBox: {
     marginHorizontal: 16,
-    backgroundColor: CARD_BG,
+    backgroundColor: "#292929",
     borderRadius: 8,
     padding: 8,
   },
@@ -845,39 +1106,38 @@ const styles = StyleSheet.create({
     padding: 8,
     marginVertical: 4,
   },
+  // PÁGINA DE PERFIL
   playerCard: {
-    backgroundColor: CARD_BG,
     marginHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: BORDER_COLOR,
-    padding: 16,
-    alignItems: "center",
-    position: "relative",
     marginTop: 10,
+    borderRadius: 16,
+    borderWidth: 2,
+    padding: 20,
+    alignItems: "center",
   },
   templateIconContainer: {
     position: "absolute",
-    top: 10,
-    right: 10,
-  },
-  gearIconContainer: {
-    position: "absolute",
-    top: 10,
-    left: 10,
+    top: 12,
+    right: 12,
   },
   playerName: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: "bold",
     marginBottom: 6,
     textAlign: "center",
   },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginVertical: 12,
-    borderWidth: 2,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginVertical: 14,
+    backgroundColor: "#000",
+  },
+  playerMessage: {
+    marginTop: 4,
+    marginBottom: 8,
+    fontSize: 14,
+    textAlign: "center",
   },
   statsRow: {
     flexDirection: "row",
@@ -892,7 +1152,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 14,
-    marginBottom: 4,
+    marginTop: 2,
   },
   statValue: {
     fontSize: 16,
@@ -956,18 +1216,58 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 16,
   },
+  // SEÇÃO DE CUSTOMIZAÇÃO
+  sectionTitle: {
+    color: "#FFF",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  customLabel: {
+    color: "#CCC",
+    fontSize: 14,
+    marginTop: 8,
+  },
+  customBox: {
+    backgroundColor: "#333",
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  customInput: {
+    color: "#FFF",
+    fontSize: 14,
+  },
+  toggleTactileButton: {
+    backgroundColor: "#555",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginLeft: 12,
+  },
+  templateButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  // MODAIS
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
+    backgroundColor: "rgba(0,0,0,0.75)",
     justifyContent: "center",
     alignItems: "center",
   },
   modalContent: {
-    backgroundColor: CARD_BG,
+    backgroundColor: "#292929",
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: BORDER_COLOR,
+    borderColor: "#4D4D4D",
     maxHeight: "85%",
     alignItems: "center",
   },
@@ -976,6 +1276,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
     marginBottom: 10,
+    color: "#FFF",
   },
   closeModalBtn: {
     backgroundColor: RED,
@@ -995,19 +1296,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: "hidden",
     borderWidth: 2,
-    borderColor: BORDER_COLOR,
+    borderColor: "#4D4D4D",
   },
   avatarImage: {
     width: 80,
     height: 80,
   },
-
-  // Modal de Confronto
+  // Confronto
   confrontModalContainer: {
-    backgroundColor: CARD_BG,
+    backgroundColor: "#292929",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: BORDER_COLOR,
+    borderColor: "#4D4D4D",
     padding: 16,
     width: "90%",
     alignItems: "center",
@@ -1026,6 +1326,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 8,
+    textAlign: "center",
   },
   confrontAvatar: {
     width: 80,
@@ -1070,5 +1371,21 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingVertical: 10,
     paddingHorizontal: 16,
+  },
+  // SWIPE DOTS
+  dotsContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#666",
+    marginHorizontal: 4,
+  },
+  dotActive: {
+    backgroundColor: "#FFF",
   },
 });
