@@ -602,7 +602,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 42,
+    paddingTop: 5,
     paddingBottom: 6,
     backgroundColor: "#000",
   },

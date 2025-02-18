@@ -436,13 +436,13 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
  * e calcula XP total + nível (usando uma progressão cumulativa), com CACHE para evitar consultas extras.
  * 
  * Regras de XP:
- *  - Vitória = +10 XP
- *  - Empate = +5 XP
- *  - Derrota = +2 XP
- *  - 1º lugar em torneio = +50 XP
- *  - 2º lugar = +30 XP
- *  - 3º lugar = +20 XP
- *  - Participação = +10 XP
+ *  - Vitória = +100 XP
+ *  - Empate = +50 XP
+ *  - Derrota = +20 XP
+ *  - 1º lugar em torneio = +500 XP
+ *  - 2º lugar = +300 XP
+ *  - 3º lugar = +200 XP
+ *  - Participação = +100 XP
  * 
  * A progressão cumulativa será:
  *  - Para chegar ao Nível 1: 50 XP

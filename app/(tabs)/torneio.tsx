@@ -795,8 +795,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "transparent",
-    padding: 12,
-    marginTop: 32,
+    padding: 10,
+    
   },
   logo: {
     width: 50,

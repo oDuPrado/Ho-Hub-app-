@@ -1163,7 +1163,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingTop: 50, // 🔥 Aumenta espaço superior
+    paddingTop: 5, // 🔥 Aumenta espaço superior
   },  
   headerTitle: {
     color: "#E3350D",

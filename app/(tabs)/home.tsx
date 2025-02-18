@@ -250,10 +250,6 @@ export default function HomeScreen() {
       case 406:
         progress = stats.wins / 75;
         break;
-      case 407:
-        progress =
-          (stats.tournamentPlacements?.filter((p) => p <= 3).length ?? 0) / 3;
-        break;
       case 408:
         progress = stats.matchesTotal / 50;
         break;
@@ -263,10 +259,6 @@ export default function HomeScreen() {
       case 410:
         progress = stats.wins / 90;
         break;
-      case 411:
-        progress =
-          (stats.tournamentPlacements?.filter((p) => p <= 3).length ?? 0) / 4;
-        break;
       case 412:
         progress = stats.matchesTotal / 150;
         break;
@@ -275,10 +267,6 @@ export default function HomeScreen() {
         break;
       case 414:
         progress = Math.min(stats.losses / 10, stats.wins / 10);
-        break;
-      case 415:
-        progress =
-          (stats.tournamentPlacements?.filter((p) => p === 1).length ?? 0) / 2;
         break;
       default:
         progress = 0;
@@ -1014,7 +1002,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 50, // ⬅ Adiciona espaçamento superior
+    paddingTop: 5, // ⬅ Adiciona espaçamento superior
   },  
   userInfo: {
     flexDirection: "row",
