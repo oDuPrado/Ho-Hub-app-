@@ -286,8 +286,27 @@ export default function CalendarScreen() {
     }
   }
 
-  function isVip(pid: string): boolean {
-    return vipPlayers.includes(pid);
+  async function isVip(pid: string): Promise<boolean> {
+    if (!leagueStored) {
+      console.log("❌ Liga não selecionada, não foi possível verificar VIP.");
+      return false;
+    }
+  
+    try {
+      const vipRef = doc(db, `leagues/${leagueStored}/roles/vip/members/${pid}`);
+      const vipSnap = await getDoc(vipRef);
+  
+      if (vipSnap.exists()) {
+        console.log(`✅ Usuário ${pid} é VIP!`);
+        return true;
+      } else {
+        console.log(`🚫 Usuário ${pid} NÃO é VIP.`);
+        return false;
+      }
+    } catch (err) {
+      console.error("Erro ao verificar VIP:", err);
+      return false;
+    }
   }
 
   // ==================== LOAD TORNEIOS / FILTRO ====================
@@ -630,34 +649,80 @@ export default function CalendarScreen() {
 
   // ==================== INSCRIÇÕES ====================
   async function handleInscrever(t: Torneio) {
-    
-  
     const agora = moment(); // Data e hora atuais
-  
+    console.log("🕒 Agora:", agora.format("DD/MM/YYYY HH:mm"));
   
     if (!leagueStored) {
       Alert.alert("Erro", "Liga não selecionada.");
       return;
     }
   
-    // Verificar se o torneio tem datas de inscrição definidas e formatar corretamente
-    const dataInicio = t.inscricoesDataInicio
+    const ehVip = await isVip(playerId);
+  
+  
+    // Data de início e fim do período geral de inscrições
+    const periodoInicio = t.inscricoesDataInicio
       ? moment(`${t.inscricoesDataInicio} ${t.inscricoesAbertura}`, "DD/MM/YYYY HH:mm")
       : null;
-    const dataFim = t.inscricoesDataFim
+    const periodoFim = t.inscricoesDataFim
       ? moment(`${t.inscricoesDataFim} ${t.inscricoesFechamento}`, "DD/MM/YYYY HH:mm")
       : null;
   
+    console.log("📅 Período Geral:");
+    console.log("📌 Início:", periodoInicio?.format("DD/MM/YYYY HH:mm"));
+    console.log("📌 Fim:", periodoFim?.format("DD/MM/YYYY HH:mm"));
   
-    // Validar intervalo da data de inscrição (data + horário)
-    if (dataInicio && agora.isBefore(dataInicio)) {
+    // 🚨 Se prioridadeVip NÃO estiver ativada, VIPs seguem a regra normal
+    if (!t.prioridadeVip) {
+      console.log("⚠️ Prioridade Apoiador está desativada! Usuário segue regra normal.");
+    } else if (ehVip) {
+      // Se for VIP e a prioridade está ativa, verificar se pode se inscrever antes do horário normal
+      const primeiroDia = t.inscricoesDataInicio
+        ? moment(t.inscricoesDataInicio, "DD/MM/YYYY")
+        : null;
+      const hoje = agora.clone().startOf("day");
+  
+      console.log("🎟️ Primeiro dia de inscrições:", primeiroDia?.format("DD/MM/YYYY"));
+      console.log("📆 Hoje:", hoje.format("DD/MM/YYYY"));
+      
+      if (primeiroDia && hoje.isSame(primeiroDia, "day")) {
+        const vipInicio = moment(
+          `${t.inscricoesDataInicio} ${t.inscricoesVipAbertura}`,
+          "DD/MM/YYYY HH:mm"
+        );
+        const vipFim = periodoInicio; // O fim VIP é o início normal
+  
+        /*console.log("🏅 Período VIP:");
+        console.log("📌 Início VIP:", vipInicio?.format("DD/MM/YYYY HH:mm"));
+        console.log("📌 Fim VIP (quando começa normal):", vipFim?.format("DD/MM/YYYY HH:mm"));*/
+  
+        if (agora.isBefore(vipInicio)) {
+          console.log("🚫 Inscrição Apoaiador NÃO aberta ainda!");
+          Alert.alert(
+            "Inscrições Apoaiador Não Abertas",
+            `As inscrições começam em ${t.inscricoesDataInicio} às ${t.inscricoesAbertura}.`
+          );
+          return;
+        }
+        if (vipFim && agora.isBefore(vipFim)) {
+          console.log("✅ Usuário Apoaiador dentro do horário! INSCRIÇÃO LIBERADA!");
+          return proceedToInscription(t);
+        }
+        console.log("✅ Apoaiador fora do horário Apoaiador, seguindo regra normal.");
+      }
+    }
+  
+    // Se não for VIP ou já passou do horário VIP, segue a regra geral
+    if (periodoInicio && agora.isBefore(periodoInicio)) {
+      console.log("🚫 Inscrição NÃO aberta ainda!");
       Alert.alert(
         "Inscrições Ainda Não Abertas",
         `As inscrições começam em ${t.inscricoesDataInicio} às ${t.inscricoesAbertura}.`
       );
       return;
     }
-    if (dataFim && agora.isAfter(dataFim)) {
+    if (periodoFim && agora.isAfter(periodoFim)) {
+      console.log("🚫 Inscrição ENCERRADA!");
       Alert.alert(
         "Inscrições Encerradas",
         `O período de inscrições terminou em ${t.inscricoesDataFim} às ${t.inscricoesFechamento}.`
@@ -665,71 +730,59 @@ export default function CalendarScreen() {
       return;
     }
   
-    // Verificação de horários VIP (caso aplicável)
-    if (t.prioridadeVip && isVip(playerId)) {
-      const vipInicio = t.inscricoesVipAbertura
-        ? moment(`${t.inscricoesDataInicio} ${t.inscricoesVipAbertura}`, "DD/MM/YYYY HH:mm")
-        : null;
-      const vipFim = t.inscricoesVipFechamento
-        ? moment(`${t.inscricoesDataFim} ${t.inscricoesVipFechamento}`, "DD/MM/YYYY HH:mm")
-        : null;
+    console.log("✅ INSCRIÇÃO LIBERADA PELA REGRA NORMAL!");
+    return proceedToInscription(t);
+  }
   
-      console.log("VIP Início:", vipInicio?.format("DD/MM/YYYY HH:mm"));
-      console.log("VIP Fim:", vipFim?.format("DD/MM/YYYY HH:mm"));
+  // Função auxiliar para seguir com a inscrição
+  function proceedToInscription(t: Torneio) {
+    console.log("✅ Prosseguindo com a inscrição...");
   
-      if (vipInicio && agora.isBefore(vipInicio)) {
-        Alert.alert(
-          "Inscrições VIP Não Abertas",
-          `As inscrições VIP começam em ${t.inscricoesVipAbertura}.`
-        );
-        return;
-      }
-      if (vipFim && agora.isAfter(vipFim)) {
-        Alert.alert(
-          "Inscrições VIP Encerradas",
-          "As inscrições VIP foram encerradas."
-        );
-        return;
-      }
-    }
-  
-    // Verificar se já está inscrito
+    // Verificar se o usuário já está inscrito
     const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
-    const snap = await getDoc(doc(colRef, playerId));
-    if (snap.exists()) {
-      Alert.alert("Aviso", "Você já está inscrito neste torneio.");
-      return;
-    }
+    getDoc(doc(colRef, playerId)).then((snap) => {
+      if (snap.exists()) {
+        console.log("🚫 Usuário já está inscrito!");
+        Alert.alert("Aviso", "Você já está inscrito neste torneio.");
+        return;
+      }
   
-    // Verificar limite de vagas
-    const allDocs = await getDocs(colRef);
-    const totalInscricoes = allDocs.docs.length;
+      /// Verificar limite de vagas
+      getDocs(colRef).then((allDocs) => {
+        const totalInscricoes = allDocs.docs.length;
+        if (t.maxVagas && totalInscricoes >= t.maxVagas) {
+          console.log("⚠️ Torneio lotado! Adicionando na lista de espera...");
+          // Chama isVip(playerId) e aguarda a resolução da Promise usando then()
+          isVip(playerId).then((vipStatus) => {
+            handleWaitlist(t, vipStatus);
+          });
+          return;
+        }
   
-    if (t.maxVagas && totalInscricoes >= t.maxVagas) {
-      handleWaitlist(t, isVip(playerId));
-      return;
-    }
+        console.log("✅ INSCRIÇÃO CONFIRMADA!");
+        setDetalhesTorneio(t);
+        setInscricaoTorneioId(t.id);
+        setSelectedDeckId("");
   
-    setDetalhesTorneio(t);
-    setInscricaoTorneioId(t.id);
-    setSelectedDeckId("");
-  
-    // Buscar decks do jogador
-    const decksRef = collection(db, `players/${playerId}/decks`);
-    onSnapshot(decksRef, (resp) => {
-      const arr: DeckData[] = [];
-      resp.forEach((docSnap) => {
-        arr.push({
-          id: docSnap.id,
-          name: docSnap.data().name || `Deck ${docSnap.id}`,
-          playerId,
+        // Buscar decks do jogador
+        const decksRef = collection(db, `players/${playerId}/decks`);
+        onSnapshot(decksRef, (resp) => {
+          const arr: DeckData[] = [];
+          resp.forEach((docSnap) => {
+            arr.push({
+              id: docSnap.id,
+              name: docSnap.data().name || `Deck ${docSnap.id}`,
+              playerId,
+            });
+          });
+          setUserDecks(arr);
         });
-      });
-      setUserDecks(arr);
-    });
   
-    setInscricaoModalVisible(true);
-  }  
+        setInscricaoModalVisible(true);
+      });
+    });
+  }
+       
 
   async function handleWaitlist(t: Torneio, vip: boolean) {
     Alert.alert("Lista de Espera", "Torneio lotado. Adicionado à lista de espera.");
@@ -1461,7 +1514,7 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
                         placeholderTextColor="#777"
                       />
 
-                      <Text style={styles.modalLabel}>Fechamento (VIP) (HH:MM)</Text>
+                      {/*<Text style={styles.modalLabel}>Fechamento (VIP) (HH:MM)</Text>
                       <TextInput
                         style={styles.modalInput}
                         value={editInscricoesVipFechamento}
@@ -1470,7 +1523,7 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
                         maxLength={5}
                         placeholder="Ex: 09:00"
                         placeholderTextColor="#777"
-                      />
+                      />*/}
                     </>
                   )}
 

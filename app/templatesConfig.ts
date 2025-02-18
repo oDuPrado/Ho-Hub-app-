@@ -315,7 +315,7 @@ const templates: TemplateItem[] = [
   },
   {
     id: 411,
-    name: "Sombras",
+    name: "Noturno",
     description: "Desbloqueado com o Titulo Elite dos 4.",
     isFree: false,
     requiredTitleId: 404,
@@ -398,7 +398,7 @@ const templates: TemplateItem[] = [
     name: "Glória Eterna",
     description: "Tema supremo: esplendor máximo!",
     isFree: false,
-    requiredTitleId: 405,
+    requiredTitleId: 403,
     containerStyle: {
       backgroundColor: "#FDF5FD",
       borderColor: "#FFD700",
