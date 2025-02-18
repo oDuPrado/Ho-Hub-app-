@@ -306,10 +306,6 @@ export default function Analise() {
         </View>
       </Modal>
 
-      <Animatable.Text animation="bounceIn" style={styles.welcomeText}>
-        {welcomeMessages[welcomeIndex]}
-      </Animatable.Text>
-
       <Animatable.View animation="fadeInDown" style={styles.aiRow}>
         <Image
           source={require("../../assets/images/avatar/avatar6.jpg")}
@@ -364,14 +360,16 @@ const styles = StyleSheet.create({
     color: "#FFD700",
     fontSize: 18,
     fontStyle: "italic",
-    marginBottom: 16,
+    marginBottom: 42,
     textAlign: "center",
   },
   aiRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 10,
+    marginTop: 40, // Adicione isso para descer o ícone
   },
+  
   aiIcon: {
     width: 60,
     height: 60,

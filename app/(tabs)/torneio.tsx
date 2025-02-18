@@ -205,15 +205,24 @@ export default function TorneioScreen() {
   }, []);
 
   useFocusEffect(
-    useCallback(() => {
-      setInFocus(true);
-      console.log("==> [TorneioScreen] Focus in. Atualizando dados...");
+  useCallback(() => {
+    setInFocus(true);
+    console.log("==> [TorneioScreen] Focus in. Atualizando dados...");
+    fetchTournamentData(); // Atualiza os dados ao entrar na tela
+
+    // Inicia o intervalo apenas se estiver na tela
+    intervalRef.current = setInterval(() => {
+      console.log("==> [TorneioScreen] Atualizando dados automaticamente...");
       fetchTournamentData();
-      return () => {
-        setInFocus(false);
-      };
-    }, [])
-  );
+    }, 60000);
+
+    return () => {
+      console.log("==> [TorneioScreen] Focus out. Limpando intervalo.");
+      setInFocus(false);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [])
+);
 
   useEffect(() => {
     requestNotificationPermission();
@@ -787,18 +796,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "transparent",
     padding: 12,
-    marginTop: 10,
+    marginTop: 32,
   },
   logo: {
     width: 50,
     height: 50,
     marginRight: 10,
+    marginBottom: 8,
   },
   headerUserName: {
     flex: 1,
     color: WHITE,
     fontSize: 20,
     fontWeight: "bold",
+    marginTop: 6,
     textAlign: "center",
   },
 

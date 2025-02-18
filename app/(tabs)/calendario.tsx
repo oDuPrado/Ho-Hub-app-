@@ -2031,19 +2031,22 @@ const styles = StyleSheet.create({
     borderBottomColor: "#444",
   },
   monthNavigation: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  navArrow: {
-    padding: 6,
-  },
-  headerTitle: {
-    color: SECONDARY,
-    fontSize: 20,
-    fontWeight: "bold",
-    textTransform: "capitalize",
-  },
+  flexDirection: "row", // Muda para coluna para separar os itens
+  alignItems: "center", // Centraliza os itens na coluna
+  justifyContent: "center", 
+  marginTop: 10, // Adiciona margem superior para descer o mês
+},
+navArrow: {
+  padding: 6,
+},
+headerTitle: {
+  color: SECONDARY,
+  fontSize: 20,
+  fontWeight: "bold",
+  textTransform: "capitalize",
+  marginTop: 6, // Move o nome do mês mais para baixo
+},
+
   // Botão para criar novo torneio
   createButton: {
     flexDirection: "row",

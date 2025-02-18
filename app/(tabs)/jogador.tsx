@@ -44,10 +44,12 @@ import templates, { TemplateItem } from "../templatesConfig";
 import TitlesModal from "../../components/TitlesModal";
 import HistoryModal from "../../components/HistoryModal";
 import TemplateModal from "../../components/TemplateModal";
+
+// 🔥 Importamos a função que calcula stats + XP
 import {
-  fetchAllMatches,
   fetchAllStatsByFilter,
   PlayerStatsData,
+  fetchAllMatches,
   MatchData,
 } from "../../lib/matchService";
 
@@ -125,6 +127,11 @@ export default function PlayerScreen() {
     tournamentPlacements: [],
   });
 
+  // XP, level, xpNext
+  const [xp, setXp] = useState(0);
+  const [level, setLevel] = useState(1);
+  const [xpNextLevel, setXpNextLevel] = useState(50);
+
   const [unlockedTitles, setUnlockedTitles] = useState<TitleItem[]>([]);
   const [titlesModalVisible, setTitlesModalVisible] = useState(false);
   const [newTitleIndicator, setNewTitleIndicator] = useState(false);
@@ -174,6 +181,9 @@ export default function PlayerScreen() {
   // SWIPE PAGES
   const [activePage, setActivePage] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
+
+  // ========== NOVO: Modal de Temporada ==========
+  const [seasonModalVisible, setSeasonModalVisible] = useState(false);
 
   // ======================
   // USE FOCUS / INIT
@@ -264,18 +274,26 @@ export default function PlayerScreen() {
       const fType = (await AsyncStorage.getItem("@filterType")) || "all";
       setCurrentFilter(fType);
 
-      const aggregated = await fetchAllStatsByFilter(storedId);
+      // 🔥 Agora chamamos nossa função que já faz o cálculo de XP e nível
+      const aggregatedStats = await fetchAllStatsByFilter(storedId);
+
       const adaptedStats: PlayerStats = {
-        wins: aggregated.wins,
-        losses: aggregated.losses,
-        draws: aggregated.draws,
-        matchesTotal: aggregated.matchesTotal,
-        uniqueOpponents: aggregated.opponentsList.length,
-        tournamentPlacements: aggregated.tournamentPlacements.map((item) => item.place),
+        wins: aggregatedStats.wins,
+        losses: aggregatedStats.losses,
+        draws: aggregatedStats.draws,
+        matchesTotal: aggregatedStats.matchesTotal,
+        uniqueOpponents: aggregatedStats.opponentsList.length,
+        tournamentPlacements: aggregatedStats.tournamentPlacements.map((item) => item.place),
       };
       setStats(adaptedStats);
 
+      // XP e nível
+      setXp(aggregatedStats.xp);
+      setLevel(aggregatedStats.level);
+      setXpNextLevel(aggregatedStats.xpForNextLevel);
+
       if (fType === "league") {
+        // Computar títulos locais
         const userTitles = computeLocalTitles(adaptedStats);
         setUnlockedTitles(userTitles);
         if (userTitles.some((t) => t.unlocked)) {
@@ -287,7 +305,6 @@ export default function PlayerScreen() {
       }
 
       defineRecommendation(adaptedStats);
-
     } catch (error) {
       Alert.alert("Erro", "Não foi possível carregar seus dados.");
     } finally {
@@ -360,7 +377,6 @@ export default function PlayerScreen() {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      // Somente vibra se tactileEnabled for true
       if (tactileEnabled) {
         Vibration.vibrate(10);
       }
@@ -390,7 +406,6 @@ export default function PlayerScreen() {
   async function savePlayerMessage(msg: string) {
     setPlayerMessage(msg);
     await AsyncStorage.setItem("@userMessage", msg);
-    // Vibra se tiver ativado
     if (tactileEnabled) {
       Vibration.vibrate(5);
     }
@@ -617,6 +632,10 @@ export default function PlayerScreen() {
     // Ícones mudam de cor conforme template
     const iconColor = usedTemplate.iconColor || "#FFF";
 
+    // Identifica se estamos em um "estilo" pra cada 30 níveis
+    // Só pra trocar cor ou algo do tipo
+    const levelDecorationStyle = getLevelDecorationStyle(level);
+
     return (
       <View style={{ width: SCREEN_WIDTH }}>
         <View style={[styles.playerCard, templateStyle]}>
@@ -639,11 +658,11 @@ export default function PlayerScreen() {
           </View>
 
           <Text style={[styles.playerName, textStyle]}>{userName}</Text>
-          {usedTemplate.emblemImage && (
-            <Text style={{ color: textStyle.color, marginBottom: 4 }}>
-              [Emblema: {usedTemplate.emblemImage}]
-            </Text>
-          )}
+
+          {/* Nível Decorado */}
+          <Animatable.View animation="pulse" iterationCount="infinite" style={[styles.levelBadge, levelDecorationStyle]}>
+            <Text style={styles.levelBadgeText}>Nível {level}</Text>
+          </Animatable.View>
 
           {/* Avatar interativo */}
           <TouchableOpacity
@@ -672,6 +691,16 @@ export default function PlayerScreen() {
               (Sem frase personalizada)
             </Text>
           )}
+
+          {/* Barra de XP */}
+          <View style={styles.xpContainer}>
+            <Text style={[styles.xpText, { color: textStyle.color }]}>
+              XP: {xp}/{xpNextLevel}
+            </Text>
+            <View style={styles.xpBar}>
+              <View style={[styles.xpFill, { width: `${(xp / xpNextLevel) * 100}%` }]} />
+            </View>
+          </View>
 
           <View style={styles.statsRow}>
             <View style={styles.statBox}>
@@ -749,8 +778,35 @@ export default function PlayerScreen() {
         >
           <Text style={styles.historyButtonText}>Ver Histórico de Torneios</Text>
         </TouchableOpacity>
+
+        {/* Botão Temporada */}
+        <TouchableOpacity
+          style={[styles.seasonButton, { backgroundColor: "#333" }]}
+          onPress={() => setSeasonModalVisible(true)}
+        >
+          <MaterialCommunityIcons name="map-marker-path" size={22} color="#FFF" />
+          <Text style={styles.seasonButtonText}>Temporada</Text>
+        </TouchableOpacity>
       </View>
     );
+  }
+
+  // Função auxiliar: muda cor do "Nível" a cada 30 níveis
+  function getLevelDecorationStyle(lv: number) {
+    const baseStyle = {
+      backgroundColor: "#E3350D", // default
+      borderColor: "#fff",
+    };
+    if (lv >= 30 && lv < 60) {
+      return { backgroundColor: "#ff9900", borderColor: "#fff" };
+    } else if (lv >= 60 && lv < 90) {
+      return { backgroundColor: "#00ccff", borderColor: "#fff" };
+    } else if (lv >= 90 && lv < 120) {
+      return { backgroundColor: "#cc00ff", borderColor: "#fff" };
+    } else if (lv >= 120) {
+      return { backgroundColor: "#00ff00", borderColor: "#fff" };
+    }
+    return baseStyle;
   }
 
   // ======================
@@ -804,6 +860,60 @@ export default function PlayerScreen() {
   }
 
   // ======================
+  // MODAL DE TEMPORADA
+  // ======================
+  function renderSeasonModal() {
+    const levelsArray = Array.from({ length: 150 }, (_, i) => i + 1);
+
+    return (
+      <Modal
+        visible={seasonModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSeasonModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <Animatable.View
+            style={styles.seasonModalContent}
+            animation="fadeInUp"
+            duration={400}
+          >
+            <Text style={styles.seasonModalTitle}>Progresso da Temporada</Text>
+            <MaterialCommunityIcons name="chess-rook" size={40} color="#FFF" style={{ marginBottom: 12 }} />
+            <Text style={styles.seasonModalSubtitle}>
+              Do Nível 1 ao Nível 150
+            </Text>
+
+            <ScrollView style={styles.towerScroll}>
+              {levelsArray.map((lvl) => {
+                const xpNeeded = (lvl * lvl) * 50; // mesma fórmula
+                return (
+                  <Animatable.View
+                    key={lvl}
+                    style={styles.towerLevelContainer}
+                    animation="fadeIn"
+                    delay={lvl * 5}
+                  >
+                    <MaterialCommunityIcons name="star-four-points" size={20} color="#FFF" />
+                    <Text style={styles.towerLevelText}>Nível {lvl} - {xpNeeded} XP</Text>
+                  </Animatable.View>
+                );
+              })}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.closeSeasonBtn}
+              onPress={() => setSeasonModalVisible(false)}
+            >
+              <Text style={styles.closeSeasonBtnText}>Fechar</Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </View>
+      </Modal>
+    );
+  }
+
+  // ======================
   // LAYOUT PRINCIPAL
   // ======================
   if (loading) {
@@ -830,6 +940,8 @@ export default function PlayerScreen() {
       )}
 
       {/* Modais */}
+      {renderSeasonModal()}
+
       <TitlesModal
         visible={titlesModalVisible}
         onClose={() => setTitlesModalVisible(false)}
@@ -948,7 +1060,7 @@ export default function PlayerScreen() {
         </View>
       </Modal>
 
-      {/* Header com search oculta */}
+      {/* Header com search oculta (atualmente desativado, mas mantido) */}
       <View style={styles.header}>
         {searchIconVisible && false && (
           <TouchableOpacity style={{ marginRight: 12 }} onPress={handleToggleSearch}>
@@ -1126,6 +1238,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: "center",
   },
+  levelBadge: {
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  levelBadgeText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
   avatar: {
     width: 120,
     height: 120,
@@ -1138,6 +1262,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontSize: 14,
     textAlign: "center",
+  },
+  xpContainer: {
+    marginBottom: 12,
+    alignItems: "center",
+  },
+  xpText: {
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  xpBar: {
+    width: 200,
+    height: 10,
+    backgroundColor: "#444",
+    borderRadius: 5,
+    marginTop: 4,
+    overflow: "hidden",
+  },
+  xpFill: {
+    height: "100%",
+    backgroundColor: "#E3350D",
   },
   statsRow: {
     flexDirection: "row",
@@ -1216,6 +1360,21 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 16,
   },
+  seasonButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 10,
+    justifyContent: "center",
+  },
+  seasonButtonText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 16,
+    marginLeft: 6,
+  },
   // SEÇÃO DE CUSTOMIZAÇÃO
   sectionTitle: {
     color: "#FFF",
@@ -1255,7 +1414,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
   },
-  // MODAIS
+  // MODAIS GENÉRICOS
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.75)",
@@ -1387,5 +1546,53 @@ const styles = StyleSheet.create({
   },
   dotActive: {
     backgroundColor: "#FFF",
+  },
+  // MODAL DE TEMPORADA
+  seasonModalContent: {
+    backgroundColor: "#292929",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#4D4D4D",
+    width: "90%",
+    maxHeight: "85%",
+    padding: 16,
+    alignItems: "center",
+  },
+  seasonModalTitle: {
+    color: "#FFF",
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+  seasonModalSubtitle: {
+    color: "#CCC",
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  towerScroll: {
+    width: "100%",
+    marginBottom: 16,
+  },
+  towerLevelContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#444",
+    marginVertical: 4,
+    padding: 8,
+    borderRadius: 8,
+  },
+  towerLevelText: {
+    color: "#FFF",
+    marginLeft: 8,
+  },
+  closeSeasonBtn: {
+    backgroundColor: RED,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  closeSeasonBtnText: {
+    color: "#FFF",
+    fontWeight: "bold",
   },
 });

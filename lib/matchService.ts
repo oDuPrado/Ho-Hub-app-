@@ -1,7 +1,6 @@
 //////////////////////////////////////////
 // ARQUIVO: matchService.ts
 //////////////////////////////////////////
-// ==== INTERFACES ====
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -14,7 +13,8 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebaseConfig";
 
-// ==== INTERFACES ====
+/** ==== INTERFACES ==== */
+
 // Dados das partidas
 export interface MatchData {
   id: string;
@@ -30,8 +30,8 @@ export interface PlayerStatsData {
   draws: number;
   matchesTotal: number;
   opponentsList: string[];
-  tournamentPlacements: TournamentHistoryItem[]; // 🔥 Adicionado aqui
-  updatedAt?: any;
+  tournamentPlacements: TournamentHistoryItem[];
+  updatedAt?: any; // opcional, se você quiser salvar data
 }
 
 // Dados de Rival
@@ -46,7 +46,7 @@ export interface RivalData {
   updatedAt?: any;
 }
 
-/** 
+/**
  * Dados agregados de Clássicos, lidos do documento 
  * /leagues/{leagueId}/players/{playerId}/stats/classics
  */
@@ -71,6 +71,8 @@ export interface TournamentHistoryItem {
   roundCount: number;
   date: string; // ISO string
 }
+
+// =============== FUNÇÕES DE LEITURA DE STATS ===============
 
 /**
  * Lê o documento /stats/classics de um jogador.
@@ -240,73 +242,82 @@ export async function fetchAllMatchesGlobal(): Promise<MatchData[]> {
   }
 }
 
-/** 
- * Soma as estatísticas agregadas do usuário de acordo com o filtro (all, city ou league).
+/**
+ * Retorna os últimos torneios do jogador (até 15),
+ * salvos em /leagues/<leagueId>/players/<playerId>/stats/history
  */
-export async function fetchAllStatsByFilter(userId: string): Promise<PlayerStatsData> {
-  const defaultStats: PlayerStatsData = {
-    wins: 0,
-    losses: 0,
-    draws: 0,
-    matchesTotal: 0,
-    opponentsList: [],
-    tournamentPlacements: [], // ✅ Adicionando torneios aqui!
-  };
-
+export async function fetchPlayerHistory(
+  leagueId: string,
+  playerId: string
+): Promise<TournamentHistoryItem[]> {
   try {
-    const filterType = await AsyncStorage.getItem("@filterType");
-    const cityStored = await AsyncStorage.getItem("@selectedCity");
-    const leagueStored = await AsyncStorage.getItem("@leagueId");
+    const docRef = doc(db, `leagues/${leagueId}/players/${playerId}/stats`, "history");
+    const snap = await getDoc(docRef);
 
-    let leaguesToFetch: string[] = [];
-
-    if (!filterType || filterType === "all") {
-      const leaguesSnap = await getDocs(collection(db, "leagues"));
-      leaguesSnap.forEach((docSnap) => {
-        leaguesToFetch.push(docSnap.id);
-      });
-    } else if (filterType === "city" && cityStored) {
-      const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
-      const citySnapshot = await getDocs(qCity);
-      citySnapshot.forEach((docSnap) => {
-        leaguesToFetch.push(docSnap.id);
-      });
-    } else if (filterType === "league" && leagueStored) {
-      leaguesToFetch.push(leagueStored);
-    } else {
-      console.warn("Filtro inválido ou não definido. Retornando stats zeradas.");
-      return defaultStats;
+    if (!snap.exists()) {
+      console.warn(`Histórico não encontrado para ${playerId} na liga ${leagueId}`);
+      return [];
     }
 
-    if (leaguesToFetch.length === 0) {
-      console.log("Nenhuma liga encontrada para esse filtro.");
-      return defaultStats;
+    const data = snap.data();
+
+    if (!data || !data.latestTournaments) {
+      console.warn("⚠️ Campo 'latestTournaments' não encontrado no histórico.");
+      return [];
     }
 
-    let finalStats = { ...defaultStats };
-
-    for (const lid of leaguesToFetch) {
-      const aggregated = await fetchPlayerStatsAggregated(lid, userId);
-      if (aggregated) {
-        finalStats.wins += aggregated.wins;
-        finalStats.losses += aggregated.losses;
-        finalStats.draws += aggregated.draws;
-        finalStats.matchesTotal += aggregated.matchesTotal;
-
-        const union = new Set([...finalStats.opponentsList, ...aggregated.opponentsList]);
-        finalStats.opponentsList = Array.from(union);
-      }
-
-      // 🔥 Buscar histórico de torneios para tournamentPlacements
-      const history = await fetchPlayerHistory(lid, userId);
-      if (history.length > 0) {
-        finalStats.tournamentPlacements.push(...history);
-      }
+    if (!Array.isArray(data.latestTournaments)) {
+      console.error("❌ 'latestTournaments' não é um array!", data.latestTournaments);
+      return [];
     }
-    return finalStats;
+
+    // 🔥 Certifica que 'place' é extraído corretamente
+    const tournaments = data.latestTournaments.map((t: any) => ({
+      tournamentId: t.tournamentId || "Desconhecido",
+      tournamentName: t.tournamentName || "Torneio Sem Nome",
+      place: t.place ?? -1,
+      totalPlayers: t.totalPlayers ?? 0,
+      roundCount: t.roundCount ?? 0,
+      date: t.date || new Date().toISOString(),
+    }));
+
+    return tournaments;
+  } catch (err) {
+    console.error("Erro ao buscar histórico:", err);
+    return [];
+  }
+}
+
+/**
+ * NOVA FUNÇÃO que retorna uma lista de Clássicos ativos entre dois jogadores
+ * usando os dados do /stats/classics do Player A.
+ */
+import { getActiveClassicosForDuo, PlayerVsPlayerStats } from "../app/classicosConfig";
+
+export async function fetchActiveClassicosForDuo(
+  leagueId: string,
+  playerA: string,
+  playerB: string
+): Promise<ReturnType<typeof getActiveClassicosForDuo>> {
+  try {
+    const classicsData = await fetchPlayerClassicsStats(leagueId, playerA);
+    if (!classicsData || !classicsData.opponents[playerB]) {
+      return [];
+    }
+    const statsData = classicsData.opponents[playerB];
+    const stats: PlayerVsPlayerStats = {
+      playerA,
+      playerB,
+      matches: statsData.matches,
+      winsA: statsData.wins,
+      winsB: statsData.losses, // perdas de A são vitórias de B
+      draws: statsData.draws,
+    };
+
+    return getActiveClassicosForDuo(stats);
   } catch (error) {
-    console.error("Erro em fetchAllStatsByFilter:", error);
-    return defaultStats;
+    console.error("Erro ao calcular Clássicos entre os jogadores:", error);
+    return [];
   }
 }
 
@@ -315,7 +326,6 @@ export async function fetchAllStatsByFilter(userId: string): Promise<PlayerStats
  */
 export async function fetchRivalByFilter(userId: string): Promise<RivalData | null> {
   try {
-    // 1️⃣ Busca os filtros armazenados
     const filterType = await AsyncStorage.getItem("@filterType");
     const cityStored = await AsyncStorage.getItem("@selectedCity");
     const leagueStored = await AsyncStorage.getItem("@leagueId");
@@ -358,7 +368,6 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
 
     let updatedAt = null;
 
-    // 2️⃣ Percorre todas as ligas e busca os dados de classics
     for (const lid of leaguesToFetch) {
       const classicsData = await fetchPlayerClassicsStats(lid, userId);
       if (!classicsData || !classicsData.opponents) continue;
@@ -372,12 +381,12 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
         const userWins = matchData.wins;
         const rivalWins = matchData.losses;
         const draws = matchData.draws;
-        const lastWinner = userWins > rivalWins ? "user" : rivalWins > userWins ? "rival" : "empate";
 
+        const lastWinner = userWins > rivalWins ? "user" : rivalWins > userWins ? "rival" : "empate";
         const winDiff = Math.abs(userWins - rivalWins);
         const balanceFactor = 1 / (1 + winDiff); // Se diferença for 0, valor 1
 
-        // Fórmula de rivalidade:
+        // Simples fórmula de "rivalidade"
         const score = totalMatches * balanceFactor + (lastWinner === "rival" ? 0.5 : 0);
 
         if (score > topScore) {
@@ -400,10 +409,11 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
       return null;
     }
 
-    // 3️⃣ Buscar o nome do rival no Firebase
     const rivalRef = doc(db, `leagues/${leaguesToFetch[0]}/players/${topRivalId}`);
     const rivalSnap = await getDoc(rivalRef);
-    const rivalName = rivalSnap.exists() ? rivalSnap.data()?.fullname || `User ${topRivalId}` : `User ${topRivalId}`;
+    const rivalName = rivalSnap.exists()
+      ? rivalSnap.data()?.fullname || `User ${topRivalId}`
+      : `User ${topRivalId}`;
 
     return {
       rivalId: topRivalId,
@@ -421,87 +431,199 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
   }
 }
 
-// =============== NOVA FUNÇÃO: fetchPlayerHistory ===============
-
 /**
- * Retorna os últimos torneios do jogador (até 15),
- * salvos em /leagues/<leagueId>/players/<playerId>/stats/history
+ * NOVA FUNÇÃO: soma as estatísticas agregadas do usuário, usando o mesmo filtro,
+ * e calcula XP total + nível (usando uma progressão cumulativa), com CACHE para evitar consultas extras.
+ * 
+ * Regras de XP:
+ *  - Vitória = +10 XP
+ *  - Empate = +5 XP
+ *  - Derrota = +2 XP
+ *  - 1º lugar em torneio = +50 XP
+ *  - 2º lugar = +30 XP
+ *  - 3º lugar = +20 XP
+ *  - Participação = +10 XP
+ * 
+ * A progressão cumulativa será:
+ *  - Para chegar ao Nível 1: 50 XP
+ *  - Para chegar ao Nível 2: 50 + 150 = 200 XP
+ *  - Para chegar ao Nível 3: 200 + 250 = 450 XP
+ *  - Para chegar ao Nível 4: 450 + 350 = 800 XP
+ *  - Para chegar ao Nível 5: 800 + 450 = 1250 XP
+ *  - Para chegar ao Nível 6: 1250 + 550 = 1800 XP
+ *  ... e assim sucessivamente (incremento = 100*(n–1) + 50).
  */
-export async function fetchPlayerHistory(
-  leagueId: string,
-  playerId: string
-): Promise<TournamentHistoryItem[]> {
-  try {
-    const docRef = doc(db, `leagues/${leagueId}/players/${playerId}/stats`, "history");
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      console.warn(`Histórico não encontrado para ${playerId} na liga ${leagueId}`);
-      return [];
-    }
-
-    const data = snap.data();
-
-    if (!data || !data.latestTournaments) {
-      console.warn("⚠️ Campo 'latestTournaments' não encontrado no histórico.");
-      return [];
-    }
-
-    if (!Array.isArray(data.latestTournaments)) {
-      console.error("❌ 'latestTournaments' não é um array!", data.latestTournaments);
-      return [];
-    }
-
-    // 🔥 Certifica que 'place' é extraído corretamente
-    const tournaments = data.latestTournaments.map((t: any) => ({
-      tournamentId: t.tournamentId || "Desconhecido",
-      tournamentName: t.tournamentName || "Torneio Sem Nome",
-      place: t.place ?? -1, // 🔥 Pegando corretamente a colocação
-      totalPlayers: t.totalPlayers ?? 0,
-      roundCount: t.roundCount ?? 0,
-      date: t.date || new Date().toISOString(),
-    }));
-
-    return tournaments;
-  } catch (err) {
-    console.error("Erro ao buscar histórico:", err);
-    return [];
+export async function fetchAllStatsByFilter(
+  userId: string
+): Promise<
+  PlayerStatsData & {
+    xp: number;
+    level: number;
+    xpForCurrentLevel: number;
+    xpForNextLevel: number;
+    xpProgress: number; // XP já acumulado no nível atual
+    xpRemaining: number; // XP faltando para subir de nível
   }
-}
+> {
+  const defaultStats: PlayerStatsData = {
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    matchesTotal: 0,
+    opponentsList: [],
+    tournamentPlacements: [],
+  };
 
-/**
- * NOVA FUNÇÃO:
- * Usa os dados agregados em /stats/classics para montar as estatísticas de confronto
- * entre dois jogadores e determinar quais clássicos estão ativos.
- */
-import { getActiveClassicosForDuo, PlayerVsPlayerStats } from "../app/classicosConfig";
+  // 1) Verifica primeiro no cache local
+  const filterType = (await AsyncStorage.getItem("@filterType")) || "all";
+  const cityStored = await AsyncStorage.getItem("@selectedCity");
+  const leagueStored = await AsyncStorage.getItem("@leagueId");
 
-export async function fetchActiveClassicosForDuo(
-  leagueId: string,
-  playerA: string,
-  playerB: string
-): Promise<ReturnType<typeof getActiveClassicosForDuo>> {
-  try {
-    // 1) Ler os dados agregados de /stats/classics do Player A
-    const classicsData = await fetchPlayerClassicsStats(leagueId, playerA);
-    if (!classicsData || !classicsData.opponents[playerB]) {
-      return [];
+  const cacheKey = `@xpCache_${filterType}_${userId}`;
+  const cachedDataString = await AsyncStorage.getItem(cacheKey);
+  let cachedData: any = null;
+  if (cachedDataString) {
+    try {
+      cachedData = JSON.parse(cachedDataString);
+    } catch (e) {
+      cachedData = null;
     }
-    const statsData = classicsData.opponents[playerB];
-    // Monta o objeto PlayerVsPlayerStats:
-    const stats: PlayerVsPlayerStats = {
-      playerA,
-      playerB,
-      matches: statsData.matches,
-      winsA: statsData.wins,
-      winsB: statsData.losses, // perdas de A são vitórias de B
-      draws: statsData.draws,
-    };
+  }
 
-    // 2) Retorna os clássicos ativos com base nas condições definidas
-    return getActiveClassicosForDuo(stats);
+  // Descobrir quais ligas vamos percorrer
+  let leaguesToFetch: string[] = [];
+  try {
+    if (!filterType || filterType === "all") {
+      const leaguesSnap = await getDocs(collection(db, "leagues"));
+      leaguesSnap.forEach((docSnap) => {
+        leaguesToFetch.push(docSnap.id);
+      });
+    } else if (filterType === "city" && cityStored) {
+      const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
+      const citySnapshot = await getDocs(qCity);
+      citySnapshot.forEach((docSnap) => {
+        leaguesToFetch.push(docSnap.id);
+      });
+    } else if (filterType === "league" && leagueStored) {
+      leaguesToFetch.push(leagueStored);
+    }
   } catch (error) {
-    console.error("Erro ao calcular Clássicos entre os jogadores:", error);
-    return [];
+    console.error("Erro ao descobrir ligas:", error);
   }
+
+  // Se não encontrou ligas, retorna stats zeradas
+  if (leaguesToFetch.length === 0) {
+    return {
+      ...defaultStats,
+      xp: cachedData?.xp || 0,
+      level: cachedData?.level || 1,
+      xpForCurrentLevel: cachedData?.xpForCurrentLevel || 0,
+      xpForNextLevel: cachedData?.xpForNextLevel || 50,
+      xpProgress: cachedData?.xpProgress || 0,
+      xpRemaining: cachedData?.xpRemaining || 50,
+    };
+  }
+
+  // 2) Se tivermos cache, verificamos se precisamos atualizar
+  let needsRefresh = false;
+  let maxUpdatedAtServer = 0;
+  for (const lid of leaguesToFetch) {
+    const aggregated = await fetchPlayerStatsAggregated(lid, userId);
+    if (aggregated?.updatedAt) {
+      const ms = new Date(aggregated.updatedAt).getTime();
+      if (ms > maxUpdatedAtServer) {
+        maxUpdatedAtServer = ms;
+      }
+    }
+  }
+  if (cachedData && cachedData.maxUpdatedAt && maxUpdatedAtServer) {
+    const cachedUpdatedMs = new Date(cachedData.maxUpdatedAt).getTime();
+    needsRefresh = maxUpdatedAtServer > cachedUpdatedMs;
+  } else {
+    needsRefresh = true;
+  }
+  if (!needsRefresh && cachedData) {
+    return {
+      ...defaultStats,
+      wins: cachedData.wins,
+      losses: cachedData.losses,
+      draws: cachedData.draws,
+      matchesTotal: cachedData.matchesTotal,
+      opponentsList: cachedData.opponentsList || [],
+      tournamentPlacements: cachedData.tournamentPlacements || [],
+      xp: cachedData.xp,
+      level: cachedData.level,
+      xpForCurrentLevel: cachedData.xpForCurrentLevel,
+      xpForNextLevel: cachedData.xpForNextLevel,
+      xpProgress: cachedData.xpProgress,
+      xpRemaining: cachedData.xpRemaining,
+    };
+  }
+
+  // 3) Cálculo completo
+  let finalStats = { ...defaultStats };
+  let totalXP = 0;
+  for (const lid of leaguesToFetch) {
+    const aggregated = await fetchPlayerStatsAggregated(lid, userId);
+    if (aggregated) {
+      finalStats.wins += aggregated.wins;
+      finalStats.losses += aggregated.losses;
+      finalStats.draws += aggregated.draws;
+      finalStats.matchesTotal += aggregated.matchesTotal;
+      const union = new Set([...finalStats.opponentsList, ...aggregated.opponentsList]);
+      finalStats.opponentsList = Array.from(union);
+      // XP por partidas
+      totalXP += aggregated.wins * 10;
+      totalXP += aggregated.draws * 5;
+      totalXP += aggregated.losses * 2;
+    }
+    const history = await fetchPlayerHistory(lid, userId);
+    if (history.length > 0) {
+      finalStats.tournamentPlacements.push(...history);
+      history.forEach((t) => {
+        if (t.place === 1) totalXP += 50;
+        else if (t.place === 2) totalXP += 30;
+        else if (t.place === 3) totalXP += 20;
+        else totalXP += 10;
+      });
+    }
+  }
+
+  // 4) Cálculo do nível usando progressão cumulativa:
+  //    - Nível 1: 50 XP
+  //    - Incremento para o próximo nível: 100*(n-1)+50
+  let levelCounter = 1;
+  let currentThreshold = 0; // xp necessário para atingir o nível atual
+  let nextThreshold = 50;   // xp necessário para atingir o nível 1
+  while (totalXP >= nextThreshold) {
+    levelCounter++;
+    currentThreshold = nextThreshold;
+    const increment = 100 * (levelCounter - 1) + 50;
+    nextThreshold += increment;
+  }
+  const finalLevel = levelCounter - 1; // nível atual
+  const xpProgress = totalXP - currentThreshold; // xp acumulado no nível atual
+  const xpForNext = nextThreshold - currentThreshold; // xp necessário para subir de nível
+  const xpRemaining = nextThreshold - totalXP; // quanto falta para o próximo nível
+
+  const result = {
+    ...finalStats,
+    xp: totalXP,
+    level: finalLevel,
+    xpForCurrentLevel: currentThreshold,
+    xpForNextLevel: nextThreshold,
+    xpProgress,
+    xpRemaining,
+  };
+
+  const cacheToSave = {
+    ...result,
+    maxUpdatedAt: maxUpdatedAtServer
+      ? new Date(maxUpdatedAtServer).toISOString()
+      : new Date().toISOString(),
+  };
+  await AsyncStorage.setItem(cacheKey, JSON.stringify(cacheToSave));
+
+  return result;
 }
+
