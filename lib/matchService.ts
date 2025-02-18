@@ -573,18 +573,18 @@ export async function fetchAllStatsByFilter(
       const union = new Set([...finalStats.opponentsList, ...aggregated.opponentsList]);
       finalStats.opponentsList = Array.from(union);
       // XP por partidas
-      totalXP += aggregated.wins * 10;
-      totalXP += aggregated.draws * 5;
-      totalXP += aggregated.losses * 2;
+      totalXP += aggregated.wins * 100;
+      totalXP += aggregated.draws * 50;
+      totalXP += aggregated.losses * 20;
     }
     const history = await fetchPlayerHistory(lid, userId);
     if (history.length > 0) {
       finalStats.tournamentPlacements.push(...history);
       history.forEach((t) => {
-        if (t.place === 1) totalXP += 50;
-        else if (t.place === 2) totalXP += 30;
-        else if (t.place === 3) totalXP += 20;
-        else totalXP += 10;
+        if (t.place === 1) totalXP += 500;
+        else if (t.place === 2) totalXP += 300;
+        else if (t.place === 3) totalXP += 200;
+        else totalXP += 100;
       });
     }
   }
