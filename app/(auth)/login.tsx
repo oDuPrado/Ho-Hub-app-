@@ -1,5 +1,5 @@
 //////////////////////////////////////
-// ARQUIVO: LoginScreen.tsx (reformulado)
+// ARQUIVO: LoginScreen.tsx
 //////////////////////////////////////
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -7,7 +7,6 @@ import {
   Text,
   TextInput,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Animated,
@@ -21,6 +20,7 @@ import {
   Image,
   FlatList,
   Pressable,
+  AppState,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -32,24 +32,17 @@ import {
   signOut,
   User,
 } from "firebase/auth";
-import {
-  doc,
-  setDoc,
-  getDoc,
-  collection,
-  getDocs,
-} from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, getDocs } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
+import * as Animatable from "react-native-animatable";
+import { useTranslation } from "react-i18next";
 
 import { auth, db } from "../../lib/firebaseConfig";
-import { useTranslation } from "react-i18next";
 import i18n from "../../i18n";
-import { BAN_PLAYER_IDS } from "../hosts";
-import { AppState } from "react-native";
 
-// >>> ADICIONEI: react-native-animatable <<<
-import * as Animatable from "react-native-animatable";
+// >>> IMPORTAÇÃO DO MODAL <<<
+import CustomModal from "../../components/CustomModal";
 
 //////////////////////////////////////
 // CONSTANTES DE CORES
@@ -65,8 +58,9 @@ const COLORS = {
   INPUT_BORDER: "#4D4D4D",
 };
 
-// >>> Lógica de verificação de senha e etc. (inalterada) <<<
-
+//////////////////////////////////////
+// FUNÇÕES DE VALIDAÇÃO
+//////////////////////////////////////
 function checkPasswordStrength(password: string) {
   let score = 0;
   if (/[A-Z]/.test(password)) score++;
@@ -113,11 +107,14 @@ async function getSavedLogin() {
   return { savedEmail, savedPassword };
 }
 
+//////////////////////////////////////
+// COMPONENTE PRINCIPAL
+//////////////////////////////////////
 export default function LoginScreen() {
   const router = useRouter();
   const { t } = useTranslation();
 
-  // >>> ESTADOS E LÓGICA (INALTERADOS) <<<
+  // ESTADOS DE FORMULÁRIO
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -128,10 +125,9 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState("Fraca");
-
-  const [banModalVisible, setBanModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // MODAL DE IDIOMA
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
   const languages = [
     { code: "pt", label: "Português" },
@@ -139,22 +135,58 @@ export default function LoginScreen() {
     { code: "es", label: "Español" },
   ];
 
+  // LOGO ANIMADO
   const logoScale = useRef(new Animated.Value(1)).current;
 
+  // LOGIN SALVO
   const [savedEmail, setSavedEmail] = useState("");
   const [savedPassword, setSavedPassword] = useState("");
   const [hasSavedLogin, setHasSavedLogin] = useState(false);
+  const [stayLogged, setStayLogged] = useState(false);
 
-  // >>> MANTENDO A LÓGICA DA FUNÇÃO isUserBanned <<<
-  async function isUserBanned(userId: string): Promise<boolean> {
+  // >>> ESTADO PARA CARREGAMENTO INICIAL <<<
+  // Serve para não ficar piscando a tela de login
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // >>> MODAL CUSTOMIZADO <<<
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalTitle, setModalTitle] = useState("");
+  const [modalMessage, setModalMessage] = useState("");
+
+  // >>> Guardamos uma ação extra para executar quando o modal fechar
+  const [onModalCloseAction, setOnModalCloseAction] = useState<() => void>(() => {});
+
+  // Mostra o modal e define uma ação a ser executada quando clicar em "OK"
+  function showModal(title: string, message: string, onCloseCb?: () => void) {
+    setModalTitle(title);
+    setModalMessage(message || "");
+    setModalVisible(true);
+
+    if (onCloseCb) {
+      setOnModalCloseAction(() => onCloseCb);
+    } else {
+      setOnModalCloseAction(() => {});
+    }
+  }
+
+  // Fechar o modal e executar a ação (caso exista)
+  function handleCloseModal() {
+    setModalVisible(false);
+    onModalCloseAction(); // Executa a callback (ex: navegar para a Home)
+  }
+
+  //////////////////////////////////////
+  // VERIFICAR SE USUÁRIO ESTÁ BANIDO
+  //////////////////////////////////////
+  async function isUserBanned(id: string): Promise<boolean> {
     try {
       const leaguesSnap = await getDocs(collection(db, "leagues"));
       for (const leagueDoc of leaguesSnap.docs) {
         const banSnap = await getDocs(
           collection(db, `leagues/${leagueDoc.id}/roles/ban/members`)
         );
-        if (banSnap.docs.some((doc) => doc.id === userId)) {
-          console.log(`🚫 Usuário ${userId} está banido na liga ${leagueDoc.id}`);
+        if (banSnap.docs.some((doc) => doc.id === id)) {
+          console.log(`🚫 Usuário ${id} está banido na liga ${leagueDoc.id}`);
           return true;
         }
       }
@@ -164,9 +196,11 @@ export default function LoginScreen() {
     return false;
   }
 
-  const [stayLogged, setStayLogged] = useState(false);
+  //////////////////////////////////////
+  // EFFECTS
+  //////////////////////////////////////
 
-  // >>> ANIMAÇÃO DO LOGO <<<
+  // >>> Animação do LOGO
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -186,6 +220,7 @@ export default function LoginScreen() {
     ).start();
   }, [logoScale]);
 
+  // >>> Buscar login salvo
   useEffect(() => {
     (async () => {
       try {
@@ -201,6 +236,7 @@ export default function LoginScreen() {
     })();
   }, []);
 
+  // >>> Carregar stayLogged
   useEffect(() => {
     (async () => {
       try {
@@ -214,17 +250,19 @@ export default function LoginScreen() {
     })();
   }, []);
 
+  // >>> onAuthStateChanged (verifica se usuário já está logado)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
       if (user) {
-        setLoading(true);
         try {
+          setLoading(true);
           const firebaseToken = await user.getIdToken(true);
           const docRef = doc(db, "login", user.uid);
           const snap = await getDoc(docRef);
 
           if (!snap.exists()) {
-            Alert.alert("Conta incompleta", "Seu cadastro não está completo.");
+            // Conta incompleta
+            showModal("Conta incompleta", "Seu cadastro não está completo.");
             await signOut(auth);
             setLoading(false);
             return;
@@ -232,20 +270,29 @@ export default function LoginScreen() {
 
           const data = snap.data();
           if (!data.playerId || !data.pin) {
-            Alert.alert("Dados ausentes", "Seu cadastro está incompleto.");
+            // Dados ausentes
+            showModal("Dados ausentes", "Seu cadastro está incompleto.");
             await signOut(auth);
             setLoading(false);
             return;
           }
 
-          const isBanned = await isUserBanned(data.playerId);
-          if (isBanned) {
-            setBanModalVisible(true);
+          // Checar se está banido
+          const banned = await isUserBanned(data.playerId);
+          if (banned) {
+            showModal(
+              "Banido!",
+              t("login.alerts.ban_message"),
+              () => {
+                // Ao fechar, não navega, apenas fica aqui
+              }
+            );
             await signOut(auth);
             setLoading(false);
             return;
           }
 
+          // Salvar dados no AsyncStorage
           await AsyncStorage.setItem("@userId", data.playerId);
           await AsyncStorage.setItem("@userPin", data.pin);
           await AsyncStorage.setItem("@userName", data.name || "Jogador");
@@ -258,20 +305,32 @@ export default function LoginScreen() {
             await AsyncStorage.removeItem("@stayLogged");
           }
 
-          Alert.alert("Bem-vindo!", `Olá, ${data.name || "Jogador"}!`);
-          router.push("/(tabs)/home");
+          // Exibir modal de Bem-vindo e, ao fechar, navegar para Home
+          showModal(
+            "Bem-vindo!",
+            `Olá, ${data.name || "Jogador"}!`,
+            () => {
+              router.push("/(tabs)/home");
+            }
+          );
         } catch (e) {
           console.log("Erro no onAuthStateChanged:", e);
-          Alert.alert("Erro", "Falha ao carregar dados.");
+          showModal("Erro", "Falha ao carregar dados.");
         } finally {
           setLoading(false);
         }
       }
+      // Se não houver user, apenas marcamos que terminamos de checar
+      else {
+        setLoading(false);
+      }
+      setCheckingAuth(false);
     });
 
     return () => unsubscribe();
   }, [stayLogged]);
 
+  // >>> Renovar token (foreground)
   useEffect(() => {
     const interval = setInterval(async () => {
       const currentUser = auth.currentUser;
@@ -288,6 +347,7 @@ export default function LoginScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  // >>> Renovar token (ao voltar do background)
   useEffect(() => {
     const renewToken = async () => {
       const currentUser = auth.currentUser;
@@ -311,6 +371,7 @@ export default function LoginScreen() {
     return () => appStateListener.remove();
   }, []);
 
+  // >>> Calcular força da senha se for signup
   useEffect(() => {
     if (mode === "signup") {
       const s = checkPasswordStrength(password);
@@ -318,28 +379,33 @@ export default function LoginScreen() {
     }
   }, [mode, password]);
 
+  //////////////////////////////////////
+  // TROCAR IDIOMA
+  //////////////////////////////////////
   function changeLanguage(lang: string) {
     i18n.changeLanguage(lang);
     setLanguageModalVisible(false);
   }
 
+  //////////////////////////////////////
+  // FUNÇÕES DE SIGNUP, LOGIN, RESET
+  //////////////////////////////////////
   async function handleSignUp() {
     if (!email || !password || !userId || !pin || !playerName) {
-      Alert.alert(t("login.alerts.empty_fields"));
+      showModal("", t("login.alerts.empty_fields"));
       return;
     }
     if (!validateEmail(email)) {
-      Alert.alert(t("login.alerts.invalid_email"));
+      showModal("", t("login.alerts.invalid_email"));
       return;
     }
     if (!validatePassword(password)) {
-      Alert.alert(t("login.alerts.weak_password"));
+      showModal("", t("login.alerts.weak_password"));
       return;
     }
     setLoading(true);
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
-
       const docRef = doc(db, "login", cred.user.uid);
       await setDoc(docRef, {
         email,
@@ -348,12 +414,11 @@ export default function LoginScreen() {
         name: playerName,
         createdAt: new Date().toISOString(),
       });
-
       await saveLoginData(email, password);
 
-      Alert.alert(t("login.alerts.signup_success", { playerId: userId, pin }));
+      showModal("", t("login.alerts.signup_success", { playerId: userId, pin }));
     } catch (err: any) {
-      Alert.alert(t("login.alerts.signup_error", { error: err.message || "" }));
+      showModal("", t("login.alerts.signup_error", { error: err.message || "" }));
     } finally {
       setLoading(false);
     }
@@ -361,7 +426,7 @@ export default function LoginScreen() {
 
   async function handleSignIn() {
     if (!email || !password) {
-      Alert.alert(t("login.alerts.empty_fields"));
+      showModal("", t("login.alerts.empty_fields"));
       return;
     }
     setLoading(true);
@@ -376,7 +441,7 @@ export default function LoginScreen() {
       } else if (err.code === "auth/user-not-found") {
         msg = t("login.alerts.user_not_found");
       }
-      Alert.alert(t("login.alerts.login_error", { error: "" }), msg);
+      showModal(t("login.alerts.login_error", { error: "" }), msg);
     } finally {
       setLoading(false);
     }
@@ -384,7 +449,7 @@ export default function LoginScreen() {
 
   async function handleResetPassword() {
     if (!email) {
-      Alert.alert(
+      showModal(
         t("login.alerts.password_reset_error", { error: "" }),
         t("login.alerts.invalid_email")
       );
@@ -392,9 +457,10 @@ export default function LoginScreen() {
     }
     try {
       await sendPasswordResetEmail(auth, email);
-      Alert.alert(t("login.alerts.password_reset_sent"));
+      showModal("", t("login.alerts.password_reset_sent"));
     } catch (err: any) {
-      Alert.alert(
+      showModal(
+        "",
         t("login.alerts.password_reset_error", { error: err.message || "" })
       );
     }
@@ -406,7 +472,7 @@ export default function LoginScreen() {
       await signInWithEmailAndPassword(auth, savedEmail, savedPassword);
       console.log("Login automático com:", savedEmail);
     } catch (err) {
-      Alert.alert("Erro", "Falha ao entrar automaticamente.");
+      showModal("Erro", "Falha ao entrar automaticamente.");
     }
     setLoading(false);
   }
@@ -417,10 +483,13 @@ export default function LoginScreen() {
     setSavedEmail("");
     setSavedPassword("");
     setHasSavedLogin(false);
-    Alert.alert("Login removido", "Seu login salvo foi apagado.");
+    showModal("Login removido", "Seu login salvo foi apagado.");
   }
 
-  if (loading) {
+  //////////////////////////////////////
+  // ESTADO INICIAL DE CHECAGEM DE AUTENTICAÇÃO
+  //////////////////////////////////////
+  if (checkingAuth || loading) {
     return (
       <View style={s.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.PRIMARY} />
@@ -431,11 +500,57 @@ export default function LoginScreen() {
     );
   }
 
+  //////////////////////////////////////
+  // SE NÃO ESTÁ CARREGANDO E NÃO TEM USUÁRIO,
+  // MOSTRA A TELA DE LOGIN
+  //////////////////////////////////////
   return (
     <ImageBackground
       source={require("../../assets/images/background_login.jpg")}
       style={s.background}
     >
+      {/* MODAL CUSTOMIZADO (um só) */}
+      <CustomModal
+        visible={modalVisible}
+        onClose={handleCloseModal}
+        title={modalTitle}
+        message={modalMessage}
+      />
+
+      {/* MODAL DE SELEÇÃO DE IDIOMA */}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={languageModalVisible}
+        onRequestClose={() => setLanguageModalVisible(false)}
+      >
+        <View style={s.modalOverlay}>
+          <View style={s.modalContainer}>
+            <Text style={s.modalTitle}>{t("login.select_language")}</Text>
+            <FlatList
+              data={languages}
+              keyExtractor={(item) => item.code}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={s.listItem}
+                  android_ripple={{ color: "#777" }}
+                  onPress={() => changeLanguage(item.code)}
+                >
+                  <Text style={s.listText}>{item.label}</Text>
+                </Pressable>
+              )}
+            />
+            <TouchableOpacity
+              style={s.closeButton}
+              onPress={() => setLanguageModalVisible(false)}
+            >
+              <Text style={s.closeText}>{t("login.cancel")}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CONTEÚDO DA TELA DE LOGIN */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -460,73 +575,17 @@ export default function LoginScreen() {
               : t("login.title_login")}
           </Animatable.Text>
 
-          {/* MODAL DE IDIOMA */}
-          <Modal
-            animationType="slide"
-            transparent
-            visible={languageModalVisible}
-            onRequestClose={() => setLanguageModalVisible(false)}
-          >
-            <View style={s.modalOverlay}>
-              <View style={s.modalContainer}>
-                <Text style={s.modalTitle}>{t("login.select_language")}</Text>
-                <FlatList
-                  data={languages}
-                  keyExtractor={(item) => item.code}
-                  renderItem={({ item }) => (
-                    <Pressable
-                      style={s.listItem}
-                      android_ripple={{ color: "#777" }}
-                      onPress={() => changeLanguage(item.code)}
-                    >
-                      <Text style={s.listText}>{item.label}</Text>
-                    </Pressable>
-                  )}
-                />
-                <TouchableOpacity
-                  style={s.closeButton}
-                  onPress={() => setLanguageModalVisible(false)}
-                >
-                  <Text style={s.closeText}>{t("login.cancel")}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Modal>
-
-          {/* MODAL BANIDO */}
-          <Modal
-            animationType="fade"
-            transparent
-            visible={banModalVisible}
-            onRequestClose={() => setBanModalVisible(false)}
-          >
-            <View style={s.banOverlay}>
-              <Animatable.View
-                animation="zoomIn"
-                duration={400}
-                style={s.banContainer}
-              >
-                <Image
-                  source={require("../../assets/images/pikachu_happy.png")}
-                  style={s.banImage}
-                />
-                <Text style={s.banTitle}>Banido!</Text>
-                <Text style={s.banText}>{t("login.alerts.ban_message")}</Text>
-                <TouchableOpacity
-                  onPress={() => setBanModalVisible(false)}
-                  style={s.banButton}
-                >
-                  <Text style={s.banButtonText}>Ok</Text>
-                </TouchableOpacity>
-              </Animatable.View>
-            </View>
-          </Modal>
-
-          {/* FORMULÁRIO DE EMAIL */}
+          {/* FORMULÁRIO LOGIN/SIGNUP */}
           <Animatable.View animation="fadeInUp" style={{ width: "100%" }}>
+            {/* EMAIL */}
             <Text style={s.label}>{t("login.email_label")}</Text>
             <View style={s.inputContainer}>
-              <Ionicons name="mail" size={20} color="#999" style={{ marginLeft: 10, marginRight: 6 }}/>
+              <Ionicons
+                name="mail"
+                size={20}
+                color="#999"
+                style={{ marginLeft: 10, marginRight: 6 }}
+              />
               <TextInput
                 style={[s.input, { flex: 1 }]}
                 placeholder={t("login.email_placeholder") || ""}
@@ -538,10 +597,15 @@ export default function LoginScreen() {
               />
             </View>
 
-            {/* FORMULÁRIO DE SENHA */}
+            {/* SENHA */}
             <Text style={s.label}>{t("login.password_label")}</Text>
             <View style={s.inputContainer}>
-              <Ionicons name="lock-closed" size={20} color="#999" style={{ marginLeft: 10, marginRight: 6 }}/>
+              <Ionicons
+                name="lock-closed"
+                size={20}
+                color="#999"
+                style={{ marginLeft: 10, marginRight: 6 }}
+              />
               <TextInput
                 style={[s.input, { flex: 1 }]}
                 placeholder={t("login.password_placeholder") || ""}
@@ -563,17 +627,14 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Botão "Esqueci a senha" apenas no modo Login */}
+            {/* ESQUECI A SENHA */}
             {mode === "login" && (
-              <TouchableOpacity
-                style={s.forgotButton}
-                onPress={handleResetPassword}
-              >
+              <TouchableOpacity style={s.forgotButton} onPress={handleResetPassword}>
                 <Text style={s.forgotText}>{t("login.forgot_password")}</Text>
               </TouchableOpacity>
-          )}
+            )}
 
-            {/* Força da senha se for SIGNUP */}
+            {/* FORÇA DE SENHA (somente signup) */}
             {mode === "signup" && (
               <Text
                 style={[
@@ -585,9 +646,10 @@ export default function LoginScreen() {
               </Text>
             )}
 
-            {/* CAMPOS EXTRAS SE FOR SIGNUP */}
+            {/* CAMPOS EXTRAS (signup) */}
             {mode === "signup" && (
               <>
+                {/* NOME */}
                 <Text style={s.label}>{t("login.player_name_label")}</Text>
                 <View style={s.inputContainer}>
                   <Ionicons
@@ -605,6 +667,7 @@ export default function LoginScreen() {
                   />
                 </View>
 
+                {/* ID DO JOGADOR */}
                 <Text style={s.label}>{t("login.player_id_label")}</Text>
                 <View style={s.inputContainer}>
                   <Ionicons
@@ -623,6 +686,7 @@ export default function LoginScreen() {
                   />
                 </View>
 
+                {/* PIN */}
                 <Text style={s.label}>{t("login.pin_label")}</Text>
                 <View style={s.inputContainer}>
                   <Ionicons
@@ -654,29 +718,36 @@ export default function LoginScreen() {
               </>
             )}
 
-            {/* BOTÃO PRINCIPAL: SIGNUP ou LOGIN */}
+            {/* BOTÃO PRINCIPAL */}
             <Animatable.View
               animation="bounceIn"
               delay={300}
-              style={{
-                marginTop: 20,
-                alignItems: "center",
-              }}
+              style={{ marginTop: 20, alignItems: "center" }}
             >
               {mode === "signup" ? (
                 <TouchableOpacity style={s.signupButton} onPress={handleSignUp}>
-                  <Ionicons name="person-add-outline" size={18} color="#FFF" style={{ marginRight: 6 }}/>
+                  <Ionicons
+                    name="person-add-outline"
+                    size={18}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
                   <Text style={s.buttonText}>{t("login.signup_button")}</Text>
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity style={s.loginButton} onPress={handleSignIn}>
-                  <Ionicons name="log-in-outline" size={18} color="#FFF" style={{ marginRight: 6 }}/>
+                  <Ionicons
+                    name="log-in-outline"
+                    size={18}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
                   <Text style={s.buttonText}>{t("login.login_button")}</Text>
                 </TouchableOpacity>
               )}
             </Animatable.View>
 
-            {/* LINK PARA TROCAR DE MODO */}
+            {/* LINK TROCAR MODO */}
             <TouchableOpacity
               style={{ marginTop: 20, alignSelf: "center" }}
               onPress={() => setMode(mode === "signup" ? "login" : "signup")}
@@ -688,25 +759,20 @@ export default function LoginScreen() {
               </Text>
             </TouchableOpacity>
 
-            {/* LOGIN SALVO -> BOTÃO AUTOLOGIN */}
+            {/* LOGIN SALVO */}
             {hasSavedLogin && (
               <View style={{ marginTop: 24 }}>
                 <Text style={{ color: COLORS.SECONDARY, marginBottom: 8 }}>
                   Você tem um login salvo:
                 </Text>
-                <TouchableOpacity
-                  style={s.autoLoginButton}
-                  onPress={handleAutoLogin}
-                >
+                <TouchableOpacity style={s.autoLoginButton} onPress={handleAutoLogin}>
                   <Ionicons
                     name="play-circle-outline"
                     size={16}
                     color="#FFF"
                     style={{ marginRight: 6 }}
                   />
-                  <Text style={s.autoLoginText}>
-                    Entrar como {savedEmail}
-                  </Text>
+                  <Text style={s.autoLoginText}>Entrar como {savedEmail}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={s.forgetSavedButton}
@@ -731,7 +797,12 @@ export default function LoginScreen() {
                 style={s.languageButton}
                 onPress={() => setLanguageModalVisible(true)}
               >
-                <Ionicons name="language-outline" size={16} color="#FFF" style={{ marginRight: 8 }}/>
+                <Ionicons
+                  name="language-outline"
+                  size={16}
+                  color="#FFF"
+                  style={{ marginRight: 8 }}
+                />
                 <Text style={s.languageButtonText}>Mudar idioma</Text>
               </TouchableOpacity>
             </View>
@@ -913,47 +984,6 @@ const s = StyleSheet.create({
   closeText: {
     color: "#FFFFFF",
     fontSize: 16,
-    fontWeight: "bold",
-  },
-  banOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  banContainer: {
-    width: "80%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 15,
-    alignItems: "center",
-    padding: 20,
-  },
-  banImage: {
-    width: 80,
-    height: 80,
-    marginBottom: 15,
-  },
-  banTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333333",
-    marginBottom: 10,
-  },
-  banText: {
-    fontSize: 14,
-    color: "#666666",
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  banButton: {
-    backgroundColor: COLORS.PRIMARY,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  banButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
     fontWeight: "bold",
   },
 });

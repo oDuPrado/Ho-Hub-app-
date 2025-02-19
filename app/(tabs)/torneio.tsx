@@ -205,24 +205,32 @@ export default function TorneioScreen() {
   }, []);
 
   useFocusEffect(
-  useCallback(() => {
-    setInFocus(true);
-    console.log("==> [TorneioScreen] Focus in. Atualizando dados...");
-    fetchTournamentData(); // Atualiza os dados ao entrar na tela
-
-    // Inicia o intervalo apenas se estiver na tela
-    intervalRef.current = setInterval(() => {
-      console.log("==> [TorneioScreen] Atualizando dados automaticamente...");
-      fetchTournamentData();
-    }, 60000);
-
-    return () => {
-      console.log("==> [TorneioScreen] Focus out. Limpando intervalo.");
-      setInFocus(false);
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [])
-);
+    useCallback(() => {
+      setInFocus(true);
+      console.log("==> [TorneioScreen] Focus in. Atualizando dados...");
+      fetchTournamentData(); // Atualiza os dados ao entrar na tela
+  
+      // Limpa qualquer intervalo existente antes de criar um novo
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+  
+      // Agora cria um novo intervalo
+      intervalRef.current = setInterval(() => {
+        console.log("==> [TorneioScreen] Atualizando dados automaticamente...");
+        fetchTournamentData();
+      }, 60000);
+  
+      return () => {
+        console.log("==> [TorneioScreen] Focus out. Limpando intervalo.");
+        setInFocus(false);
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null; // Garante que o intervalo foi zerado
+        }
+      };
+    }, [])
+  );   
 
   useEffect(() => {
     requestNotificationPermission();
@@ -323,18 +331,49 @@ export default function TorneioScreen() {
 
       let foundMesa: string | null = null;
       let foundOpponent: string | null = null;
-      for (const tableId in tables) {
+
+      // Pega só as chaves das mesas que existem nessa rodada
+      const tableKeys = Object.keys(tables);
+
+      for (const tableId of tableKeys) {
         const matchInfo = tables[tableId];
-        if (matchInfo.player1_id === storedId) {
-          foundMesa = tableId;
-          foundOpponent = matchInfo.player2;
-          break;
-        } else if (matchInfo.player2_id === storedId) {
-          foundMesa = tableId;
-          foundOpponent = matchInfo.player1;
-          break;
+
+        // Se faltar algum ID, ignora
+        if (!matchInfo.player1_id || !matchInfo.player2_id) {
+          continue;
+        }
+
+        console.log("Stored ID:", storedId, "table:", tableId);
+        console.log("Match player1_id:", matchInfo.player1_id, "Match player2_id:", matchInfo.player2_id);
+
+        // Se ainda não setamos a mesa (pra evitar sobrescrever se houver duplicado)
+        if (!foundMesa) {
+          if (matchInfo.player1_id === storedId) {
+            // Usuário é Player 1
+            foundMesa = tableId;
+            foundOpponent = matchInfo.player2;
+            console.log("-> [DEBUG] Definindo AsyncStorage (sou P1)");
+            await AsyncStorage.setItem("@player1Name", storedName ?? "Jogador 1");
+            await AsyncStorage.setItem("@player2Name", matchInfo.player2 ?? "Jogador 2");
+            break; // Sai do loop, pois já achamos a mesa certa
+          } else if (matchInfo.player2_id === storedId) {
+            // Usuário é Player 2
+            foundMesa = tableId;
+            foundOpponent = matchInfo.player1;
+            console.log("-> [DEBUG] Definindo AsyncStorage (sou P2)");
+            await AsyncStorage.setItem("@player1Name", matchInfo.player1 ?? "Jogador 1");
+            await AsyncStorage.setItem("@player2Name", storedName ?? "Jogador 2");
+            break; // Sai do loop
+          }
         }
       }
+
+      // Depois do loop, se foundMesa estiver null, não achou nada
+      if (!foundMesa) {
+        console.log("-> [DEBUG] Não achamos nenhuma mesa para o usuário");
+        // Lida com essa situação (user não está jogando)
+      }
+
 
       if (!foundMesa) {
         console.log(`⚠️ Não está jogando na rodada ${maxRound}.`);
@@ -344,13 +383,6 @@ export default function TorneioScreen() {
         setMesaNumber(null);
         setOpponentName(null);
         setNotPlaying(false);
-
-        const storedUserName = await AsyncStorage.getItem("@userName");
-        const player1Name = storedUserName || "Jogador 1";
-        if (foundMesa && foundOpponent) {
-          await AsyncStorage.setItem("@player1Name", player1Name);
-          await AsyncStorage.setItem("@player2Name", foundOpponent);
-        }
         setTimeout(() => {
           setMesaNumber(foundMesa);
           setOpponentName(foundOpponent ?? null);

@@ -85,6 +85,7 @@ interface DeckData {
   id: string;
   name: string;
   playerId: string;
+  archetype?: string; // <-- Agora o arquétipo também será armazenado
 }
 
 export default function CalendarScreen() {
@@ -773,11 +774,12 @@ export default function CalendarScreen() {
               id: docSnap.id,
               name: docSnap.data().name || `Deck ${docSnap.id}`,
               playerId,
+              archetype: docSnap.data().archetype || "Desconhecido", // <-- Pegando o arquétipo
             });
           });
           setUserDecks(arr);
         });
-  
+
         setInscricaoModalVisible(true);
       });
     });
@@ -801,28 +803,34 @@ export default function CalendarScreen() {
       Alert.alert("Erro", "Liga não selecionada.");
       return;
     }
-
+  
     if (detalhesTorneio.eventType !== "Liga Local" && !selectedDeckId) {
       Alert.alert("Erro", "Selecione um deck ou verifique o tipo de evento.");
       return;
     }
-
+  
     try {
       const colRef = collection(db, "leagues", leagueStored, "calendar", inscricaoTorneioId, "inscricoes");
       const docRef = doc(colRef, playerId);
-
+  
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         Alert.alert("Aviso", "Você já se inscreveu neste torneio.");
         setInscricaoModalVisible(false);
         return;
       }
-
+  
+      // 🔥 Buscar o arquétipo do deck selecionado
+      const selectedDeck = userDecks.find(d => d.id === selectedDeckId);
+      const archetype = selectedDeck?.archetype || "Desconhecido"; // Se não encontrar, usa "Desconhecido"
+  
       await setDoc(docRef, {
         userId: playerId,
-        deckId: detalhesTorneio.eventType === "Liga Local" ? null : selectedDeckId,
+        deckId: selectedDeckId,
+        archetype: archetype, // Agora a variável está definida corretamente
         createdAt: new Date().toISOString(),
       });
+  
       Alert.alert("Sucesso", "Inscrição realizada com sucesso!");
       setInscricaoModalVisible(false);
     } catch (err) {
@@ -830,7 +838,7 @@ export default function CalendarScreen() {
       Alert.alert("Erro", "Falha ao salvar inscrição.");
     }
   }
-
+  
   // ================== DETALHES ==================
   function handleOpenDetalhes(t: Torneio) {
     setDetalhesTorneio(t);
@@ -1779,8 +1787,9 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
                     onPress={() => setSelectedDeckId(dk.id)}
                   >
                     <Text style={styles.deckOptionText}>
-                      {dk.playerId} | {dk.name}
-                    </Text>
+                    {dk.name} | ({dk.archetype})
+                  </Text>
+
                   </TouchableOpacity>
                 ))
               )

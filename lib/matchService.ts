@@ -398,7 +398,7 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
             rivalWins,
             draws,
             lastWinner,
-            wrPercentage: totalMatches > 0 ? (userWins / totalMatches) * 100 : 0,
+            wrPercentage: ((userWins + (draws * 0.5)) / totalMatches) * 100
           };
         }
       }

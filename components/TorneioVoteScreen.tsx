@@ -8,9 +8,9 @@ import {
   Alert,
   Modal,
   TextInput,
-  Platform,
   Keyboard,
   ActivityIndicator,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
@@ -19,9 +19,9 @@ import * as Animatable from "react-native-animatable";
 import { useTranslation } from "react-i18next";
 
 const RED = "#E3350D";
-const BLACK = "#1E1E1E";
-const DARK_GRAY = "#292929";
+const DARK_GRAY = "#1E1E1E";
 const WHITE = "#FFFFFF";
+const SCREEN_WIDTH = Dimensions.get("window").width;
 
 interface VoteProps {
   visible: boolean;
@@ -29,16 +29,10 @@ interface VoteProps {
   mesaId: string | null;
   leagueId: string;
   opponentName: string;
-  // Caso os nomes sejam passados via props, eles serão usados;
-  // se não, o modal buscará via AsyncStorage (get-data)
   p1Name?: string;
   p2Name?: string;
 }
 
-/**
- * Substitui "mesa.html". Permite votar com PIN e escolher vencedor
- * ou Empate, com layout estilizado e animações.
- */
 export default function TorneioVoteScreen({
   visible,
   onClose,
@@ -59,43 +53,42 @@ export default function TorneioVoteScreen({
   const [player1Name, setPlayer1Name] = useState<string>(p1Name || "");
   const [player2Name, setPlayer2Name] = useState<string>(p2Name || "");
 
-  // Sempre que abrir o modal, limpa o PIN e feedback
+  // Ao abrir o modal, limpa o PIN e feedback
   useEffect(() => {
     if (visible) {
       setUserPin("");
       setFeedbackMessage("");
-      
-      // Se os nomes não foram passados via props, tenta buscá-los do AsyncStorage
+
       async function fetchPlayers() {
         console.log("🔍 Buscando nomes dos jogadores...");
-      
+
         if (!p1Name) {
           const storedP1 = await AsyncStorage.getItem("@player1Name");
           console.log("📌 [DEBUG] Valor salvo no AsyncStorage para Player 1:", storedP1);
-          setPlayer1Name(storedP1 || "Jogador 1"); // Se vier `null`, define como "Jogador 1"
+          setPlayer1Name(storedP1 || "Jogador 1");
         }
-      
+
         if (!p2Name) {
           const storedP2 = await AsyncStorage.getItem("@player2Name");
           console.log("📌 [DEBUG] Valor salvo no AsyncStorage para Player 2:", storedP2);
-          setPlayer2Name(storedP2 || "Jogador 2"); // Se vier `null`, define como "Jogador 2"
+          setPlayer2Name(storedP2 || "Jogador 2");
         }
-      
-        console.log("✅ Nome do Jogador 1 definido:", player1Name);
-        console.log("✅ Nome do Jogador 2 definido:", player2Name);
       }
-  
+
       fetchPlayers();
     }
   }, [visible, p1Name, p2Name]);
-  
+
+  useEffect(() => {
+    console.log("✅ Nome atualizado do Jogador 1:", player1Name);
+    console.log("✅ Nome atualizado do Jogador 2:", player2Name);
+  }, [player1Name, player2Name]);
 
   async function sendVote(result: string) {
     try {
       setLoading(true);
       setFeedbackMessage("");
 
-      // 🔥 Obtém os dados necessários do AsyncStorage
       const storedLeagueId = await AsyncStorage.getItem("@leagueId");
       const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
       const storedUserId = await AsyncStorage.getItem("@userId");
@@ -140,7 +133,7 @@ export default function TorneioVoteScreen({
         console.log("✅ Voto registrado com sucesso!", json);
         Alert.alert("Sucesso", json.message || "Voto registrado!");
         setFeedbackMessage(json.message || "Voto registrado com sucesso!");
-        onClose(); // Fecha o modal após o voto
+        onClose();
       }
     } catch (err) {
       console.error("Erro no voto:", err);
@@ -156,7 +149,6 @@ export default function TorneioVoteScreen({
       setLoading(true);
       setFeedbackMessage("");
 
-      // Obtém dados necessários do AsyncStorage
       const storedLeagueId = await AsyncStorage.getItem("@leagueId");
       const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
 
@@ -204,176 +196,240 @@ export default function TorneioVoteScreen({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      {/* Overlay com gradiente animado */}
       <Animatable.View
         style={styles.overlay}
         animation="fadeIn"
-        duration={300}
+        duration={500}
         onTouchStart={() => Keyboard.dismiss()}
       >
-        <Animatable.View style={styles.modalContainer} animation="zoomIn" duration={300}>
-          <Text style={styles.modalTitle}>
-            Mesa {mesaId ?? "?"} <Ionicons name="play" color="#FFD700" size={20} />
-          </Text>
-          <Text style={styles.modalSubtitle}>Jogadores:</Text>
-          <Text style={styles.playersText}>
-            {player1Name || "Jogador 1"} vs {player2Name || "Jogador 2"}
-          </Text>
+        {/* Container principal do modal */}
+        <Animatable.View
+          style={styles.modalContainer}
+          animation="zoomIn"
+          duration={400}
+          easing="ease-out"
+        >
+          {/* Cabeçalho do Modal */}
+          <Animatable.View animation="fadeInDown" style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Mesa {mesaId ?? "?"}{" "}
+              <Ionicons name="play" color="#FFD700" size={20} />
+            </Text>
+            <Text style={styles.modalSubtitle}>
+              Jogadores
+            </Text>
+            <Text style={styles.playersText}>
+              {player1Name || "Jogador 1"}{" "}
+              <Ionicons name="flash" size={18} color="#FFD700" />
+              {" vs "}
+              <Ionicons name="flash" size={18} color="#FFD700" />
+              {" "}
+              {player2Name || "Jogador 2"}
+            </Text>
+          </Animatable.View>
 
-          <Text style={styles.modalLabel}>Digite seu PIN:</Text>
-          <TextInput
-            style={styles.pinInput}
-            value={userPin}
-            onChangeText={setUserPin}
-            placeholder="Ex: 1234"
-            placeholderTextColor="#888"
-            secureTextEntry
-          />
+          {/* Área do PIN */}
+          <Animatable.View animation="fadeInUp" style={styles.inputArea}>
+            <Text style={styles.modalLabel}>Digite seu PIN:</Text>
+            <TextInput
+              style={styles.pinInput}
+              value={userPin}
+              onChangeText={setUserPin}
+              placeholder="Ex: 1234"
+              placeholderTextColor="#888"
+              secureTextEntry
+            />
+          </Animatable.View>
 
+          {/* Área dos botões */}
           {loading ? (
             <ActivityIndicator color={RED} size="large" style={{ marginVertical: 20 }} />
           ) : (
             <>
-              <View style={styles.voteContainer}>
+              <Animatable.View animation="fadeInUp" delay={100} style={styles.voteContainer}>
                 <TouchableOpacity
                   style={styles.voteButton}
                   onPress={() => sendVote("Vitória Jogador 1")}
                 >
-                  <MaterialCommunityIcons name="trophy" size={24} color="#4CAF50" />
+                  <MaterialCommunityIcons name="trophy" size={26} color="#4CAF50" />
                   <Text style={styles.voteText}>
-                    Vitória do: {player1Name || "Jogador 1"}
+                    Vitória: {player1Name || "Jogador 1"}
                   </Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
-                  style={styles.voteButton}
+                  style={[styles.voteButton, { marginHorizontal: 8 }]}
                   onPress={() => sendVote("Vitória Jogador 2")}
                 >
-                  <MaterialCommunityIcons name="trophy" size={24} color="#F44336" />
+                  <MaterialCommunityIcons name="trophy" size={26} color="#F44336" />
                   <Text style={styles.voteText}>
-                    Vitória do: {player2Name || "Jogador 2"}
+                    Vitória: {player2Name || "Jogador 2"}
                   </Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
                   style={styles.voteButton}
                   onPress={() => sendVote("Empate")}
                 >
-                  <Ionicons name="hand-left" size={24} color="#FFC107" />
+                  <Ionicons name="hand-left" size={26} color="#FFC107" />
                   <Text style={styles.voteText}>Empate</Text>
                 </TouchableOpacity>
-              </View>
-              {/* Botão para limpar resultado */}
-              <TouchableOpacity style={styles.clearButton} onPress={clearVote}>
-                <Ionicons name="trash-bin" size={24} color="#fff" />
-                <Text style={styles.clearButtonText}>Limpar Resultado</Text>
-              </TouchableOpacity>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={150}>
+                <TouchableOpacity style={styles.clearButton} onPress={clearVote}>
+                  <Ionicons name="trash-bin" size={24} color="#fff" />
+                  <Text style={styles.clearButtonText}>Limpar Resultado</Text>
+                </TouchableOpacity>
+              </Animatable.View>
             </>
           )}
 
           {/* Feedback visual para o usuário */}
           {feedbackMessage !== "" && (
-            <Text style={styles.feedbackText}>{feedbackMessage}</Text>
+            <Animatable.Text
+              style={styles.feedbackText}
+              animation="pulse"
+              duration={500}
+              easing="ease-in-out"
+            >
+              {feedbackMessage}
+            </Animatable.Text>
           )}
 
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-            <Text style={styles.closeText}>Fechar</Text>
-          </TouchableOpacity>
+          {/* Botão de Fechar */}
+          <Animatable.View animation="fadeInUp" delay={200} style={styles.closeBtnContainer}>
+            <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+              <Ionicons name="close" size={20} color="#FFF" />
+              <Text style={styles.closeText}>Fechar</Text>
+            </TouchableOpacity>
+          </Animatable.View>
         </Animatable.View>
       </Animatable.View>
     </Modal>
   );
 }
 
+// ====================== ESTILOS ======================
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
+    // Gradient no background (fake gradient) + fallback
+    backgroundColor: DARK_GRAY,
     justifyContent: "center",
     alignItems: "center",
   },
   modalContainer: {
-    width: "85%",
-    backgroundColor: DARK_GRAY,
-    borderRadius: 10,
-    padding: 20,
+    width: SCREEN_WIDTH * 0.88,
+    backgroundColor: "#2D2D2D",
+    borderRadius: 20,
+    padding: 24,
+    overflow: "hidden",
+    elevation: 10,
+  },
+  modalHeader: {
+    marginBottom: 16,
+    alignItems: "center",
   },
   modalTitle: {
     color: WHITE,
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: "bold",
-    marginBottom: 8,
     textAlign: "center",
+    marginBottom: 4,
   },
   modalSubtitle: {
-    color: "#ccc",
+    color: "#BBB",
     fontSize: 14,
-    marginBottom: 4,
+    marginBottom: 8,
     textAlign: "center",
   },
   playersText: {
     color: WHITE,
     fontSize: 16,
-    marginBottom: 16,
+    marginBottom: 8,
     textAlign: "center",
+    fontWeight: "600",
+  },
+  inputArea: {
+    marginBottom: 16,
   },
   modalLabel: {
     color: WHITE,
     fontSize: 14,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   pinInput: {
     backgroundColor: "#444",
     color: WHITE,
     fontSize: 16,
-    width: "100%",
-    borderRadius: 6,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   voteContainer: {
     flexDirection: "row",
-    justifyContent: "space-around",
-    marginVertical: 8,
+    justifyContent: "space-between",
+    marginTop: 8,
+    marginBottom: 12,
   },
   voteButton: {
+    flexDirection: "column",
     alignItems: "center",
-    width: 90,
+    backgroundColor: "#333",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    minWidth: 90,
   },
   voteText: {
     color: WHITE,
-    marginTop: 4,
+    marginTop: 6,
     fontSize: 13,
     textAlign: "center",
+    fontWeight: "600",
   },
   clearButton: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#555",
-    borderRadius: 6,
+    backgroundColor: RED,
+    borderRadius: 10,
     paddingVertical: 10,
-    marginVertical: 12,
+    paddingHorizontal: 16,
+    alignSelf: "center",
   },
   clearButtonText: {
     color: WHITE,
     fontSize: 14,
+    fontWeight: "600",
     marginLeft: 8,
   },
   feedbackText: {
     color: WHITE,
     fontSize: 14,
     textAlign: "center",
-    marginVertical: 8,
+    marginVertical: 12,
+    fontWeight: "600",
+  },
+  closeBtnContainer: {
+    alignItems: "center",
+    marginTop: 8,
   },
   closeBtn: {
-    backgroundColor: RED,
-    borderRadius: 6,
-    padding: 12,
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: 16,
+    backgroundColor: "#444",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignSelf: "center",
   },
   closeText: {
     color: WHITE,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "bold",
+    marginLeft: 6,
   },
 });
