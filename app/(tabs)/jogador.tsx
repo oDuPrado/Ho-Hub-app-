@@ -53,6 +53,14 @@ import {
   MatchData,
 } from "../../lib/matchService";
 
+/** ================================ */
+/** IMPORTES DOS NOVOS COMPONENTES:  */
+/** 1) AvatarModal                  */
+/** 2) SeasonModal                  */
+/** ================================ */
+import AvatarModal from "../../components/AvatarModal";
+import SeasonModal from "../../components/SeasonModal";
+
 /** PlayerInfo e ConfrontoStats */
 interface PlayerInfo {
   userid: string;
@@ -138,6 +146,7 @@ export default function PlayerScreen() {
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
 
   // Avatar + Template
+  /** =========== REMOVEMOS O COD. DO MODAL DE AVATAR =========== */
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
   const [selectedAvatar, setSelectedAvatar] = useState<any>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number>(1);
@@ -183,6 +192,7 @@ export default function PlayerScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   // ========== NOVO: Modal de Temporada ==========
+  /** =========== REMOVEMOS O COD. DO MODAL DE TEMPORADA =========== */
   const [seasonModalVisible, setSeasonModalVisible] = useState(false);
 
   // ======================
@@ -860,60 +870,6 @@ export default function PlayerScreen() {
   }
 
   // ======================
-  // MODAL DE TEMPORADA
-  // ======================
-  function renderSeasonModal() {
-    const levelsArray = Array.from({ length: 150 }, (_, i) => i + 1);
-
-    return (
-      <Modal
-        visible={seasonModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSeasonModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <Animatable.View
-            style={styles.seasonModalContent}
-            animation="fadeInUp"
-            duration={400}
-          >
-            <Text style={styles.seasonModalTitle}>Progresso da Temporada</Text>
-            <MaterialCommunityIcons name="chess-rook" size={40} color="#FFF" style={{ marginBottom: 12 }} />
-            <Text style={styles.seasonModalSubtitle}>
-              Do Nível 1 ao Nível 150
-            </Text>
-
-            <ScrollView style={styles.towerScroll}>
-              {levelsArray.map((lvl) => {
-                const xpNeeded = (lvl * lvl) * 50; // mesma fórmula
-                return (
-                  <Animatable.View
-                    key={lvl}
-                    style={styles.towerLevelContainer}
-                    animation="fadeIn"
-                    delay={lvl * 5}
-                  >
-                    <MaterialCommunityIcons name="star-four-points" size={20} color="#FFF" />
-                    <Text style={styles.towerLevelText}>Nível {lvl} - {xpNeeded} XP</Text>
-                  </Animatable.View>
-                );
-              })}
-            </ScrollView>
-
-            <TouchableOpacity
-              style={styles.closeSeasonBtn}
-              onPress={() => setSeasonModalVisible(false)}
-            >
-              <Text style={styles.closeSeasonBtnText}>Fechar</Text>
-            </TouchableOpacity>
-          </Animatable.View>
-        </View>
-      </Modal>
-    );
-  }
-
-  // ======================
   // LAYOUT PRINCIPAL
   // ======================
   if (loading) {
@@ -939,8 +895,42 @@ export default function PlayerScreen() {
         </View>
       )}
 
-      {/* Modais */}
-      {renderSeasonModal()}
+      {/* Modais de Temporada e AvatarModal agora importados */}
+      <SeasonModal
+        visible={seasonModalVisible}
+        onClose={() => setSeasonModalVisible(false)}
+        currentLevel={level}
+        currentXp={xp}
+        xpForNextLevel={xpNextLevel}
+        seasonName="Temporada dos Dragões"
+      />
+
+      <AvatarModal
+        visible={avatarModalVisible}
+        onClose={() => setAvatarModalVisible(false)}
+        currentAvatarId={
+          // Tentando descobrir ID no array original:
+          (() => {
+            const found = avatarList.find((x) => x.uri === selectedAvatar);
+            return found?.id || 1;
+          })()
+        }
+        onSelectAvatar={async (avatarId) => {
+          const found = avatarList.find((av) => av.id === avatarId);
+          if (found) {
+            setSelectedAvatar(found.uri);
+            await AsyncStorage.setItem("@userAvatar", avatarId.toString());
+            if (userId) {
+              await updatePlayerAvatar(userId, avatarId);
+            }
+          }
+        }}
+        avatarsList={avatarList.map((av) => ({
+          ...av,
+          requiredXp: av.id > 3 ? av.id * 200 : 0, // Exemplo de XP base
+        }))}
+        userXp={xp}
+      />
 
       <TitlesModal
         visible={titlesModalVisible}
@@ -952,42 +942,6 @@ export default function PlayerScreen() {
         onClose={() => setHistoryModalVisible(false)}
         userId={userId}
       />
-      <Modal
-        visible={avatarModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setAvatarModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { width: "90%" }]}>
-            <Text style={[styles.modalTitle]}>Selecione um Avatar</Text>
-            <ScrollView contentContainerStyle={{ flexDirection: "row", flexWrap: "wrap" }}>
-              {avatarList.map((av) => (
-                <TouchableOpacity
-                  key={av.id}
-                  style={styles.avatarChoice}
-                  onPress={async () => {
-                    setSelectedAvatar(av.uri);
-                    setAvatarModalVisible(false);
-                    if (userId) {
-                      await AsyncStorage.setItem("@userAvatar", av.id.toString());
-                      await updatePlayerAvatar(userId, av.id);
-                    }
-                  }}
-                >
-                  <Image source={av.uri} style={styles.avatarImage} />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <Pressable
-              style={styles.closeModalBtn}
-              onPress={() => setAvatarModalVisible(false)}
-            >
-              <Text style={styles.closeModalText}>Cancelar</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
       <TemplateModal
         visible={templateModalVisible}
         onClose={() => setTemplateModalVisible(false)}

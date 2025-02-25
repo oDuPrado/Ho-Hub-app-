@@ -762,39 +762,63 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Modal de Filtro (mosaico) */}
-      <Modal
-        visible={filterModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeFilterModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.filterModalContainer}>
+          {/* Modal de Filtro (mosaico) */}
+    <Modal
+      visible={filterModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={closeFilterModal}
+    >
+      <View style={styles.modalOverlay}>
+
+        {/* Container animado para dar um 'fadeInUp' */}
+        <Animatable.View
+          style={styles.filterModalContainer}
+          animation="fadeInUp"
+          duration={500}
+          // optional: delay={100}
+        >
+          {/* Cabeçalho do Modal */}
+          <View style={styles.filterHeader}>
+            <MaterialCommunityIcons
+              name="earth"
+              size={28}
+              color="#E3350D"
+              style={{ marginRight: 10 }}
+            />
             <Text style={styles.filterModalTitle}>Selecionar Filtro</Text>
+          </View>
 
-            <TouchableOpacity
-              style={styles.showAllRow}
-              onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-                setShowAllLeagues(!showAllLeagues);
-              }}
-            >
-              <MaterialCommunityIcons
-                name={
-                  showAllLeagues
-                    ? "checkbox-marked-outline"
-                    : "checkbox-blank-outline"
-                }
-                size={24}
-                color="#E3350D"
-                style={{ marginRight: 10 }}
-              />
-              <Text style={styles.showAllText}>Mostrar todas as Cidades</Text>
-            </TouchableOpacity>
+          {/* Opção: Mostrar todas as ligas/cidades */}
+          <TouchableOpacity
+            style={styles.showAllRow}
+            onPress={() => {
+              LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
+              setShowAllLeagues(!showAllLeagues);
+            }}
+          >
+            <MaterialCommunityIcons
+              name={
+                showAllLeagues
+                  ? "checkbox-marked-outline"
+                  : "checkbox-blank-outline"
+              }
+              size={24}
+              color="#E3350D"
+              style={{ marginRight: 10 }}
+            />
+            <Text style={styles.showAllText}>Mostrar todas as Cidades</Text>
+          </TouchableOpacity>
 
-            {!showAllLeagues && (
-              <>
+          {/* Se NÃO mostrar todas as ligas/cidades, exibe o mosaico */}
+          {!showAllLeagues && (
+            <View style={styles.selectionContainer}>
+              {/* Botão e Lista de Cidades */}
+              <Animatable.View
+                style={styles.citySelection}
+                animation="fadeIn"
+                duration={300}
+              >
                 <TouchableOpacity
                   style={styles.cityButton}
                   onPress={() => {
@@ -811,40 +835,54 @@ export default function HomeScreen() {
                   <Text style={styles.cityButtonText}>Cidades</Text>
                 </TouchableOpacity>
 
+                {/* Lista de Cidades em Mosaico */}
                 {showMosaicCities && (
-                  <FlatList
-                    data={cities}
-                    keyExtractor={(item) => item}
-                    numColumns={2}
-                    style={styles.mosaicList}
-                    columnWrapperStyle={styles.mosaicRow}
-                    renderItem={({ item }) => {
-                      const selected = item === selectedCity;
-                      return (
-                        <TouchableOpacity
-                          style={[
-                            styles.mosaicItem,
-                            selected && { borderColor: "#E3350D" },
-                          ]}
-                          onPress={() => {
-                            setSelectedCity(item);
-                            setShowMosaicLeagues(true);
-                            fetchLeaguesByCity(item);
-                          }}
-                        >
-                          <MaterialCommunityIcons
-                            name="map-marker"
-                            size={24}
-                            color={selected ? "#E3350D" : "#FFF"}
-                          />
-                          <Text style={styles.mosaicItemText}>{item}</Text>
-                        </TouchableOpacity>
-                      );
-                    }}
-                  />
+                  <Animatable.View
+                    style={styles.mosaicContainer}
+                    animation="fadeInUp"
+                    duration={400}
+                  >
+                    <FlatList
+                      data={cities}
+                      keyExtractor={(item) => item}
+                      numColumns={2}
+                      style={styles.mosaicList}
+                      columnWrapperStyle={styles.mosaicRow}
+                      renderItem={({ item }) => {
+                        const selected = item === selectedCity;
+                        return (
+                          <TouchableOpacity
+                            style={[
+                              styles.mosaicItem,
+                              selected && { borderColor: "#E3350D" },
+                            ]}
+                            onPress={() => {
+                              setSelectedCity(item);
+                              setShowMosaicLeagues(true);
+                              fetchLeaguesByCity(item);
+                            }}
+                          >
+                            <MaterialCommunityIcons
+                              name="map-marker"
+                              size={24}
+                              color={selected ? "#E3350D" : "#FFF"}
+                            />
+                            <Text style={styles.mosaicItemText}>{item}</Text>
+                          </TouchableOpacity>
+                        );
+                      }}
+                    />
+                  </Animatable.View>
                 )}
+              </Animatable.View>
 
-                {showMosaicLeagues && (
+              {/* Lista de Ligas em Mosaico */}
+              {showMosaicLeagues && (
+                <Animatable.View
+                  style={styles.leagueSelection}
+                  animation="fadeInUp"
+                  duration={400}
+                >
                   <FlatList
                     data={leagues}
                     keyExtractor={(item) => item.id}
@@ -873,10 +911,13 @@ export default function HomeScreen() {
                       );
                     }}
                   />
-                )}
-              </>
-            )}
+                </Animatable.View>
+              )}
+            </View>
+          )}
 
+          {/* Botões Salvar e Voltar */}
+          <View style={styles.filterButtonsRow}>
             <TouchableOpacity
               style={styles.saveFilterButton}
               onPress={handleSaveFilter}
@@ -891,8 +932,9 @@ export default function HomeScreen() {
               <Text style={styles.closeFilterText}>Voltar</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+        </Animatable.View>
+      </View>
+    </Modal>
     </View>
   );
 
@@ -1308,21 +1350,6 @@ const styles = StyleSheet.create({
   },
 
   // Modal de Filtro
-  filterModalContainer: {
-    width: "90%",
-    backgroundColor: "#292929",
-    padding: 16,
-    borderRadius: 12,
-    alignSelf: "center",
-    marginTop: 60,
-  },
-  filterModalTitle: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 12,
-    textAlign: "center",
-  },
   showAllRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1431,5 +1458,57 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingVertical: 10,
     paddingHorizontal: 16,
+  },
+  // Container geral do modal, já existe mas podemos incrementar se quiser
+  filterModalContainer: {
+    backgroundColor: "#292929",
+    padding: 16,
+    borderRadius: 12,
+    alignSelf: "center",
+    marginTop: 60,
+    width: "90%",
+    // Se quiser sombra no iOS
+    shadowColor: "#000",
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    // E uma sombra leve no Android
+    elevation: 6,
+  },
+
+  // Novo cabeçalho do filtro
+  filterHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+
+  filterModalTitle: {
+    color: "#FFF",
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+
+  selectionContainer: {
+    marginTop: 10,
+  },
+
+  citySelection: {
+    marginBottom: 14,
+  },
+  leagueSelection: {
+    marginTop: 8,
+  },
+
+  mosaicContainer: {
+    marginTop: 10,
+    // para limitar a altura e permitir rolagem se houver muitos itens
+    maxHeight: 200,
+  },
+
+  filterButtonsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 16,
   },
 });

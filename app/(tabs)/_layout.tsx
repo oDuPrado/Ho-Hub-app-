@@ -1,8 +1,17 @@
 import React from "react";
-import { createDrawerNavigator } from "@react-navigation/drawer";
+import {
+  createDrawerNavigator,
+  DrawerContentScrollView,
+  DrawerContentComponentProps,
+  DrawerItemList,
+} from "@react-navigation/drawer";
 import { withLayoutContext } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useTranslation } from "react-i18next"; // <--- Import do i18n
+import { useTranslation } from "react-i18next";
+import { View, Text, StyleSheet } from "react-native";
+
+// (Opcional) Para usar gradiente como fundo
+import { LinearGradient } from "expo-linear-gradient";
 
 // Importar telas
 import HomeScreen from "./home";
@@ -15,30 +24,66 @@ import CartasScreen from "./Cartas";
 import AnalyticsScreen from "./Analise";
 import NoticiasScreen from "./Noticias";
 import SugestaoScreen from "./Sugestao";
-import ChatsListScreen from "./chats";
 import PlayerScreen from "./Cadastros";
 import ClassicosScreen from "./classicos";
 
+// CORES PADRÃO
+const DARK_BG = "#1E1E1E";
+const RED = "#E3350D";
+const WHITE = "#FFFFFF";
+
 const Drawer = createDrawerNavigator();
 
+// Exemplo de conteúdo customizado do Drawer (cabeçalho + lista)
+function CustomDrawerContent(props: DrawerContentComponentProps) { 
+  const { t } = useTranslation();
+
+  return (
+    // LinearGradient para dar um fundinho gradiente
+    <LinearGradient
+      colors={[DARK_BG, "#292929"]} 
+      style={{ flex: 1 }}
+    >
+      <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
+
+        {/* Lista de itens do Drawer */}
+        <DrawerItemList {...props} />
+      </DrawerContentScrollView>
+    </LinearGradient>
+  );
+}
+
 function DrawerLayout() {
-  const { t } = useTranslation(); // <--- Hook do i18n para pegar traduções do "drawer"
+  const { t } = useTranslation();
 
   return (
     <Drawer.Navigator
+      // Define que vamos renderizar um conteúdo customizado
+      drawerContent={(props) => <CustomDrawerContent {...props} />}
       screenOptions={{
+        // Desativa o swipe
+        swipeEnabled: false,
+        // Header (barra superior) com fundo escuro e texto branco
+        headerStyle: {
+          backgroundColor: DARK_BG,
+          elevation: 0, // remove sombra do Android
+          shadowOpacity: 0, // remove sombra do iOS
+        },
+        headerTintColor: WHITE,
+        // Estilos do drawer
         drawerStyle: {
-          backgroundColor: "#1E1E1E", // Fundo do menu
-          paddingVertical: 20, // Espaçamento interno
+          backgroundColor: "transparent", // Usamos 'transparent' pois tem gradiente atrás
+          width: 260,
         },
         drawerLabelStyle: {
-          color: "#FFFFFF", // Cor do texto
-          fontSize: 16, // Tamanho do texto
-          marginLeft: -10, // Ajuste de alinhamento com o ícone
+          color: WHITE,
+          fontSize: 16,
+          marginLeft: -5,
         },
-        drawerActiveTintColor: "#E3350D", // Cor do texto da aba ativa
-        drawerInactiveTintColor: "#FFFFFF", // Cor do texto das abas inativas
-        drawerActiveBackgroundColor: "#292929", // Fundo da aba ativa
+        drawerActiveTintColor: RED, // Cor texto aba ativa
+        drawerInactiveTintColor: WHITE, // Cor texto abas inativas
+        // Fundo da aba ativa (pode ser mais claro para destacar)
+        drawerActiveBackgroundColor: "rgba(227, 53, 13, 0.2)",
       }}
     >
       <Drawer.Screen
@@ -46,18 +91,18 @@ function DrawerLayout() {
         component={HomeScreen}
         options={{
           title: t("drawer.home"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="home-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size} color={color} />
           ),
         }}
-        />
+      />
       <Drawer.Screen
         name="jogador"
         component={JogadorScreen}
         options={{
           title: t("drawer.jogador"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="person-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size} color={color} />
           ),
         }}
       />
@@ -66,8 +111,8 @@ function DrawerLayout() {
         component={ClassicosScreen}
         options={{
           title: t("drawer.classico"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="flame-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="flame-outline" size={size} color={color} />
           ),
         }}
       />
@@ -76,8 +121,8 @@ function DrawerLayout() {
         component={CalendarioScreen}
         options={{
           title: t("drawer.calendario"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="calendar-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="calendar-outline" size={size} color={color} />
           ),
         }}
       />
@@ -86,8 +131,8 @@ function DrawerLayout() {
         component={TorneioScreen}
         options={{
           title: t("drawer.torneio"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="trophy-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="trophy-outline" size={size} color={color} />
           ),
         }}
       />
@@ -97,41 +142,38 @@ function DrawerLayout() {
         component={NoticiasScreen}
         options={{
           title: t("drawer.noticias"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="newspaper-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="newspaper-outline" size={size} color={color} />
           ),
         }}
-        />
-        
+      />
       <Drawer.Screen
         name="ScauterIA"
         component={AnalyticsScreen}
         options={{
           title: t("drawer.iapikachu"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="flash-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="flash-outline" size={size} color={color} />
           ),
         }}
       />
-
       <Drawer.Screen
         name="Cartas"
         component={CartasScreen}
         options={{
           title: t("drawer.cartas"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="card-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="card-outline" size={size} color={color} />
           ),
         }}
       />
-
       <Drawer.Screen
         name="trocas"
         component={TrocasScreen}
         options={{
           title: t("drawer.trocas"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="swap-horizontal-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="swap-horizontal-outline" size={size} color={color} />
           ),
         }}
       />
@@ -140,8 +182,8 @@ function DrawerLayout() {
         component={EstatisticasScreen}
         options={{
           title: t("drawer.decks"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="albums-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="albums-outline" size={size} color={color} />
           ),
         }}
       />
@@ -150,19 +192,18 @@ function DrawerLayout() {
         component={PlayerScreen}
         options={{
           title: t("drawer.cadastros"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="create-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="create-outline" size={size} color={color} />
           ),
         }}
       />
-
       <Drawer.Screen
         name="Sugestão"
         component={SugestaoScreen}
         options={{
           title: t("drawer.sugestao"),
-          drawerIcon: ({ color }) => (
-            <Ionicons name="chatbubbles-outline" size={20} color={color} />
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="chatbubbles-outline" size={size} color={color} />
           ),
         }}
       />
@@ -171,3 +212,21 @@ function DrawerLayout() {
 }
 
 export default withLayoutContext(DrawerLayout);
+
+// Estilos
+const styles = StyleSheet.create({
+  headerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#333",
+  },
+  headerText: {
+    color: WHITE,
+    fontSize: 18,
+    fontWeight: "bold",
+    marginTop: 10,
+  },
+});

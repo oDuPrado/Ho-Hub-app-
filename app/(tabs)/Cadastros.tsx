@@ -16,10 +16,12 @@ import {
   TouchableWithoutFeedback,
   FlatList,
   ScrollView,
+  LayoutAnimation,
+  UIManager,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import {
   collection,
   getDocs,
@@ -31,12 +33,17 @@ import {
 } from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
 
+// Ícones e animações
+import * as Animatable from "react-native-animatable";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+
+// Funções e Constantes
 import {
   Authuser,
   fetchRoleMembers,
   addRoleMember,
   removeRoleMember,
-  HOST_PLAYER_IDS
+  HOST_PLAYER_IDS,
 } from "../hosts";
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -74,7 +81,6 @@ interface LeagueData {
   tournamentsCount: number;
 }
 
-// === 3) Roles => sub-roles com players
 interface RoleMember {
   userId: string;
   fullname: string;
@@ -89,7 +95,9 @@ export default function CadastrosScreen() {
   const [loading, setLoading] = useState(true);
 
   // ABAS: "players" | "logins" | "roles"
-  const [currentTab, setCurrentTab] = useState<"players"|"logins"|"roles">("players");
+  const [currentTab, setCurrentTab] = useState<"players" | "logins" | "roles">(
+    "players"
+  );
 
   // Permissão de ver logins/roles
   const [canSeeLogins, setCanSeeLogins] = useState(false);
@@ -123,7 +131,7 @@ export default function CadastrosScreen() {
   const [formLoginPlayerId, setFormLoginPlayerId] = useState("");
   const [formLoginCreatedAt, setFormLoginCreatedAt] = useState("");
 
-  // =========== ROLES (3ª Aba) ===========
+  // =========== ROLES ===========
   const [leagues, setLeagues] = useState<LeagueData[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesSearch, setRolesSearch] = useState("");
@@ -134,7 +142,9 @@ export default function CadastrosScreen() {
   const [selectedLeagueName, setSelectedLeagueName] = useState("");
 
   // Sub-aba: "host", "judge", "head", "ban", "vip"
-  const [currentRoleTab, setCurrentRoleTab] = useState<"host"|"judge"|"head"|"ban"|"vip">("host");
+  const [currentRoleTab, setCurrentRoleTab] = useState<
+    "host" | "judge" | "head" | "ban" | "vip"
+  >("host");
 
   // Cada lista
   const [hostList, setHostList] = useState<RoleMember[]>([]);
@@ -150,11 +160,20 @@ export default function CadastrosScreen() {
   const [selectLoading, setSelectLoading] = useState(false);
 
   // Qual role estamos adicionando?
-  const [addingRole, setAddingRole] = useState<"host"|"judge"|"head"|"ban"|"vip">("host");
+  const [addingRole, setAddingRole] = useState<
+    "host" | "judge" | "head" | "ban" | "vip"
+  >("host");
 
-  //Acessos negados
-  
+  // Acessos negados
   const [accessDenied, setAccessDenied] = useState(false);
+
+  // Para ativar LayoutAnimation em Android
+  if (
+    Platform.OS === "android" &&
+    UIManager.setLayoutAnimationEnabledExperimental
+  ) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
 
   // ================ useEffect inicial =================
   useEffect(() => {
@@ -163,71 +182,56 @@ export default function CadastrosScreen() {
         setLoading(true);
         const storedId = await AsyncStorage.getItem("@userId");
         if (!storedId) {
-          console.log("🚫 Nenhum userId encontrado no AsyncStorage. Redirecionando para login.");
           router.replace("/(auth)/login");
           return;
         }
-  
+
         let isHost = false;
         let isAuthuser = false;
-  
-        console.log(`🔍 Verificando permissões do usuário: ${storedId}`);
-  
-        // ==== 1. Busca no Firebase quem é host ====
+
+        // 1. Verifica se é host no Firebase
         try {
           const leaguesSnap = await getDocs(collection(db, "leagues"));
           for (const leagueDoc of leaguesSnap.docs) {
-            const hostSnap = await getDocs(collection(db, `leagues/${leagueDoc.id}/roles/host/members`));
+            const hostSnap = await getDocs(
+              collection(db, `leagues/${leagueDoc.id}/roles/host/members`)
+            );
             if (hostSnap.docs.some((doc) => doc.id === storedId)) {
               isHost = true;
-              console.log(`✅ Encontrado como host no Firebase (Liga: ${leagueDoc.id})`);
               break;
             }
           }
         } catch (error) {
-          console.log("⚠️ Erro ao buscar hosts no Firebase, tentando fallback.", error);
+          console.log("Erro ao buscar hosts no Firebase, fallback.", error);
         }
-  
-        // ==== 2. Se não achou no Firebase, usa o fallback da lista estática ====
+
+        // 2. Fallback da lista estática
         if (!isHost) {
           isHost = HOST_PLAYER_IDS.includes(storedId);
-          if (isHost) {
-            console.log("🟡 Não encontrado no Firebase. Usando fallback da lista estática.");
-          } else {
-            console.log("🚫 Usuário não é host nem no Firebase nem na lista estática.");
-          }
         }
-  
-        // ==== 3. Verifica se é Authuser ====
+
+        // 3. Verifica se é Authuser
         isAuthuser = Authuser.includes(storedId);
-        if (isAuthuser) {
-          console.log("✅ Usuário é um Authuser (Acesso total liberado).");
-        }
-  
-        // ==== 4. Define permissões ====
+
+        // 4. Define permissões
         if (!isHost && !isAuthuser) {
-          console.log("🚫 Acesso negado. Usuário não tem permissões.");
           setAccessDenied(true);
           return;
         }
-  
         setUserId(storedId);
-  
-        // Somente Authusers podem ver logins e roles
+
+        // Somente Authusers podem ver logins/roles
         setCanSeeLogins(isAuthuser);
-  
-        console.log(`🎯 Permissões definidas: isHost=${isHost}, isAuthuser=${isAuthuser}`);
+
         await loadTabData();
       } catch (error) {
-        console.log("❌ Erro inesperado ao verificar permissões:", error);
         Alert.alert("Erro", "Falha ao carregar cadastros.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [currentTab, router]);  
-  
-  // ================ Carregar ao trocar de aba =================
+  }, [currentTab, router]);
+
   async function loadTabData() {
     if (currentTab === "players") {
       await fetchPlayers();
@@ -238,8 +242,9 @@ export default function CadastrosScreen() {
     }
   }
 
-  // =================== FUNÇÃO TROCAR ABA =====================
-  function switchTab(tab: "players"|"logins"|"roles") {
+  // ================ FUNÇÃO TROCAR ABA ================
+  function switchTab(tab: "players" | "logins" | "roles") {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setCurrentTab(tab);
     setSearchTerm("");
     setRolesSearch("");
@@ -259,7 +264,10 @@ export default function CadastrosScreen() {
         const leaguesSnap = await getDocs(collection(db, "leagues"));
         leaguesSnap.forEach((ds) => leagueIds.push(ds.id));
       } else if (filterType === "city" && cityStored) {
-        const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
+        const qCity = query(
+          collection(db, "leagues"),
+          where("city", "==", cityStored)
+        );
         const snapC = await getDocs(qCity);
         snapC.forEach((ds) => leagueIds.push(ds.id));
       } else if (filterType === "league" && leagueStored) {
@@ -293,7 +301,6 @@ export default function CadastrosScreen() {
       });
       setPlayers(unique);
     } catch (error) {
-      console.log("Erro fetchPlayers:", error);
       Alert.alert("Erro", "Não foi possível carregar jogadores.");
     } finally {
       setPlayersLoading(false);
@@ -338,46 +345,46 @@ export default function CadastrosScreen() {
           },
           { merge: true }
         );
-        Alert.alert("Sucesso", isEditingPlayer ? "Jogador atualizado!" : "Jogador criado!");
+        Alert.alert(
+          "Sucesso",
+          isEditingPlayer ? "Jogador atualizado!" : "Jogador criado!"
+        );
         setPlayerModalVisible(false);
         await fetchPlayers();
       } else {
-        Alert.alert("Filtro inválido", "Crie jogador apenas com liga específica selecionada.");
+        Alert.alert(
+          "Filtro inválido",
+          "Crie jogador apenas com liga específica selecionada."
+        );
       }
     } catch (error) {
-      console.log("Erro handleSavePlayer:", error);
       Alert.alert("Erro", "Não foi possível salvar jogador.");
     }
   }
 
   async function handleDeletePlayer(item: PlayerData) {
-    Alert.alert(
-      "Confirmação",
-      `Excluir jogador ${item.fullname || item.userid}?`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Excluir",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const leagueId = await AsyncStorage.getItem("@leagueId");
-              if (!leagueId) {
-                Alert.alert("Erro", "Nenhuma liga selecionada.");
-                return;
-              }
-              const docRef = doc(db, `leagues/${leagueId}/players`, item.userid);
-              await deleteDoc(docRef);
-              Alert.alert("Sucesso", "Jogador excluído!");
-              await fetchPlayers();
-            } catch (error) {
-              console.log("Erro ao excluir:", error);
-              Alert.alert("Erro", "Não foi possível excluir jogador.");
+    Alert.alert("Confirmação", `Excluir jogador ${item.fullname || item.userid}?`, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Excluir",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const leagueId = await AsyncStorage.getItem("@leagueId");
+            if (!leagueId) {
+              Alert.alert("Erro", "Nenhuma liga selecionada.");
+              return;
             }
-          },
+            const docRef = doc(db, `leagues/${leagueId}/players`, item.userid);
+            await deleteDoc(docRef);
+            Alert.alert("Sucesso", "Jogador excluído!");
+            await fetchPlayers();
+          } catch (error) {
+            Alert.alert("Erro", "Não foi possível excluir jogador.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   }
 
   // ================ LOGINS ================
@@ -403,7 +410,6 @@ export default function CadastrosScreen() {
       });
       setLogins(arr);
     } catch (error) {
-      console.log("Erro fetchLogins:", error);
       Alert.alert("Erro", "Não foi possível carregar logins.");
     } finally {
       setLoginsLoading(false);
@@ -470,51 +476,45 @@ export default function CadastrosScreen() {
         },
         { merge: true }
       );
-      Alert.alert("Sucesso", isEditingLogin ? "Login atualizado!" : "Novo login criado!");
+      Alert.alert(
+        "Sucesso",
+        isEditingLogin ? "Login atualizado!" : "Novo login criado!"
+      );
       setLoginModalVisible(false);
       await fetchLogins();
     } catch (error) {
-      console.log("Erro handleSaveLogin:", error);
       Alert.alert("Erro", "Não foi possível salvar login.");
     }
   }
 
   async function handleDeleteLogin(item: LoginData) {
-    Alert.alert(
-      "Confirmação",
-      `Excluir login ${item.name || item.loginId}?`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Excluir",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const docRef = doc(db, "login", item.loginId);
-              await deleteDoc(docRef);
-              Alert.alert("Sucesso", "Login excluído!");
-              await fetchLogins();
-            } catch (err) {
-              console.log("Erro delete login:", err);
-              Alert.alert("Erro", "Não foi possível excluir login.");
-            }
-          },
+    Alert.alert("Confirmação", `Excluir login ${item.name || item.loginId}?`, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Excluir",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const docRef = doc(db, "login", item.loginId);
+            await deleteDoc(docRef);
+            Alert.alert("Sucesso", "Login excluído!");
+            await fetchLogins();
+          } catch (err) {
+            Alert.alert("Erro", "Não foi possível excluir login.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   }
 
   // ================ ROLES ================
-  const [leagueList, setLeagueList] = useState<LeagueData[]>([]);
   async function fetchLeagues() {
     try {
       setRolesLoading(true);
       const leaguesSnap = await getDocs(collection(db, "leagues"));
       let arr: LeagueData[] = [];
       const term = rolesSearch.toLowerCase();
-  
-      console.log("Total de ligas encontradas:", leaguesSnap.size);
-  
+
       leaguesSnap.forEach((docSnap) => {
         const ld = docSnap.data();
         const leagueId = docSnap.id;
@@ -522,10 +522,7 @@ export default function CadastrosScreen() {
         const leagueName = ld.leagueName || leagueId;
         const playersCount = ld.players_count || 0;
         const tournamentsCount = ld.tournaments_count || 0;
-  
-        // Log para depuração
-        console.log(`Liga ${leagueId}: ${leagueName} - ${city}`);
-  
+
         if (
           !term ||
           city.toLowerCase().includes(term) ||
@@ -540,11 +537,8 @@ export default function CadastrosScreen() {
           });
         }
       });
-  
-      console.log("Ligas filtradas:", arr);
       setLeagues(arr);
     } catch (error) {
-      console.log("Erro fetchLeagues:", error);
       Alert.alert("Erro", "Não foi possível carregar ligas.");
     } finally {
       setRolesLoading(false);
@@ -556,8 +550,6 @@ export default function CadastrosScreen() {
     setSelectedLeagueName(item.leagueName);
     setCurrentRoleTab("host");
     setRolesModalVisible(true);
-
-    // Carregar dados
     loadRoleData(item.leagueId);
   }
 
@@ -580,44 +572,49 @@ export default function CadastrosScreen() {
       setBanList(b);
       setVipList(v);
     } catch (error) {
-      console.log("Erro loadRoleData:", error);
+      Alert.alert("Erro", "Não foi possível carregar dados de roles.");
     }
   }
 
-  function switchRoleTab(tab: "host"|"judge"|"head"|"ban"|"vip") {
+  function switchRoleTab(tab: "host" | "judge" | "head" | "ban" | "vip") {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setCurrentRoleTab(tab);
   }
 
-  async function handleAddRoleMember(roleName: "host"|"judge"|"head"|"ban"|"vip", userId: string, userName: string) {
+  async function handleAddRoleMember(
+    roleName: "host" | "judge" | "head" | "ban" | "vip",
+    userId: string,
+    userName: string
+  ) {
     try {
       if (!selectedLeagueId) return;
       await addRoleMember(selectedLeagueId, roleName, userId, userName);
       await loadRoleData(selectedLeagueId);
     } catch (err) {
-      console.log("Erro addRoleMember:", err);
       Alert.alert("Erro", "Não foi possível adicionar membro.");
     }
   }
 
-  async function handleRemoveRoleMember(roleName: "host"|"judge"|"head"|"ban"|"vip", userId: string) {
+  async function handleRemoveRoleMember(
+    roleName: "host" | "judge" | "head" | "ban" | "vip",
+    userId: string
+  ) {
     try {
       if (!selectedLeagueId) return;
       await removeRoleMember(selectedLeagueId, roleName, userId);
       await loadRoleData(selectedLeagueId);
     } catch (err) {
-      console.log("Erro removeRoleMember:", err);
       Alert.alert("Erro", "Não foi possível remover membro.");
     }
   }
 
-  // ========== MODAL DE SELECIONAR JOGADORES ===========
-  function openSelectPlayersModal(role: "host"|"judge"|"head"|"ban"|"vip") {
+  // ========== MODAL DE SELECIONAR JOGADORES ==========
+  function openSelectPlayersModal(role: "host" | "judge" | "head" | "ban" | "vip") {
     setAddingRole(role);
     setSelectSearch("");
     setSelectPlayers([]);
     setSelectModalVisible(true);
 
-    // Carrega jogadores da liga, se 'selectedLeagueId' existe
     if (selectedLeagueId) {
       loadPlayersForLeague(selectedLeagueId, "");
     }
@@ -633,7 +630,6 @@ export default function CadastrosScreen() {
         const d = docSnap.data() as PlayerData;
         arr.push(d);
       });
-
       const term = search.toLowerCase();
       if (term) {
         arr = arr.filter(
@@ -642,10 +638,8 @@ export default function CadastrosScreen() {
             (p.fullname || "").toLowerCase().includes(term)
         );
       }
-
       setSelectPlayers(arr);
     } catch (err) {
-      console.log("Erro loadPlayersForLeague:", err);
       Alert.alert("Erro", "Não foi possível carregar jogadores para seleção.");
     } finally {
       setSelectLoading(false);
@@ -659,25 +653,28 @@ export default function CadastrosScreen() {
   }
 
   function handleSelectPlayer(p: PlayerData) {
-    // Ao clicar num jogador, adiciona ele ao role
     const nameUsed = p.fullname || p.userid;
     handleAddRoleMember(addingRole, p.userid, nameUsed);
   }
 
-  // ============ RENDER ==============
+  // ============ RENDER =============
   if (accessDenied) {
     return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
-        <Text style={{ color: RED, fontSize: 18 }}>
+      <View style={[styles.container, styles.centeredView]}>
+        <Animatable.Text
+          style={styles.accessDeniedText}
+          animation="shake"
+          iterationCount={2}
+        >
           Você não tem permissão para acessar esta página.
-        </Text>
+        </Animatable.Text>
       </View>
     );
   }
-  
+
   if (loading) {
     return (
-      <View style={[styles.container, { justifyContent: "center" }]}>
+      <View style={[styles.container, styles.centeredView]}>
         <ActivityIndicator size="large" color={RED} />
       </View>
     );
@@ -691,7 +688,17 @@ export default function CadastrosScreen() {
       <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
         <View style={{ flex: 1 }}>
           {/* HEADER */}
-          <View style={styles.header}>
+          <Animatable.View
+            style={styles.header}
+            animation="fadeInDown"
+            duration={500}
+          >
+            <MaterialCommunityIcons
+              name="account-group"
+              size={28}
+              color={RED}
+              style={{ marginRight: 10 }}
+            />
             <Text style={styles.headerTitle}>
               {currentTab === "players"
                 ? "Gerenciar Jogadores"
@@ -699,17 +706,24 @@ export default function CadastrosScreen() {
                 ? "Gerenciar Logins"
                 : "Gerenciar Roles"}
             </Text>
-          </View>
+          </Animatable.View>
 
           {/* TAB BAR */}
-          <View style={styles.tabBar}>
+          <Animatable.View
+            style={styles.tabBar}
+            animation="fadeInUp"
+            duration={500}
+          >
             <TouchableOpacity
-              style={[
-                styles.tabButton,
-                currentTab === "players" && styles.tabButtonActive,
-              ]}
+              style={[styles.tabButton]}
               onPress={() => switchTab("players")}
             >
+              <Ionicons
+                name="people-outline"
+                size={20}
+                color={currentTab === "players" ? RED : WHITE}
+                style={{ marginBottom: 4 }}
+              />
               <Text
                 style={[
                   styles.tabButtonText,
@@ -722,13 +736,13 @@ export default function CadastrosScreen() {
 
             {canSeeLogins && (
               <>
-                <TouchableOpacity
-                  style={[
-                    styles.tabButton,
-                    currentTab === "logins" && styles.tabButtonActive,
-                  ]}
-                  onPress={() => switchTab("logins")}
-                >
+                <TouchableOpacity style={styles.tabButton} onPress={() => switchTab("logins")}>
+                  <Ionicons
+                    name="key-outline"
+                    size={20}
+                    color={currentTab === "logins" ? RED : WHITE}
+                    style={{ marginBottom: 4 }}
+                  />
                   <Text
                     style={[
                       styles.tabButtonText,
@@ -738,14 +752,14 @@ export default function CadastrosScreen() {
                     Logins
                   </Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={[
-                    styles.tabButton,
-                    currentTab === "roles" && styles.tabButtonActive,
-                  ]}
-                  onPress={() => switchTab("roles")}
-                >
+
+                <TouchableOpacity style={styles.tabButton} onPress={() => switchTab("roles")}>
+                  <Ionicons
+                    name="shield-checkmark-outline"
+                    size={20}
+                    color={currentTab === "roles" ? RED : WHITE}
+                    style={{ marginBottom: 4 }}
+                  />
                   <Text
                     style={[
                       styles.tabButtonText,
@@ -757,8 +771,7 @@ export default function CadastrosScreen() {
                 </TouchableOpacity>
               </>
             )}
-          </View>
-
+          </Animatable.View>
 
           {/* CONTENT */}
           {currentTab === "players" && renderPlayersTab()}
@@ -782,12 +795,12 @@ export default function CadastrosScreen() {
   );
 
   // ============= SUB-RENDERS =============
-
   function renderPlayersTab() {
     return (
-      <View style={{ flex: 1 }}>
+      <Animatable.View style={{ flex: 1 }} animation="fadeIn" duration={500}>
         {/* PESQUISA */}
         <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color="#999" style={{ marginRight: 6 }} />
           <TextInput
             style={styles.searchInput}
             placeholder="Buscar por nome/ID..."
@@ -807,14 +820,20 @@ export default function CadastrosScreen() {
             keyExtractor={(item) => item.userid}
             contentContainerStyle={[styles.listContainer, { flexGrow: 1 }]}
             renderItem={({ item }) => (
-              <View style={styles.card}>
+              <Animatable.View
+                style={styles.card}
+                animation="fadeInUp"
+                duration={400}
+              >
                 <View style={styles.cardInfo}>
                   <Text style={styles.cardTitle}>
                     {item.fullname || "Sem nome"}
                   </Text>
                   <Text style={styles.cardSubtitle}>ID: {item.userid}</Text>
                   {item.birthdate && (
-                    <Text style={styles.cardSubtitle}>Nascimento: {item.birthdate}</Text>
+                    <Text style={styles.cardSubtitle}>
+                      Nascimento: {item.birthdate}
+                    </Text>
                   )}
                   {item.pin && (
                     <Text style={styles.cardSubtitle}>PIN: {item.pin}</Text>
@@ -827,17 +846,19 @@ export default function CadastrosScreen() {
                       style={[styles.cardBtn, { backgroundColor: "#4CAF50" }]}
                       onPress={() => openEditPlayerModal(item)}
                     >
+                      <Ionicons name="create-outline" size={16} color={WHITE} />
                       <Text style={styles.cardBtnText}>Editar</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.cardBtn, { backgroundColor: RED }]}
                       onPress={() => handleDeletePlayer(item)}
                     >
+                      <Ionicons name="trash-outline" size={16} color={WHITE} />
                       <Text style={styles.cardBtnText}>Excluir</Text>
                     </TouchableOpacity>
                   </View>
                 )}
-              </View>
+              </Animatable.View>
             )}
           />
         )}
@@ -845,18 +866,20 @@ export default function CadastrosScreen() {
         {Authuser.includes(userId) && (
           <View style={styles.tabActions}>
             <TouchableOpacity style={styles.addButton} onPress={openCreatePlayerModal}>
-              <Text style={styles.addButtonText}>+ Novo Player</Text>
+              <Ionicons name="add-circle-outline" size={20} color={WHITE} style={{ marginRight: 6 }} />
+              <Text style={styles.addButtonText}>Novo Player</Text>
             </TouchableOpacity>
           </View>
         )}
-      </View>
+      </Animatable.View>
     );
   }
 
   function renderLoginsTab() {
     return (
-      <View style={{ flex: 1 }}>
+      <Animatable.View style={{ flex: 1 }} animation="fadeIn" duration={500}>
         <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color="#999" style={{ marginRight: 6 }} />
           <TextInput
             style={styles.searchInput}
             placeholder="Buscar por nome/email/playerId"
@@ -886,12 +909,14 @@ export default function CadastrosScreen() {
                 } catch {}
               }
               return (
-                <View style={styles.card}>
+                <Animatable.View
+                  style={styles.card}
+                  animation="fadeInUp"
+                  duration={400}
+                >
                   <View style={styles.cardInfo}>
                     <Text style={styles.cardTitle}>{item.name || "Sem nome"}</Text>
-                    <Text style={styles.cardSubtitle}>
-                      LoginID: {item.loginId}
-                    </Text>
+                    <Text style={styles.cardSubtitle}>LoginID: {item.loginId}</Text>
                     {item.email && (
                       <Text style={styles.cardSubtitle}>Email: {item.email}</Text>
                     )}
@@ -899,10 +924,14 @@ export default function CadastrosScreen() {
                       <Text style={styles.cardSubtitle}>PIN: {item.pin}</Text>
                     )}
                     {item.playerId && (
-                      <Text style={styles.cardSubtitle}>PlayerID: {item.playerId}</Text>
+                      <Text style={styles.cardSubtitle}>
+                        PlayerID: {item.playerId}
+                      </Text>
                     )}
                     {dateStr && (
-                      <Text style={styles.cardSubtitle}>Criado em: {dateStr}</Text>
+                      <Text style={styles.cardSubtitle}>
+                        Criado em: {dateStr}
+                      </Text>
                     )}
                   </View>
                   <View style={styles.cardButtons}>
@@ -910,16 +939,18 @@ export default function CadastrosScreen() {
                       style={[styles.cardBtn, { backgroundColor: "#4CAF50" }]}
                       onPress={() => openEditLoginModal(item)}
                     >
+                      <Ionicons name="create-outline" size={16} color={WHITE} />
                       <Text style={styles.cardBtnText}>Editar</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.cardBtn, { backgroundColor: RED }]}
                       onPress={() => handleDeleteLogin(item)}
                     >
+                      <Ionicons name="trash-outline" size={16} color={WHITE} />
                       <Text style={styles.cardBtnText}>Excluir</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
+                </Animatable.View>
               );
             }}
           />
@@ -927,17 +958,19 @@ export default function CadastrosScreen() {
 
         <View style={styles.tabActions}>
           <TouchableOpacity style={styles.addButton} onPress={openCreateLoginModal}>
-            <Text style={styles.addButtonText}>+ Novo Login</Text>
+            <Ionicons name="add-circle-outline" size={20} color={WHITE} style={{ marginRight: 6 }} />
+            <Text style={styles.addButtonText}>Novo Login</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </Animatable.View>
     );
   }
 
   function renderRolesTab() {
     return (
-      <View style={{ flex: 1 }}>
+      <Animatable.View style={{ flex: 1 }} animation="fadeIn" duration={500}>
         <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color="#999" style={{ marginRight: 6 }} />
           <TextInput
             style={styles.searchInput}
             placeholder="Buscar liga ou cidade"
@@ -956,32 +989,41 @@ export default function CadastrosScreen() {
             keyExtractor={(item) => item.leagueId}
             contentContainerStyle={styles.listContainer}
             renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.card}
-                onPress={() => openRolesModal(item)}
+              <Animatable.View
+                style={[styles.card, { padding: 18 }]}
+                animation="fadeInUp"
+                duration={400}
               >
-                <View style={styles.cardInfo}>
-                  <Text style={styles.cardTitle}>{item.leagueName}</Text>
-                  <Text style={styles.cardSubtitle}>Cidade: {item.city}</Text>
-                  <Text style={styles.cardSubtitle}>Players: {item.playersCount}</Text>
-                  <Text style={styles.cardSubtitle}>Torneios: {item.tournamentsCount}</Text>
-                </View>
-              </TouchableOpacity>
+                <TouchableOpacity onPress={() => openRolesModal(item)}>
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.cardTitle}>{item.leagueName}</Text>
+                    <Text style={styles.cardSubtitle}>Cidade: {item.city}</Text>
+                    <Text style={styles.cardSubtitle}>
+                      Players: {item.playersCount}
+                    </Text>
+                    <Text style={styles.cardSubtitle}>
+                      Torneios: {item.tournamentsCount}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </Animatable.View>
             )}
           />
         )}
-      </View>
+      </Animatable.View>
     );
   }
 
   // ========== RENDER MODALS ==========
-
-  // ~~ Modal de criar/editar Jogador ~~
   function renderPlayerModal() {
     return (
-      <Modal visible={playerModalVisible} animationType="slide" transparent>
+      <Modal visible={playerModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+          <Animatable.View
+            style={styles.modalContainer}
+            animation="zoomIn"
+            duration={400}
+          >
             <Text style={styles.modalTitle}>
               {isEditingPlayer ? "Editar Jogador" : "Novo Jogador"}
             </Text>
@@ -1030,18 +1072,21 @@ export default function CadastrosScreen() {
                 <Text style={styles.modalBtnText}>Salvar</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </Animatable.View>
         </View>
       </Modal>
     );
   }
 
-  // ~~ Modal de criar/editar Login ~~
   function renderLoginModal() {
     return (
-      <Modal visible={loginModalVisible} animationType="slide" transparent>
+      <Modal visible={loginModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+          <Animatable.View
+            style={styles.modalContainer}
+            animation="zoomIn"
+            duration={400}
+          >
             <Text style={styles.modalTitle}>
               {isEditingLogin ? "Editar Login" : "Novo Login"}
             </Text>
@@ -1104,36 +1149,45 @@ export default function CadastrosScreen() {
                 <Text style={styles.modalBtnText}>Salvar</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </Animatable.View>
         </View>
       </Modal>
     );
   }
 
-  // ~~ Modal Roles FullScreen ~~
   function renderRolesModal() {
     return (
       <Modal
         visible={rolesModalVisible}
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setRolesModalVisible(false)}
       >
         <View style={{ flex: 1, backgroundColor: BLACK }}>
           {/* Header */}
-          <View style={[styles.header, { justifyContent: "center" }]}>
-            <Text style={styles.headerTitle}>{selectedLeagueName || "Liga"}</Text>
-          </View>
+          <Animatable.View
+            style={[styles.header, { justifyContent: "center" }]}
+            animation="fadeInDown"
+          >
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={24}
+              color={RED}
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.headerTitle}>
+              {selectedLeagueName || "Liga"}
+            </Text>
+          </Animatable.View>
 
-          {/* Sub-ABAS: "host", "judge", "head", "ban", "vip" */}
-          <View style={styles.subTabBar}>
-            {renderRoleTabButton("host", "Host")}
-            {renderRoleTabButton("judge", "Judge")}
-            {renderRoleTabButton("head", "Head")}
-            {renderRoleTabButton("ban", "Ban")}
-            {renderRoleTabButton("vip", "Vip")}
-          </View>
+          {/* Sub-ABAS */}
+          <Animatable.View style={styles.subTabBar} animation="fadeInUp">
+            {renderRoleTabButton("host", "Host", "flash")}
+            {renderRoleTabButton("judge", "Judge", "hammer")}
+            {renderRoleTabButton("head", "Head", "cog")}
+            {renderRoleTabButton("ban", "Ban", "close-circle")}
+            {renderRoleTabButton("vip", "VIP", "star-half")}
+          </Animatable.View>
 
-          {/* Conteúdo da subaba */}
           <View style={{ flex: 1 }}>
             {currentRoleTab === "host" && renderRoleList(hostList, "host")}
             {currentRoleTab === "judge" && renderRoleList(judgeList, "judge")}
@@ -1142,20 +1196,26 @@ export default function CadastrosScreen() {
             {currentRoleTab === "vip" && renderRoleList(vipList, "vip")}
           </View>
 
-          {/* Botão Fechar */}
-          <View style={{ flexDirection: "row", justifyContent: "space-between", padding: 10 }}>
+          {/* Botões Ações */}
+          <View style={styles.bottomRow}>
             <TouchableOpacity
-              style={[styles.addButton]}
+              style={[styles.addButton, { flexDirection: "row" }]}
               onPress={() => openSelectPlayersModal(currentRoleTab)}
             >
-              <Text style={styles.addButtonText}>+ Adicionar Membro</Text>
+              <Ionicons
+                name="person-add-outline"
+                size={20}
+                color={WHITE}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.addButtonText}>Adicionar Membro</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.modalBtn, { backgroundColor: "#999" }]}
               onPress={() => setRolesModalVisible(false)}
             >
-              <Text style={styles.modalBtnText}>Cancelar</Text>
+              <Text style={styles.modalBtnText}>Fechar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1163,60 +1223,63 @@ export default function CadastrosScreen() {
     );
   }
 
-  // ~~ Modal SelectPlayers ~~
   function renderSelectPlayersModal() {
     return (
       <Modal
         visible={selectModalVisible}
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setSelectModalVisible(false)}
       >
         <View style={{ flex: 1, backgroundColor: BLACK }}>
-          <View style={[styles.header, { justifyContent: "center" }]}>
+          <Animatable.View style={[styles.header, { justifyContent: "center" }]} animation="fadeInDown">
+            <Ionicons
+              name="people-circle-outline"
+              size={24}
+              color={RED}
+              style={{ marginRight: 8 }}
+            />
             <Text style={styles.headerTitle}>Selecionar Jogadores</Text>
-          </View>
+          </Animatable.View>
 
           {/* Barra de busca */}
           <View style={styles.searchContainer}>
+            <Ionicons name="search" size={18} color="#999" style={{ marginRight: 6 }} />
             <TextInput
               style={styles.searchInput}
               placeholder="Buscar por nome/ID..."
               placeholderTextColor="#999"
               value={selectSearch}
               onChangeText={setSelectSearch}
-              onSubmitEditing={() => {
-                if (selectedLeagueId) {
-                  loadPlayersForLeague(selectedLeagueId, selectSearch);
-                }
-              }}
+              onSubmitEditing={handleSelectSearch}
             />
           </View>
 
           {selectLoading ? (
             <ActivityIndicator size="large" color={RED} style={{ marginTop: 20 }} />
           ) : (
-            <FlatList
-              data={selectPlayers}
-              keyExtractor={(item) => item.userid}
-              contentContainerStyle={styles.listContainer}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.card}
-                  onPress={() => {
-                    const nameUsed = item.fullname || item.userid;
-                    handleAddRoleMember(addingRole, item.userid, nameUsed);
-                  }}
-                >
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardTitle}>{item.fullname || "Sem nome"}</Text>
-                    <Text style={styles.cardSubtitle}>ID: {item.userid}</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-            />
+            <Animatable.View animation="fadeInUp" style={{ flex: 1 }}>
+              <FlatList
+                data={selectPlayers}
+                keyExtractor={(item) => item.userid}
+                contentContainerStyle={styles.listContainer}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.card, { paddingVertical: 14 }]}
+                    onPress={() => handleSelectPlayer(item)}
+                  >
+                    <View style={styles.cardInfo}>
+                      <Text style={styles.cardTitle}>
+                        {item.fullname || "Sem nome"}
+                      </Text>
+                      <Text style={styles.cardSubtitle}>ID: {item.userid}</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            </Animatable.View>
           )}
 
-          <View style={{ padding: 10 }}>
+          <View style={styles.bottomRow}>
             <TouchableOpacity
               style={[styles.modalBtn, { backgroundColor: "#999" }]}
               onPress={() => setSelectModalVisible(false)}
@@ -1230,38 +1293,56 @@ export default function CadastrosScreen() {
   }
 
   // ============= RENDERIZADORES AUXILIARES =============
-
-  function renderRoleTabButton(role: "host"|"judge"|"head"|"ban"|"vip", label: string) {
+  function renderRoleTabButton(
+    role: "host" | "judge" | "head" | "ban" | "vip",
+    label: string,
+    icon: string
+  ) {
+    const active = currentRoleTab === role;
     return (
       <TouchableOpacity
-        style={[
-          styles.subTabBtn,
-          currentRoleTab === role && styles.subTabBtnActive,
-        ]}
+        style={[styles.subTabBtn, active && styles.subTabBtnActive]}
         onPress={() => switchRoleTab(role)}
       >
-        <Text
-          style={[
-            styles.subTabBtnText,
-            currentRoleTab === role && { color: RED },
-          ]}
-        >
+        <Ionicons
+          name={icon as keyof typeof Ionicons.glyphMap} 
+          size={18}
+          color={active ? RED : WHITE}
+          style={{ marginBottom: 2 }}
+        />
+        <Text style={[styles.subTabBtnText, active && { color: RED }]}>
           {label}
         </Text>
       </TouchableOpacity>
     );
   }
 
-  function renderRoleList(list: RoleMember[], role: "host"|"judge"|"head"|"ban"|"vip") {
+  function renderRoleList(
+    list: RoleMember[],
+    role: "host" | "judge" | "head" | "ban" | "vip"
+  ) {
     return (
       <ScrollView contentContainerStyle={{ padding: 12 }}>
         {list.length === 0 && (
-          <Text style={{ color: WHITE, textAlign: "center" }}>
+          <Animatable.Text
+            style={{
+              color: WHITE,
+              textAlign: "center",
+              marginTop: 20,
+              fontStyle: "italic",
+            }}
+            animation="fadeIn"
+          >
             Nenhum membro encontrado para {role}.
-          </Text>
+          </Animatable.Text>
         )}
         {list.map((m) => (
-          <View style={styles.card} key={m.userId}>
+          <Animatable.View
+            style={styles.card}
+            key={m.userId}
+            animation="fadeInUp"
+            duration={300}
+          >
             <View style={styles.cardInfo}>
               <Text style={styles.cardTitle}>{m.fullname}</Text>
               <Text style={styles.cardSubtitle}>ID: {m.userId}</Text>
@@ -1271,10 +1352,11 @@ export default function CadastrosScreen() {
                 style={[styles.cardBtn, { backgroundColor: RED }]}
                 onPress={() => handleRemoveRoleMember(role, m.userId)}
               >
+                <Ionicons name="remove-circle-outline" size={16} color={WHITE} />
                 <Text style={styles.cardBtnText}>Remover</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </Animatable.View>
         ))}
       </ScrollView>
     );
@@ -1285,12 +1367,25 @@ export default function CadastrosScreen() {
 // ESTILOS
 ////////////////////////////////////////////////////////////////////////////////
 const styles = StyleSheet.create({
+  centeredView: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  accessDeniedText: {
+    color: RED,
+    fontSize: 18,
+    textAlign: "center",
+  },
   background: {
     flex: 1,
     resizeMode: "cover",
   },
+  container: {
+    flex: 1,
+    backgroundColor: BLACK,
+  },
   header: {
-    backgroundColor: "rgba(0,0,0,0.7)",
+    backgroundColor: "rgba(0,0,0,0.8)",
     paddingHorizontal: 20,
     paddingVertical: 15,
     flexDirection: "row",
@@ -1301,30 +1396,24 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "bold",
   },
-  container: {
-    flex: 1,
-    backgroundColor: BLACK,
-  },
   tabBar: {
     flexDirection: "row",
     justifyContent: "space-around",
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(0,0,0,0.6)",
     paddingVertical: 10,
   },
   tabButton: {
-    paddingVertical: 6,
-  },
-  tabButtonActive: {
-    borderBottomColor: RED,
-    borderBottomWidth: 3,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 15,
   },
   tabButtonText: {
     color: WHITE,
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 14,
+    fontWeight: "600",
   },
   searchContainer: {
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(0,0,0,0.5)",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
@@ -1350,31 +1439,53 @@ const styles = StyleSheet.create({
     borderColor: "#444",
   },
   cardInfo: {
-    marginBottom: 10,
+    marginBottom: 8,
   },
   cardTitle: {
     color: WHITE,
     fontSize: 18,
     fontWeight: "bold",
+    marginBottom: 4,
   },
   cardSubtitle: {
     color: "#ccc",
     fontSize: 14,
-    marginTop: 2,
   },
   cardButtons: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    marginTop: 6,
   },
   cardBtn: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 8,
-    marginLeft: 8,
+    marginLeft: 6,
   },
   cardBtnText: {
     color: WHITE,
     fontWeight: "bold",
+    marginLeft: 4,
+  },
+  tabActions: {
+    backgroundColor: "rgba(0,0,0,0.4)",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    padding: 8,
+  },
+  addButton: {
+    flexDirection: "row",
+    backgroundColor: RED,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  addButtonText: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 16,
   },
   modalOverlay: {
     flex: 1,
@@ -1410,6 +1521,21 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     marginTop: 8,
   },
+  modalBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  modalBtnText: {
+    color: WHITE,
+    fontWeight: "bold",
+    fontSize: 16,
+    marginLeft: 4,
+  },
   subTabBar: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -1417,7 +1543,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   subTabBtn: {
-    paddingVertical: 5,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 15,
   },
   subTabBtnActive: {
     borderBottomColor: RED,
@@ -1425,37 +1553,12 @@ const styles = StyleSheet.create({
   },
   subTabBtnText: {
     color: WHITE,
-    fontSize: 15,
-    fontWeight: "bold",
+    fontWeight: "600",
+    fontSize: 14,
   },
-  tabActions: {
-    backgroundColor: "rgba(0,0,0,0.4)",
+  bottomRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    padding: 8,
-  },
-  addButton: {
-    backgroundColor: RED,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  addButtonText: {
-    color: WHITE,
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-  modalBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginLeft: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalBtnText: {
-    color: "#FFFFFF",
-    fontWeight: "bold",
-    fontSize: 16,
+    justifyContent: "space-between",
+    padding: 12,
   },
 });
