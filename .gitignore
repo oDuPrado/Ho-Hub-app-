@@ -34,6 +34,10 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Arquivos sensíveis do Firebase
+lib/firebaseConfig.ts
+lib/firebaseConfig_teste.txt
+
+
+# Exemplo de app (se precisar excluir)
 app-example
-
-

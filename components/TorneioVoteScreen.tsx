@@ -49,6 +49,9 @@ export default function TorneioVoteScreen({
   const [loading, setLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
 
+  // Armazena o resultado do voto do usuário, para exibir abaixo dos botões
+  const [votedResult, setVotedResult] = useState<string | null>(null);
+
   // Estados para os nomes dos jogadores
   const [player1Name, setPlayer1Name] = useState<string>(p1Name || "");
   const [player2Name, setPlayer2Name] = useState<string>(p2Name || "");
@@ -58,6 +61,7 @@ export default function TorneioVoteScreen({
     if (visible) {
       setUserPin("");
       setFeedbackMessage("");
+      setVotedResult(null);
 
       async function fetchPlayers() {
         console.log("🔍 Buscando nomes dos jogadores...");
@@ -131,9 +135,8 @@ export default function TorneioVoteScreen({
         setFeedbackMessage(json.message || "Erro ao registrar voto.");
       } else {
         console.log("✅ Voto registrado com sucesso!", json);
-        Alert.alert("Sucesso", json.message || "Voto registrado!");
         setFeedbackMessage(json.message || "Voto registrado com sucesso!");
-        onClose();
+        setVotedResult(result); // Armazena em quem o usuário votou
       }
     } catch (err) {
       console.error("Erro no voto:", err);
@@ -182,8 +185,8 @@ export default function TorneioVoteScreen({
         setFeedbackMessage(json.message || "Erro ao limpar resultado.");
       } else {
         console.log("✅ Resultado limpo com sucesso!", json);
-        Alert.alert("Sucesso", json.message || "Resultado limpo!");
         setFeedbackMessage(json.message || "Resultado limpo com sucesso!");
+        setVotedResult(null); // Reseta o estado de voto
       }
     } catch (err) {
       console.error("Erro ao limpar resultado:", err);
@@ -235,7 +238,9 @@ export default function TorneioVoteScreen({
             <TextInput
               style={styles.pinInput}
               value={userPin}
-              onChangeText={setUserPin}
+              // Apenas números
+              onChangeText={(text) => setUserPin(text.replace(/[^0-9]/g, ""))}
+              keyboardType="numeric"
               placeholder="Ex: 1234"
               placeholderTextColor="#888"
               secureTextEntry
@@ -286,7 +291,24 @@ export default function TorneioVoteScreen({
             </>
           )}
 
-          {/* Feedback visual para o usuário */}
+          {/* Feedback do voto (quem já votou) */}
+          {votedResult && (
+          <Animatable.Text
+            style={styles.votedResultText}
+            animation="fadeIn"
+            duration={600}
+            easing="ease-in-out"
+          >
+            Seu voto atual:{" "}
+            {votedResult === "Vitória Jogador 1"
+              ? `Vitória: ${player1Name}`
+              : votedResult === "Vitória Jogador 2"
+              ? `Vitória: ${player2Name}`
+              : "Empate"}
+          </Animatable.Text>
+        )}
+        
+          {/* Feedback geral (erros ou sucesso do servidor) */}
           {feedbackMessage !== "" && (
             <Animatable.Text
               style={styles.feedbackText}
@@ -315,7 +337,6 @@ export default function TorneioVoteScreen({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    // Gradient no background (fake gradient) + fallback
     backgroundColor: DARK_GRAY,
     justifyContent: "center",
     alignItems: "center",
@@ -405,6 +426,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     marginLeft: 8,
+  },
+  votedResultText: {
+    color: "#FFD700",
+    fontSize: 15,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: 12,
+    marginBottom: 2,
   },
   feedbackText: {
     color: WHITE,

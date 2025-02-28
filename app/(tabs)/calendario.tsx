@@ -178,6 +178,9 @@ export default function CalendarScreen() {
   const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState<boolean>(false);
 
+  //Torneios 
+  const [inscritoIds, setInscritoIds] = useState<Set<string>>(new Set()); // Lista de torneios onde o usuário está inscrito
+
   // =========== LIFECYCLE ==============
   useEffect(() => {
     moment.locale("pt-br");
@@ -234,6 +237,7 @@ export default function CalendarScreen() {
     console.log("🔄 Atualizando torneios - Filtros:", filterType, leagueStored, cityStored);
     loadTorneios();
   }, [currentMonth, filterType, cityStored, leagueStored]);
+
 
   // ============ FUNÇÕES DE AJUDA ============
 
@@ -827,17 +831,59 @@ export default function CalendarScreen() {
       await setDoc(docRef, {
         userId: playerId,
         deckId: selectedDeckId,
-        archetype: archetype, // Agora a variável está definida corretamente
+        archetype: archetype,
         createdAt: new Date().toISOString(),
       });
-  
+      
+      // Atualizar o estado `inscritoIds` para refletir a nova inscrição imediatamente
+      setInscritoIds((prev) => new Set(prev).add(inscricaoTorneioId!));
+      
       Alert.alert("Sucesso", "Inscrição realizada com sucesso!");
-      setInscricaoModalVisible(false);
+      setInscricaoModalVisible(false);      
     } catch (err) {
       console.log("Erro handleSalvarInscricao:", err);
       Alert.alert("Erro", "Falha ao salvar inscrição.");
     }
   }
+
+  useEffect(() => {
+    moment.locale("pt-br");
+    (async () => {
+      try {
+        const pid = await AsyncStorage.getItem("@userId");
+        if (pid) {
+          setPlayerId(pid);
+          setIsHost(HOST_PLAYER_IDS.includes(pid));
+        }
+        loadTorneios();
+        loadUserInscricoes(pid); // Carregar inscrições do usuário
+      } catch (error) {
+        console.log("Erro no fetch inicial:", error);
+      }
+    })();
+  }, []);
+
+  async function loadUserInscricoes(userId: string | null) {
+    if (!userId || !leagueStored) return;
+    try {
+      const inscricoesRef = collection(db, "leagues", leagueStored, "calendar");
+      const snapshot = await getDocs(inscricoesRef);
+
+      const inscritoSet = new Set<string>();
+      for (const docSnap of snapshot.docs) {
+        const inscricaoCol = collection(db, "leagues", leagueStored, "calendar", docSnap.id, "inscricoes");
+        const inscricaoSnap = await getDoc(doc(inscricaoCol, userId));
+
+        if (inscricaoSnap.exists()) {
+          inscritoSet.add(docSnap.id);
+        }
+      }
+      setInscritoIds(inscritoSet);
+    } catch (error) {
+      console.error("Erro ao carregar inscrições do usuário:", error);
+    }
+  }
+
   
   // ================== DETALHES ==================
   function handleOpenDetalhes(t: Torneio) {
@@ -1211,6 +1257,7 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
     const headJudgeName = headJudgeMap[tor.headJudge] || "Sem Head Judge";
     const isThisJudgePending = tor.judge === playerId && tor.judgeAccepted === false;
     const canAccessDetails = isHost || (tor.judge === playerId && tor.judgeAccepted);
+    const isUserInscrito = inscritoIds.has(tor.id); // Verifica se o usuário está inscrito
 
     const creatorFullname =
       playerNameMap[tor.createdBy] || `Jogador não cadastrado: ${tor.createdBy}`;
@@ -1289,13 +1336,21 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
                 <Text style={styles.cardActionButtonText}>  Detalhes</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity
-              style={styles.cardActionButton}
-              onPress={() => handleInscrever(tor)}
-            >
-              <Ionicons name="checkmark-circle" size={18} color="#FFF" />
-              <Text style={styles.cardActionButtonText}>  Inscrever</Text>
-            </TouchableOpacity>
+            {inscritoIds.has(tor.id) ? (
+              // Botão desabilitado para torneios já inscritos
+              <View style={[styles.cardActionButton, { backgroundColor: "#777" }]}>
+                <Ionicons name="checkmark-circle" size={18} color="#FFF" />
+                <Text style={styles.cardActionButtonText}>  Inscrito</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.cardActionButton}
+                onPress={() => handleInscrever(tor)}
+              >
+                <Ionicons name="checkmark-circle" size={18} color="#FFF" />
+                <Text style={styles.cardActionButtonText}>  Inscrever</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
           <TouchableOpacity
@@ -1307,7 +1362,7 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
               {canAccessDetails ? " Detalhes (Ocorrido)" : " Já ocorreu"}
             </Text>
           </TouchableOpacity>
-        )}
+)}
       </Animatable.View>
     );
   }
@@ -2139,6 +2194,9 @@ headerTitle: {
     color: SECONDARY,
     fontWeight: "bold",
     marginLeft: 4,
+  },
+  inscritoButton: {
+    backgroundColor: "#777", // Cinza para indicar que o usuário já está inscrito
   },
   // Container para mensagem de lista vazia
   emptyContainer: {

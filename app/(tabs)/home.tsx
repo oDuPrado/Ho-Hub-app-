@@ -31,6 +31,7 @@ import {
   getDocs,
   query,
   where,
+  setDoc,
   // As outras imports se mantêm se quiser
 } from "firebase/firestore";
 
@@ -131,35 +132,66 @@ export default function HomeScreen() {
   // useEffect Inicial
   // =============================
   useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
+  (async () => {
+    try {
+      setLoading(true);
 
-        // 1) Pega userId e nome
-        const storedId = await AsyncStorage.getItem("@userId");
-        const storedName = await AsyncStorage.getItem("@userName");
-        if (!storedId) {
-          router.replace("/(auth)/login");
-          return;
-        }
-        setUserId(storedId);
-        setUserName(storedName || "Jogador");
+      // 1) Pega userId e nome
+      const storedId = await AsyncStorage.getItem("@userId");
+      const storedName = await AsyncStorage.getItem("@userName");
+      if (!storedId) {
+        router.replace("/(auth)/login");
+        return;
+      }
+      setUserId(storedId);
+      setUserName(storedName || "Jogador");
 
-        // Avatar
-        const storedAvatar = await AsyncStorage.getItem("@userAvatar");
-        if (storedAvatar) {
-          const avId = parseInt(storedAvatar, 10);
-          const found = avatarList.find((av) => av.id === avId);
-          if (found) setAvatarUri(found.uri);
-        }
+      // ✅ Buscar dados do Firestore primeiro
+      const userDocRef = doc(db, "players", storedId);
+      const userSnap = await getDoc(userDocRef);
 
-        // Boas-vindas
-        const showWelcome = await AsyncStorage.getItem("@showWelcomeModal");
-        if (showWelcome === "true") {
-          setWelcomeModalVisible(true);
-          await AsyncStorage.removeItem("@showWelcomeModal");
-        }
+      let leagueId = null;
+      let filterType = "all";
+      let city = null;
 
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        leagueId = userData.leagueId || null;
+        filterType = userData.filterType || "all";
+        city = userData.city || null;
+      }
+
+      // ✅ Se encontrou no Firestore, salvar no AsyncStorage
+      if (leagueId) {
+        await AsyncStorage.setItem("@leagueId", leagueId);
+        await AsyncStorage.setItem("@filterType", filterType);
+      }
+      if (city) {
+        await AsyncStorage.setItem("@selectedCity", city);
+      }
+
+      // Avatar
+      const storedAvatar = await AsyncStorage.getItem("@userAvatar");
+      if (storedAvatar) {
+        const avId = parseInt(storedAvatar, 10);
+        const found = avatarList.find((av) => av.id === avId);
+        if (found) setAvatarUri(found.uri);
+      }
+
+      // Boas-vindas
+      const showWelcome = await AsyncStorage.getItem("@showWelcomeModal");
+      if (showWelcome === "true") {
+        setWelcomeModalVisible(true);
+        await AsyncStorage.removeItem("@showWelcomeModal");
+      }
+
+      // ✅ Agora carregar os dados normalmente
+      const finalLeagueId = leagueId || (await AsyncStorage.getItem("@leagueId"));
+      const finalFilterType = filterType || (await AsyncStorage.getItem("@filterType")) || "all";
+
+      setSelectedLeagueId(finalLeagueId);
+      setSelectedCity(city);
+      
         // 3) Lê STATs AGREGADAS do backend (já somadas conforme o filtro)
         const aggregated = await fetchAllStatsByFilter(storedId);
 
@@ -229,50 +261,111 @@ export default function HomeScreen() {
   }
 
   function calcProgress(title: TitleItem, stats: PlayerStats): number {
-    if (title.condition(stats)) return 1;
+    if (title.condition(stats)) return 1; // Se já desbloqueou, progresso é 100%
+  
     let progress = 0;
+  
     switch (title.id) {
-      case 101:
+      case 101: // Mestre Kanto (Vitórias)
         progress = stats.wins / 20;
         break;
-      case 999:
+      case 999: // A Jornada Começa (Primeira vitória)
         progress = stats.wins / 1;
         break;
-      case 102:
+      case 102: // Kamehameha Vitorioso (30 Vitórias)
         progress = stats.wins / 30;
         break;
-      case 401:
+      case 401: // Guardião de Rayquaza (50 Vitórias)
         progress = stats.wins / 50;
         break;
-      case 405:
+      case 405: // Caminho do Campeão (100 Partidas Jogadas)
         progress = stats.matchesTotal / 100;
         break;
-      case 406:
+      case 406: // Conquistador de Johto (75 Vitórias)
         progress = stats.wins / 75;
         break;
-      case 408:
+      case 407: // Top 3 Desafiante (Top 3 em 3 torneios)
+        progress =
+          (stats.tournamentPlacements?.filter((p) => p <= 3).length ?? 0) / 3;
+        break;
+      case 408: // Oitavo Anjo (50 partidas jogadas)
         progress = stats.matchesTotal / 50;
         break;
-      case 409:
+      case 409: // Conquistador de 100 Unowns (20 oponentes únicos)
         progress = stats.uniqueOpponents / 20;
         break;
-      case 410:
+      case 410: // Hakuna Matata da Vitória (90 Vitórias)
         progress = stats.wins / 90;
         break;
-      case 412:
+      case 411: // Elite dos 4 (Top 3 em 4 torneios)
+        progress =
+          (stats.tournamentPlacements?.filter((p) => p <= 3).length ?? 0) / 4;
+        break;
+      case 412: // Faça Elevar seu Cosmo! (150 Partidas)
         progress = stats.matchesTotal / 150;
         break;
-      case 413:
+      case 413: // Z-Crystal Supremo (120 Vitórias)
         progress = stats.wins / 120;
         break;
-      case 414:
+      case 414: // Símbolo da Superação (10 Derrotas + 10 Vitórias)
         progress = Math.min(stats.losses / 10, stats.wins / 10);
+        break;
+      case 415: // Top 1 Duas Vezes (Primeiro lugar em 2 torneios)
+        progress =
+          (stats.tournamentPlacements?.filter((p) => p === 1).length ?? 0) / 2;
+        break;
+      case 201: // Miau, Que Empate! (5 Empates)
+        progress = stats.draws / 5;
+        break;
+      case 404: // Erro 404: Vitória Não Encontrada (Mais derrotas que vitórias)
+        progress = stats.losses > stats.wins ? 1 : 0;
+        break;
+      case 202: // One Punch Draw (10 Empates)
+        progress = stats.draws / 10;
+        break;
+      case 204: // Pikachu Zonzo (3 Empates e nenhuma vitória)
+        progress = stats.draws >= 3 && stats.wins === 0 ? 1 : 0;
+        break;
+      case 205: // Treinamento do Mestre Kame (1 empate em 2 jogos)
+        progress = stats.draws >= 1 && stats.matchesTotal <= 2 ? 1 : 0;
+        break;
+      case 206: // Rivalidade de Shounen (10 oponentes únicos, menos de 10 vitórias)
+        progress = stats.uniqueOpponents >= 10 && stats.wins < 10 ? 1 : 0;
+        break;
+      case 207: // Sofredor Shingeki (20 Derrotas)
+        progress = stats.losses / 20;
+        break;
+      case 208: // Mais Filler em Naruto? (200 Partidas)
+        progress = stats.matchesTotal / 200;
+        break;
+      case 209: // Magikarp Saltitante (Mais derrotas que vitórias, mas pelo menos 1 vitória)
+        progress = stats.losses > stats.wins && stats.wins >= 1 ? 1 : 0;
+        break;
+      case 210: // Zubat Incessante (8 Empates)
+        progress = stats.draws / 8;
+        break;
+      case 211: // Equipe Rocket Decolando Denovo (50 partidas, menos de 5 vitórias)
+        progress = stats.matchesTotal >= 50 && stats.wins < 5 ? 1 : 0;
+        break;
+      case 212: // Chuunibyou Ativado (15 Derrotas e 15 Vitórias)
+        progress = stats.losses >= 15 && stats.wins >= 15 ? 1 : 0;
+        break;
+      case 213: // O Meme Continua (Todos empates)
+        progress =
+          stats.draws === stats.matchesTotal && stats.matchesTotal > 0 ? 1 : 0;
+        break;
+      case 214: // Chorando no Chuveiro (30 Derrotas)
+        progress = stats.losses / 30;
+        break;
+      case 402: // Viajante Interdimensional (30 Oponentes únicos)
+        progress = stats.uniqueOpponents / 30;
         break;
       default:
         progress = 0;
     }
-    return Math.min(progress, 1);
-  }
+  
+    return Math.min(progress, 1); // Garante que o progresso nunca passe de 100%
+  }  
 
   // =============================
   // Funções para Rival (agora lendo do backend)
@@ -435,15 +528,23 @@ export default function HomeScreen() {
   // e recalculamos Títulos, Rival etc.
   async function handleSaveFilter() {
     try {
+      let filterType = "all";
+      let selectedCityData = null;
+      let selectedLeagueData = null;
+  
       if (showAllLeagues) {
         await AsyncStorage.setItem("@filterType", "all");
         await AsyncStorage.removeItem("@selectedCity");
         await AsyncStorage.removeItem("@leagueId");
       } else if (selectedCity && !selectedLeagueId) {
+        filterType = "city";
+        selectedCityData = selectedCity;
         await AsyncStorage.setItem("@filterType", "city");
         await AsyncStorage.setItem("@selectedCity", selectedCity);
         await AsyncStorage.removeItem("@leagueId");
       } else if (selectedLeagueId) {
+        filterType = "league";
+        selectedLeagueData = selectedLeagueId;
         await AsyncStorage.setItem("@filterType", "league");
         await AsyncStorage.setItem("@leagueId", selectedLeagueId);
         await AsyncStorage.removeItem("@selectedCity");
@@ -452,6 +553,14 @@ export default function HomeScreen() {
         await AsyncStorage.removeItem("@selectedCity");
         await AsyncStorage.removeItem("@leagueId");
       }
+
+      // ✅  SALVAR NO FIRESTORE JUNTO COM O AVATAR E TEMPLATE
+    const userDocRef = doc(db, "players", userId);
+    await setDoc(userDocRef, {
+      leagueId: selectedLeagueData,
+      city: selectedCityData,
+      filterType,
+    }, { merge: true });
 
       setFilterModalVisible(false);
       setLoading(true);
