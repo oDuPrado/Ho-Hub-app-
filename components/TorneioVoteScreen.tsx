@@ -116,8 +116,6 @@ export default function TorneioVoteScreen({
         pin: userPin.trim(),
       };
 
-      console.log("🔥 Enviando voto:", body);
-
       const resp = await fetch("https://Doprado.pythonanywhere.com/report", {
         method: "POST",
         headers: {
@@ -264,6 +262,14 @@ export default function TorneioVoteScreen({
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={styles.voteButton}
+                  onPress={() => sendVote("Empate")}
+                >
+                  <Ionicons name="hand-left" size={26} color="#FFC107" />
+                  <Text style={styles.voteText}>Empate</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={[styles.voteButton, { marginHorizontal: 8 }]}
                   onPress={() => sendVote("Vitória Jogador 2")}
                 >
@@ -273,13 +279,7 @@ export default function TorneioVoteScreen({
                   </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.voteButton}
-                  onPress={() => sendVote("Empate")}
-                >
-                  <Ionicons name="hand-left" size={26} color="#FFC107" />
-                  <Text style={styles.voteText}>Empate</Text>
-                </TouchableOpacity>
+                
               </Animatable.View>
 
               <Animatable.View animation="fadeInUp" delay={150}>
@@ -392,25 +392,26 @@ const styles = StyleSheet.create({
   },
   voteContainer: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "space-around",
+    alignItems: "center",
     marginTop: 8,
     marginBottom: 12,
   },
   voteButton: {
-    flexDirection: "column",
+    flex: 1,
+    marginHorizontal: 4,
     alignItems: "center",
     backgroundColor: "#333",
     paddingVertical: 12,
     paddingHorizontal: 8,
     borderRadius: 12,
-    minWidth: 90,
   },
   voteText: {
     color: WHITE,
     marginTop: 6,
     fontSize: 13,
     textAlign: "center",
-    fontWeight: "600",
+    fontWeight: "800",
   },
   clearButton: {
     flexDirection: "row",

@@ -74,21 +74,62 @@ export default function TorneioReportsScreen({
     try {
       setLoading(true);
       setErrorMsg("");
-
+  
       const leagueId = await AsyncStorage.getItem("@leagueId");
       const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
       const storedName = await AsyncStorage.getItem("@userName");
       setUserName(storedName || "Jogador");
-
+  
       if (!leagueId) {
         setErrorMsg("Nenhuma liga selecionada no app.");
         setLoading(false);
         return;
       }
-
+  
       await checkIfHost(leagueId);
-
-      // 1. Busca resultados
+  
+      // 3. Primeiro: Busca dados do torneio (mesas visuais finais)
+      let tables: Record<string, any> = {};
+      const resTorneio = await fetch(
+        `https://Doprado.pythonanywhere.com/get-data/${leagueId}`,
+        {
+          method: "GET",
+          headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
+        }
+      );
+      if (resTorneio.ok) {
+        const dataTorneio = await resTorneio.json();
+        const roundObj = dataTorneio.round ?? {};
+        const roundKeys = Object.keys(roundObj).map((rk) => parseInt(rk, 10));
+      
+        if (roundKeys.length > 0) {
+          const latestRound = Math.max(...roundKeys);
+          const divisions = roundObj[String(latestRound)] || {};
+          const divisionKeys = Object.keys(divisions);
+          if (divisionKeys.length > 0) {
+            const currentDivision = divisionKeys[0];
+            tables = divisions[currentDivision]?.table ?? {};
+            
+            // ✅ Atualiza os nomes das mesas na API antes de setar
+            Object.keys(tables).forEach((mesaId) => {
+              if (tables[mesaId].player1) {
+                tables[mesaId].player1 = tables[mesaId].player1.trim();
+              }
+              if (tables[mesaId].player2) {
+                tables[mesaId].player2 = tables[mesaId].player2.trim();
+              }
+            });
+      
+            setMesaData(tables);
+          } else {
+            setMesaData({});
+          }
+        } else {
+          setMesaData({});
+        }
+      }      
+  
+      // 1. Busca resultados (depois de obter as mesas visuais)
       const resResults = await fetch(
         `https://Doprado.pythonanywhere.com/get-resultados?league_id=${leagueId}`,
         {
@@ -108,11 +149,25 @@ export default function TorneioReportsScreen({
         setLoading(false);
         return;
       }
+  
+      // Filtra os resultados utilizando as mesas visuais obtidas
+      const visualMesas = Object.keys(tables);
+      const filteredFinal = Object.fromEntries(
+        Object.entries(dataResults.final || {}).filter(([key]) =>
+          visualMesas.includes(key)
+        )
+      ) as Record<string, string>;
+      const filteredPartial = Object.fromEntries(
+        Object.entries(dataResults.partial || {}).filter(([key]) =>
+          visualMesas.includes(key)
+        )
+      ) as Record<string, Record<string, string>>;
+  
       setReports({
-        final: dataResults.final || {},
-        partial: dataResults.partial || {},
+        final: filteredFinal,
+        partial: filteredPartial,
       });
-
+  
       // 2. Busca info da liga
       const resLeagueInfo = await fetch(
         "https://Doprado.pythonanywhere.com/get-league-info",
@@ -125,42 +180,13 @@ export default function TorneioReportsScreen({
         const infoData = await resLeagueInfo.json();
         setLeagueName(infoData.leagueName || "Torneio");
       }
-
-      // 3. Busca dados do torneio (mesas visuais finais)
-      const resTorneio = await fetch(
-        `https://Doprado.pythonanywhere.com/get-data/${leagueId}`,
-        {
-          method: "GET",
-          headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
-        }
-      );
-      if (resTorneio.ok) {
-        const dataTorneio = await resTorneio.json();
-        const roundObj = dataTorneio.round ?? {};
-        const roundKeys = Object.keys(roundObj).map((rk) => parseInt(rk, 10));
-        if (roundKeys.length > 0) {
-          const latestRound = Math.max(...roundKeys);
-          const divisions = roundObj[String(latestRound)] || {};
-          const divisionKeys = Object.keys(divisions);
-          if (divisionKeys.length > 0) {
-            const currentDivision = divisionKeys[0];
-            const tables = divisions[currentDivision]?.table ?? {};
-            // Estas "tables" já devem conter APENAS as mesas visuais (ex: "10" em vez de "2")
-            setMesaData(tables);
-          } else {
-            setMesaData({});
-          }
-        } else {
-          setMesaData({});
-        }
-      }
-
+  
       setLoading(false);
     } catch (error: any) {
       setErrorMsg("Falha ao carregar resultados do torneio.");
       setLoading(false);
     }
-  }
+  }  
 
   async function checkIfHost(leagueId: string) {
     try {
@@ -229,8 +255,8 @@ export default function TorneioReportsScreen({
       return null;
     }
 
-    const p1Name = tableInfo.player1 || "Jogador 1";
-    const p2Name = tableInfo.player2 || "Jogador 2";
+    const p1Name = mesaData[mesaVisual]?.player1 || "Jogador 1";
+    const p2Name = mesaData[mesaVisual]?.player2 || "Jogador 2";
 
     // Votos e resultados dessa mesa (visual)
     const finalResult = reports.final[mesaVisual];

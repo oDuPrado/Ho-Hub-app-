@@ -35,7 +35,7 @@ yarn-error.*
 *.tsbuildinfo
 
 # Arquivos sensíveis do Firebase
-#lib/firebaseConfig.ts
+lib/firebaseConfig.ts
 lib/firebaseConfig_teste.txt
 
 

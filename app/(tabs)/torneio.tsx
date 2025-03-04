@@ -219,7 +219,7 @@ export default function TorneioScreen() {
       intervalRef.current = setInterval(() => {
         console.log("==> [TorneioScreen] Atualizando dados automaticamente...");
         fetchTournamentData();
-      }, 60000);
+      }, 600000);
   
       return () => {
         console.log("==> [TorneioScreen] Focus out. Limpando intervalo.");
@@ -679,6 +679,12 @@ export default function TorneioScreen() {
           source={require("../../assets/images/logo.jpg")}
           style={styles.logo}
         />
+
+        {/* Botão de Atualizar */}
+      <TouchableOpacity onPress={fetchTournamentData} style={styles.refreshButton}>
+        <MaterialCommunityIcons name="refresh" size={28} color="white" />
+      </TouchableOpacity>
+
         <Text style={styles.headerUserName}>{userName}</Text>
         {isAuthUser && (
           <TouchableOpacity onPress={() => setAdminPanelVisible(true)}>
@@ -1047,4 +1053,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginTop: 12,
   },
+  refreshButton: {
+  marginLeft: 10,
+  padding: 8,
+  borderRadius: 50, // Deixa o botão circular
+  backgroundColor: "rgba(255, 255, 255, 0.15)", // Fundo mais sutil
+  borderWidth: 1,
+  borderColor: "rgba(255, 255, 255, 0.3)", // Bordas suaves
+  justifyContent: "center",
+  alignItems: "center",
+},
+
 });
