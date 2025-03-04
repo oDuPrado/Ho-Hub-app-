@@ -16,10 +16,10 @@ import * as Animatable from "react-native-animatable";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 
-// Função para buscar membros do role host – ajuste o caminho conforme necessário
+// Se você usa essa função para buscar membros do role host
 import { fetchRoleMembers } from "../app/hosts";
 
-// ======== Cores/Constantes ========
+// Cores/Constantes
 const RED = "#E3350D";
 const DARK_GRAY = "#1E1E1E";
 const LIGHT_GRAY = "#444";
@@ -52,7 +52,7 @@ export default function TorneioReportsScreen({
   const [userName, setUserName] = useState<string>("Jogador");
   const [errorMsg, setErrorMsg] = useState<string>("");
 
-  // Fechar modal com o botão físico (BackHandler)
+  // Fecha modal ao apertar botão físico de voltar
   useEffect(() => {
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
       onClose();
@@ -63,7 +63,7 @@ export default function TorneioReportsScreen({
     };
   }, [onClose]);
 
-  // Carrega os dados assim que o modal fica visível
+  // Carrega dados assim que o modal fica visível
   useEffect(() => {
     if (visible) {
       loadReports();
@@ -75,7 +75,6 @@ export default function TorneioReportsScreen({
       setLoading(true);
       setErrorMsg("");
 
-      // Obtém dados do AsyncStorage
       const leagueId = await AsyncStorage.getItem("@leagueId");
       const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
       const storedName = await AsyncStorage.getItem("@userName");
@@ -87,10 +86,9 @@ export default function TorneioReportsScreen({
         return;
       }
 
-      // Verifica se o usuário é host
       await checkIfHost(leagueId);
 
-      // 1. Busca os resultados via API get-resultados
+      // 1. Busca resultados
       const resResults = await fetch(
         `https://Doprado.pythonanywhere.com/get-resultados?league_id=${leagueId}`,
         {
@@ -115,24 +113,29 @@ export default function TorneioReportsScreen({
         partial: dataResults.partial || {},
       });
 
-      // 2. Busca informações adicionais da liga (get-league-info)
-      const resLeagueInfo = await fetch(`https://Doprado.pythonanywhere.com/get-league-info`, {
-        method: "GET",
-        headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
-      });
+      // 2. Busca info da liga
+      const resLeagueInfo = await fetch(
+        "https://Doprado.pythonanywhere.com/get-league-info",
+        {
+          method: "GET",
+          headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
+        }
+      );
       if (resLeagueInfo.ok) {
         const infoData = await resLeagueInfo.json();
         setLeagueName(infoData.leagueName || "Torneio");
       }
 
-      // 3. Busca os dados do torneio para obter todas as mesas (get-data)
-      const resTorneio = await fetch(`https://Doprado.pythonanywhere.com/get-data/${leagueId}`, {
-        method: "GET",
-        headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
-      });
+      // 3. Busca dados do torneio (mesas visuais finais)
+      const resTorneio = await fetch(
+        `https://Doprado.pythonanywhere.com/get-data/${leagueId}`,
+        {
+          method: "GET",
+          headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
+        }
+      );
       if (resTorneio.ok) {
         const dataTorneio = await resTorneio.json();
-        // Extraímos as mesas da rodada atual
         const roundObj = dataTorneio.round ?? {};
         const roundKeys = Object.keys(roundObj).map((rk) => parseInt(rk, 10));
         if (roundKeys.length > 0) {
@@ -142,6 +145,7 @@ export default function TorneioReportsScreen({
           if (divisionKeys.length > 0) {
             const currentDivision = divisionKeys[0];
             const tables = divisions[currentDivision]?.table ?? {};
+            // Estas "tables" já devem conter APENAS as mesas visuais (ex: "10" em vez de "2")
             setMesaData(tables);
           } else {
             setMesaData({});
@@ -150,6 +154,7 @@ export default function TorneioReportsScreen({
           setMesaData({});
         }
       }
+
       setLoading(false);
     } catch (error: any) {
       setErrorMsg("Falha ao carregar resultados do torneio.");
@@ -212,41 +217,45 @@ export default function TorneioReportsScreen({
     }
   }
 
-  // Renderiza o card de cada mesa
-  function renderResultCard(mesa: string) {
-    // Dados da mesa
-    const tableInfo = mesaData[mesa];
-    const p1Name = tableInfo?.player1 || "Jogador 1";
-    const p2Name = tableInfo?.player2 || "Jogador 2";
+  // Mostramos SOMENTE as mesas que estão no mesaData (versão final/visual).
+  function getVisualMesas(): string[] {
+    return Object.keys(mesaData);
+  }
 
-    // Obtém votos
-    const finalResult = reports.final[mesa];
-    const partialVotes = reports.partial[mesa];
+  function renderResultCard(mesaVisual: string) {
+    // Se a mesa não existe em mesaData (visual), não renderiza
+    const tableInfo = mesaData[mesaVisual];
+    if (!tableInfo) {
+      return null;
+    }
 
-    // Valores padrões
+    const p1Name = tableInfo.player1 || "Jogador 1";
+    const p2Name = tableInfo.player2 || "Jogador 2";
+
+    // Votos e resultados dessa mesa (visual)
+    const finalResult = reports.final[mesaVisual];
+    const partialVotes = reports.partial[mesaVisual];
+
     let voteP1 = "Aguardando voto";
     let voteP2 = "Aguardando voto";
     let statusText = "";
     let statusIcon = null;
-    let cardBorderColor = WARNING_YELLOW; // aguardando
+    let cardBorderColor = WARNING_YELLOW; // estado default (aguardando)
 
     if (!finalResult && !partialVotes) {
       statusText = "Status da mesa: Jogando";
     } else if (partialVotes) {
       const voteEntries = Object.entries(partialVotes);
       if (voteEntries.length === 1) {
-        // Um voto
-        const votedPlayerId = voteEntries[0][0];
-        const votedVote = voteEntries[0][1];
-        if (tableInfo && tableInfo.player1_id === votedPlayerId) {
+        const [votedPlayerId, votedVote] = voteEntries[0];
+        if (tableInfo.player1_id === votedPlayerId) {
           voteP1 = votedVote;
         } else {
           voteP2 = votedVote;
         }
         statusText = "Status da mesa: Aguardando outro Voto";
       } else if (voteEntries.length === 2) {
-        // Dois votos
-        const votes = voteEntries.map(([, vote]) => vote);
+        const votes = voteEntries.map(([, v]) => v);
         voteP1 = partialVotes[tableInfo.player1_id] || "Aguardando voto";
         voteP2 = partialVotes[tableInfo.player2_id] || "Aguardando voto";
         if (votes[0] === votes[1]) {
@@ -272,7 +281,6 @@ export default function TorneioReportsScreen({
         }
       }
     } else if (finalResult) {
-      // Resultado final
       voteP1 =
         partialVotes && partialVotes[tableInfo.player1_id]
           ? partialVotes[tableInfo.player1_id]
@@ -292,16 +300,15 @@ export default function TorneioReportsScreen({
       );
     }
 
-    // Card estilizado + animação
     return (
       <Animatable.View
-        key={mesa}
+        key={mesaVisual}
         style={[styles.resultCard, { borderColor: cardBorderColor }]}
         animation="fadeInUp"
         duration={600}
       >
         <Text style={styles.cardLine}>
-          <Text style={styles.label}>Mesa:</Text> {mesa}
+          <Text style={styles.label}>Mesa:</Text> {mesaVisual}
         </Text>
         <Text style={styles.cardLine}>
           <Text style={styles.label}>Jogadores:</Text> {p1Name} vs {p2Name}
@@ -320,7 +327,7 @@ export default function TorneioReportsScreen({
           <Animatable.View animation="pulse" duration={1000} iterationCount="infinite">
             <TouchableOpacity
               style={styles.cardClearButton}
-              onPress={() => handleClearResultForMesa(mesa)}
+              onPress={() => handleClearResultForMesa(mesaVisual)}
             >
               <MaterialCommunityIcons name="trash-can" size={20} color={WHITE} />
               <Text style={styles.cardClearButtonText}>Limpar</Text>
@@ -331,18 +338,16 @@ export default function TorneioReportsScreen({
     );
   }
 
-  const mesas = Object.keys(mesaData);
+  const mesas = getVisualMesas();
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      {/* Overlay com visual modernão */}
-      <Animatable.View
-        style={styles.overlay}
-        animation="fadeIn"
-        duration={400}
-        onTouchEnd={() => {}}
-      >
-        {/* Container principal */}
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <Animatable.View style={styles.overlay} animation="fadeIn" duration={400}>
         <Animatable.View
           style={styles.modalContainer}
           animation="zoomInUp"
@@ -383,14 +388,11 @@ export default function TorneioReportsScreen({
               <Text style={styles.infoText}>Nenhuma mesa encontrada.</Text>
             </View>
           ) : (
-            // Scroll com as mesas
             <ScrollView contentContainerStyle={styles.resultsContainer}>
-              {mesas.map((mesa) => renderResultCard(mesa))}
+              {mesas.map((m) => renderResultCard(m))}
             </ScrollView>
           )}
 
-          {/* Botões Extras para o Host */}
-          {/* Botão de Voltar */}
           <Animatable.View animation="fadeInUp" delay={200} style={styles.footerArea}>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
               <Ionicons name="arrow-back" size={20} color={WHITE} />
@@ -471,8 +473,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 10,
   },
-
-  // Cartões
   resultCard: {
     backgroundColor: LIGHT_GRAY,
     borderRadius: 10,
@@ -515,28 +515,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginLeft: 6,
   },
-
-  // Botão para limpar TODOS (Host)
-  hostButtonContainer: {
-    marginVertical: 10,
-    alignItems: "center",
-  },
-  clearAllButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: DANGER_RED,
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  clearAllButtonText: {
-    color: WHITE,
-    marginLeft: 8,
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-
-  // Rodapé
   footerArea: {
     alignItems: "center",
     marginTop: 10,
@@ -548,7 +526,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    alignSelf: "center",
   },
   closeButtonText: {
     color: WHITE,
