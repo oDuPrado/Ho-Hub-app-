@@ -11,19 +11,46 @@ import {
 import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
 
+type CustomModalButton = {
+  text: string;
+  onPress: () => void;
+  style?: "default" | "cancel";
+};
+
 type CustomModalProps = {
   visible: boolean;
   onClose: () => void;
   title: string;
-  message: string;
+  message: string | JSX.Element;
+  /**
+   * Se não for informado o array `buttons`, 
+   * o modal exibe apenas um botão "OK" que chama `onClose`.
+   */
+  buttons?: CustomModalButton[];
 };
 
+/**
+ * Modal customizado com fundo de imagem e animações.
+ * Agora suporta múltiplos botões via props.buttons.
+ * Se nenhum botão for passado, exibe um "OK" padrão.
+ */
 const CustomModal: React.FC<CustomModalProps> = ({
   visible,
   onClose,
   title,
   message,
+  buttons,
 }) => {
+  // Se não houver botões, exibimos um padrão "OK".
+  const finalButtons: CustomModalButton[] = buttons?.length
+    ? buttons
+    : [
+        {
+          text: "OK",
+          onPress: onClose,
+        },
+      ];
+
   return (
     <Modal
       animationType="fade"
@@ -32,7 +59,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        {/* Animando a imagem de fundo */}
+        {/* Animação do container de fundo */}
         <Animatable.View
           animation="fadeIn"
           duration={800}
@@ -48,7 +75,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
               duration={800}
               style={styles.textContainer}
             >
-              {/* Ícone de informação ao lado do título */}
+              {/* Cabeçalho: ícone + título */}
               <View style={styles.titleContainer}>
                 <Ionicons
                   name="information-circle-outline"
@@ -58,11 +85,38 @@ const CustomModal: React.FC<CustomModalProps> = ({
                 />
                 {title ? <Text style={styles.title}>{title}</Text> : null}
               </View>
+
+              {/* Mensagem principal */}
               <Text style={styles.message}>{message}</Text>
-              <TouchableOpacity style={styles.button} onPress={onClose}>
-                <Ionicons name="checkmark-circle-outline" size={20} color="#FFF" style={styles.buttonIcon} />
-                <Text style={styles.buttonText}>OK</Text>
-              </TouchableOpacity>
+
+              {/* Renderiza os botões (um ou vários) */}
+              <View style={styles.buttonContainer}>
+                {finalButtons.map((btn, index) => {
+                  const isCancel = btn.style === "cancel";
+                  const iconName = isCancel
+                    ? "close-circle-outline"
+                    : "checkmark-circle-outline";
+
+                  return (
+                    <TouchableOpacity
+                      key={index}
+                      style={[
+                        styles.button,
+                        isCancel ? styles.cancelButton : null,
+                      ]}
+                      onPress={btn.onPress}
+                    >
+                      <Ionicons
+                        name={iconName}
+                        size={20}
+                        color="#FFF"
+                        style={styles.buttonIcon}
+                      />
+                      <Text style={styles.buttonText}>{btn.text}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </Animatable.View>
           </ImageBackground>
         </Animatable.View>
@@ -71,6 +125,9 @@ const CustomModal: React.FC<CustomModalProps> = ({
   );
 };
 
+export default CustomModal;
+
+// ====================== ESTILOS ======================
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -92,13 +149,12 @@ const styles = StyleSheet.create({
   imageStyle: {
     borderRadius: 20,
   },
-  // Container exclusivo para o texto (título, mensagem e botão)
   textContainer: {
     width: "100%",
     padding: 20,
-    backgroundColor: "rgba(0, 0, 0, 0.0)", // sem fundo para deixar a imagem visível
+    backgroundColor: "rgba(0, 0, 0, 0.0)", // Sem fundo para deixar a imagem visível
     alignItems: "center",
-    marginTop: 20, // desloca o conteúdo para baixo na imagem
+    marginTop: 20, // Desloca o conteúdo para baixo na imagem
   },
   titleContainer: {
     flexDirection: "row",
@@ -126,6 +182,10 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
+  buttonContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+  },
   button: {
     flexDirection: "row",
     backgroundColor: "#E3350D",
@@ -133,6 +193,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     borderRadius: 20,
     alignItems: "center",
+    marginHorizontal: 5,
+  },
+  cancelButton: {
+    backgroundColor: "#666", // Cinza para botão de cancelamento
   },
   buttonIcon: {
     marginRight: 8,
@@ -143,5 +207,3 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 });
-
-export default CustomModal;

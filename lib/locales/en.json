@@ -39,18 +39,19 @@
   
     "drawer": {
       "home": "Home",
+      "calendario": "Registration",
       "chats": "Chats",
-      "calendario": "Calendar",
-      "torneio": "Tournament",
+      "torneio": "Rounds",
       "noticias": "News",
-      "iapikachu": "IApikachu",
+      "iapikachu": "ScauterIA",
       "cartas": "Cards",
       "trocas": "Trades",
       "decks": "Decks",
       "jogador": "Player",
-      "sugestao": "Suggestion"
-    },
-  
+      "sugestao": "Suggestion",
+      "cadastros": "Administration",
+      "classico": "History"
+    }, 
     "analytics": {
       "welcome_messages": [
         "Hello, Trainer! Ready to improve your skills?",

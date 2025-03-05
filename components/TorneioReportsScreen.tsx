@@ -15,6 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Animatable from "react-native-animatable";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
+import CustomModal from "../components/CustomModal"; // Importa o modal estilizado
 
 // Se você usa essa função para buscar membros do role host
 import { fetchRoleMembers } from "../app/hosts";
@@ -51,6 +52,8 @@ export default function TorneioReportsScreen({
   const [leagueName, setLeagueName] = useState<string>("Torneio");
   const [userName, setUserName] = useState<string>("Jogador");
   const [errorMsg, setErrorMsg] = useState<string>("");
+  // Modal de confirmaçao para limpar todos os reportes
+const [showConfirmClearAllModal, setShowConfirmClearAllModal] = useState(false);
 
   // Fecha modal ao apertar botão físico de voltar
   useEffect(() => {
@@ -248,6 +251,33 @@ export default function TorneioReportsScreen({
     return Object.keys(mesaData);
   }
 
+  async function handleLimparTodosVotos() {
+    try {
+      const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
+      const leagueId = await AsyncStorage.getItem("@leagueId");
+  
+      if (!firebaseToken || !leagueId) {
+        Alert.alert("Erro", "Não foi possível identificar a liga.");
+        return;
+      }
+  
+      const res = await fetch("https://Doprado.pythonanywhere.com/limpar-resultados", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "",
+        },
+        body: JSON.stringify({ league_id: leagueId }),
+      });
+  
+      const json = await res.json();
+      Alert.alert("Info", json.message || "Todos os Reportes foram limpos.");
+      await loadReports(); // Atualiza os resultados após a limpeza
+    } catch (error) {
+      Alert.alert("Erro", "Falha ao limpar todos os Reportes.");
+    }
+  }  
+
   function renderResultCard(mesaVisual: string) {
     // Se a mesa não existe em mesaData (visual), não renderiza
     const tableInfo = mesaData[mesaVisual];
@@ -262,8 +292,8 @@ export default function TorneioReportsScreen({
     const finalResult = reports.final[mesaVisual];
     const partialVotes = reports.partial[mesaVisual];
 
-    let voteP1 = "Aguardando voto";
-    let voteP2 = "Aguardando voto";
+    let voteP1 = "Aguardando reporte";
+    let voteP2 = "Aguardando reporte";
     let statusText = "";
     let statusIcon = null;
     let cardBorderColor = WARNING_YELLOW; // estado default (aguardando)
@@ -279,11 +309,11 @@ export default function TorneioReportsScreen({
         } else {
           voteP2 = votedVote;
         }
-        statusText = "Status da mesa: Aguardando outro Voto";
+        statusText = "Status da mesa: Aguardando outro reporte";
       } else if (voteEntries.length === 2) {
         const votes = voteEntries.map(([, v]) => v);
-        voteP1 = partialVotes[tableInfo.player1_id] || "Aguardando voto";
-        voteP2 = partialVotes[tableInfo.player2_id] || "Aguardando voto";
+        voteP1 = partialVotes[tableInfo.player1_id] || "Aguardando reporte";
+        voteP2 = partialVotes[tableInfo.player2_id] || "Aguardando reporte";
         if (votes[0] === votes[1]) {
           statusText = `Status da mesa: Vencedor: ${votes[0]}`;
           cardBorderColor = SUCCESS_GREEN;
@@ -295,7 +325,7 @@ export default function TorneioReportsScreen({
             />
           );
         } else {
-          statusText = "Status da mesa: Votos divergentes";
+          statusText = "Status da mesa: Reportes divergentes";
           cardBorderColor = DANGER_RED;
           statusIcon = (
             <MaterialCommunityIcons
@@ -310,11 +340,11 @@ export default function TorneioReportsScreen({
       voteP1 =
         partialVotes && partialVotes[tableInfo.player1_id]
           ? partialVotes[tableInfo.player1_id]
-          : "Voto confirmado";
+          : "Reporte confirmado";
       voteP2 =
         partialVotes && partialVotes[tableInfo.player2_id]
           ? partialVotes[tableInfo.player2_id]
-          : "Voto confirmado";
+          : "Reporte confirmado";
       statusText = `Status da mesa: Resultado Final: ${finalResult}`;
       cardBorderColor = SUCCESS_GREEN;
       statusIcon = (
@@ -419,6 +449,37 @@ export default function TorneioReportsScreen({
             </ScrollView>
           )}
 
+        {isHost && (
+          <Animatable.View animation="pulse" duration={1000} iterationCount="infinite">
+          <TouchableOpacity
+            style={styles.clearAllButton}
+            onPress={() => setShowConfirmClearAllModal(true)} // Abre o modal de confirmação
+          >
+            <MaterialCommunityIcons name="delete-forever" size={24} color={WHITE} />
+            <Text style={styles.clearAllButtonText}>Limpar Todos os Reportes</Text>
+          </TouchableOpacity>
+        </Animatable.View>        
+        )}
+        <CustomModal
+            visible={showConfirmClearAllModal}
+            onClose={() => setShowConfirmClearAllModal(false)} // Fecha o modal ao cancelar
+            title="Confirmar Limpeza"
+            message="Tem certeza que deseja limpar todos os reportes do torneio? Essa ação não pode ser desfeita."
+            buttons={[
+              {
+                text: "Sim",
+                onPress: () => {
+                  handleLimparTodosVotos();
+                  setShowConfirmClearAllModal(false);
+                },
+              },
+              {
+                text: "Cancelar",
+                onPress: () => setShowConfirmClearAllModal(false),
+                style: "cancel",
+              },
+            ]}
+          />
           <Animatable.View animation="fadeInUp" delay={200} style={styles.footerArea}>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
               <Ionicons name="arrow-back" size={20} color={WHITE} />
@@ -559,4 +620,21 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginLeft: 6,
   },
+  clearAllButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: DANGER_RED, // Vermelho para indicar ação crítica
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignSelf: "center",
+    marginTop: 20,
+  },
+  clearAllButtonText: {
+    color: WHITE,
+    fontSize: 16,
+    fontWeight: "bold",
+    marginLeft: 8,
+  },
+
 });

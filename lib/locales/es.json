@@ -38,19 +38,20 @@
     },
   
     "drawer": {
-      "home": "Inicio",
-      "calendario": "Calendario",
-      "chats": "Chats",
-      "torneio": "Torneo",
-      "noticias": "Noticias",
-      "iapikachu": "IApikachu",
-      "cartas": "Cartas",
-      "trocas": "Intercambios",
-      "decks": "Mazos",
-      "jogador": "Jugador",
-      "sugestao": "Sugerencia"
-    },
-  
+    "home": "Inicio",
+    "calendario": "Inscripción",
+    "chats": "Chats",
+    "torneio": "Rondas",
+    "noticias": "Noticias",
+    "iapikachu": "ScauterIA",
+    "cartas": "Cartas",
+    "trocas": "Intercambios",
+    "decks": "Mazos",
+    "jogador": "Jugador",
+    "sugestao": "Sugerencia",
+    "cadastros": "Administración",
+    "classico": "Historial"
+  },
     "analytics": {
       "welcome_messages": [
         "¡Hola, entrenador! ¿Listo para mejorar tus habilidades?",

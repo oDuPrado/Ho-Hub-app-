@@ -42,9 +42,9 @@
   
     "drawer": {
       "home": "Home",
-      "calendario": "Calendário",
+      "calendario": "Inscrição",
       "chats": "Chats",
-      "torneio": "Torneio",
+      "torneio": "Rodadas",
       "noticias": "Notícias",
       "iapikachu": "ScauterIA",
       "cartas": "Cartas",
@@ -52,8 +52,8 @@
       "decks": "Decks",
       "jogador": "Jogador",
       "sugestao": "Sugestão",
-      "cadastros":"Cadastros",
-      "classico":"Classicos"
+      "cadastros":"Administração",
+      "classico":"Historico"
 
     },
   

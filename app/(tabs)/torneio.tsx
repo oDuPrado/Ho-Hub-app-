@@ -219,7 +219,7 @@ export default function TorneioScreen() {
       intervalRef.current = setInterval(() => {
         console.log("==> [TorneioScreen] Atualizando dados automaticamente...");
         fetchTournamentData();
-      }, 600000);
+      }, 36000000);
   
       return () => {
         console.log("==> [TorneioScreen] Focus out. Limpando intervalo.");
@@ -238,7 +238,7 @@ export default function TorneioScreen() {
 
     intervalRef.current = setInterval(() => {
       setFetchCount((prev) => prev + 1);
-    }, 60000);
+    }, 36000000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);

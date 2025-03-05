@@ -35,6 +35,9 @@ import {
   // As outras imports se mantêm se quiser
 } from "firebase/firestore";
 
+// Tutoriais
+import Tutorials from "../../components/Tutorials";
+
 // ===== Importamos Titles e Stats originais =====
 import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 
@@ -45,6 +48,7 @@ import {
   RivalData as RivalBackendData,
   PlayerStatsData as PlayerStatsBackend,
 } from "../../lib/matchService";
+
 
 // Avatares e config UI
 const avatarList = [
@@ -89,6 +93,7 @@ export default function HomeScreen() {
   const [userId, setUserId] = useState("");
   const [userName, setUserName] = useState("Jogador");
   const [avatarUri, setAvatarUri] = useState<any>(null);
+  const [tutorialFiltroVisible, setTutorialFiltroVisible] = useState(false);
 
   // Stats do FRONT (mesmo shape que Titles e Stats pedem)
   const [stats, setStats] = useState<PlayerStats>({
@@ -230,9 +235,14 @@ export default function HomeScreen() {
         Alert.alert("Erro", "Não foi possível carregar dados.");
       } finally {
         setLoading(false);
+        // Verifica o tutorial depois que os dados já carregaram
+      const alreadySeen = await AsyncStorage.getItem("tutorialFiltroLigas");
+      if (!alreadySeen) {
+        setTutorialFiltroVisible(true);
       }
-    })();
-  }, [router]);
+    }
+  })();
+}, [router]);
 
   // Música do Rival
   useEffect(() => {
@@ -242,6 +252,8 @@ export default function HomeScreen() {
       stopBattleMusic();
     }
   }, [rivalModalVisible]);
+
+ 
 
   // =============================
   // Funções para Títulos
@@ -670,14 +682,13 @@ export default function HomeScreen() {
           <Image source={avatarSource} style={styles.avatar} />
           <Text style={styles.userName}>{userName}</Text>
         </View>
-
+        
         {/* Botão LIGAS */}
         <TouchableOpacity style={styles.ligasButton} onPress={openFilterModal}>
           <MaterialCommunityIcons name="earth" size={20} color="#FFF" />
           <Text style={styles.ligasButtonText}>Ligas</Text>
         </TouchableOpacity>
       </View>
-
       <ImageBackground
         source={require("../../assets/images/background_login.jpg")}
         style={styles.backgroundImage}
@@ -1620,4 +1631,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 16,
   },
+  tutorialButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#333",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginLeft: 10,
+  },
+  tutorialButtonText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginLeft: 6,
+  },
+  
 });
