@@ -497,7 +497,7 @@ export const titlesExclusivo: TitleItem[] = [
     description:
       "Nos campos de batalha Pokémon existe uma lenda silenciosa, um treinador cuja identidade pouco importa, mas cuja Choice Band é reverenciada por todos que enfrentam seu poder. Alguns dizem que a força de seus Pokémon aumenta drasticamente ao vestir essa faixa. Somente o verdadeiro portador desse legado pode ostentar este título lendário.",
     category: "EXCLUSIVO",
-    condition: (stats) => stats.userId === "4729671",
+    condition: (stats) => stats.userId === "2289116",
     icon: "karate",
   },
   {
@@ -506,7 +506,7 @@ export const titlesExclusivo: TitleItem[] = [
     description:
       "Em uma época em que as batalhas Pokémon eram apenas sonhos distantes, ele já dominava arenas e escrevia seu nome na história. Único campeão regional até hoje, seu legado não envelhece e sua glória permanece intocada pelo tempo. Este título é reservado ao lendário pioneiro cuja jornada inspira gerações.",
     category: "EXCLUSIVO",
-    condition: (stats) => stats.userId === "4729671",
+    condition: (stats) => stats.userId === "822800",
     icon: "trophy",
   },
   {
