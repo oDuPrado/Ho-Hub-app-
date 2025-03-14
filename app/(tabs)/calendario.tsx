@@ -179,7 +179,13 @@ export default function CalendarScreen() {
   const [loadingImages, setLoadingImages] = useState<boolean>(false);
 
   //Torneios 
-  const [inscritoIds, setInscritoIds] = useState<Set<string>>(new Set()); // Lista de torneios onde o usuário está inscrito
+interface InscricaoUserData {
+  [tournamentId: string]: {
+    deckId?: string;
+    createdAt: string;
+  };
+}
+const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
 
   // =========== LIFECYCLE ==============
   useEffect(() => {
@@ -237,6 +243,12 @@ export default function CalendarScreen() {
     console.log("🔄 Atualizando torneios - Filtros:", filterType, leagueStored, cityStored);
     loadTorneios();
   }, [currentMonth, filterType, cityStored, leagueStored]);
+
+  useEffect(() => {
+    if (playerId && leagueStored) {
+      loadUserInscricoes(playerId);
+    }
+  }, [playerId, leagueStored]);
 
 
   // ============ FUNÇÕES DE AJUDA ============
@@ -788,7 +800,37 @@ export default function CalendarScreen() {
       });
     });
   }
-       
+
+  function openEditInscricao(t: Torneio) {
+    // Vamos reaproveitar o mesmo modal de inscrição que existe
+    setDetalhesTorneio(t);
+    setInscricaoTorneioId(t.id);
+  
+    // Buscando decks do jogador (igual no proceedToInscription)
+    const decksRef = collection(db, `players/${playerId}/decks`);
+    onSnapshot(decksRef, (resp) => {
+      const arr: DeckData[] = [];
+      resp.forEach((docSnap) => {
+        arr.push({
+          id: docSnap.id,
+          name: docSnap.data().name || `Deck ${docSnap.id}`,
+          playerId,
+          archetype: docSnap.data().archetype || "Desconhecido",
+        });
+      });
+      setUserDecks(arr);
+    });
+  
+    // Se o jogador já tinha um deck, vamos pré-selecionar no modal
+    const inscricaoAnterior = userInscriptions[t.id];
+    if (inscricaoAnterior?.deckId) {
+      setSelectedDeckId(inscricaoAnterior.deckId);
+    } else {
+      setSelectedDeckId("");
+    }
+  
+    setInscricaoModalVisible(true);
+  }      
 
   async function handleWaitlist(t: Torneio, vip: boolean) {
     Alert.alert("Lista de Espera", "Torneio lotado. Adicionado à lista de espera.");
@@ -808,43 +850,45 @@ export default function CalendarScreen() {
       return;
     }
   
-    if (detalhesTorneio.eventType !== "Liga Local" && !selectedDeckId) {
-      Alert.alert("Erro", "Selecione um deck ou verifique o tipo de evento.");
-      return;
-    }
-  
     try {
-      const colRef = collection(db, "leagues", leagueStored, "calendar", inscricaoTorneioId, "inscricoes");
+      const colRef = collection(
+        db,
+        "leagues",
+        leagueStored,
+        "calendar",
+        inscricaoTorneioId,
+        "inscricoes"
+      );
       const docRef = doc(colRef, playerId);
   
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        Alert.alert("Aviso", "Você já se inscreveu neste torneio.");
-        setInscricaoModalVisible(false);
-        return;
-      }
+      // Buscamos deck selecionado
+      const selectedDeck = userDecks.find((d) => d.id === selectedDeckId);
+      const archetype = selectedDeck?.archetype || "Desconhecido";
   
-      // 🔥 Buscar o arquétipo do deck selecionado
-      const selectedDeck = userDecks.find(d => d.id === selectedDeckId);
-      const archetype = selectedDeck?.archetype || "Desconhecido"; // Se não encontrar, usa "Desconhecido"
-  
+      // Se selectedDeckId for vazio, tudo bem — significa que o jogador quer ficar sem deck
       await setDoc(docRef, {
         userId: playerId,
-        deckId: selectedDeckId,
-        archetype: archetype,
+        deckId: selectedDeckId || null,
+        archetype,
         createdAt: new Date().toISOString(),
       });
-      
-      // Atualizar o estado `inscritoIds` para refletir a nova inscrição imediatamente
-      setInscritoIds((prev) => new Set(prev).add(inscricaoTorneioId!));
-      
-      Alert.alert("Sucesso", "Inscrição realizada com sucesso!");
-      setInscricaoModalVisible(false);      
+  
+      // Atualiza local
+      setUserInscriptions((prev) => ({
+        ...prev,
+        [inscricaoTorneioId]: {
+          deckId: selectedDeckId || undefined,
+          createdAt: new Date().toISOString(),
+        },
+      }));
+  
+      Alert.alert("Sucesso", "Inscrição (ou edição) salva com sucesso!");
+      setInscricaoModalVisible(false);
     } catch (err) {
       console.log("Erro handleSalvarInscricao:", err);
       Alert.alert("Erro", "Falha ao salvar inscrição.");
     }
-  }
+  }  
 
   useEffect(() => {
     moment.locale("pt-br");
@@ -866,24 +910,38 @@ export default function CalendarScreen() {
   async function loadUserInscricoes(userId: string | null) {
     if (!userId || !leagueStored) return;
     try {
-      const inscricoesRef = collection(db, "leagues", leagueStored, "calendar");
-      const snapshot = await getDocs(inscricoesRef);
-
-      const inscritoSet = new Set<string>();
-      for (const docSnap of snapshot.docs) {
-        const inscricaoCol = collection(db, "leagues", leagueStored, "calendar", docSnap.id, "inscricoes");
-        const inscricaoSnap = await getDoc(doc(inscricaoCol, userId));
-
-        if (inscricaoSnap.exists()) {
-          inscritoSet.add(docSnap.id);
+      const tournamentsRef = collection(db, "leagues", leagueStored, "calendar");
+      const tournamentsSnap = await getDocs(tournamentsRef);
+  
+      const newInscriptions: InscricaoUserData = {};
+  
+      for (const tournamentDoc of tournamentsSnap.docs) {
+        const tournamentId = tournamentDoc.id;
+        // Verifica inscrição do usuário nesse torneio
+        const inscricaoRef = doc(
+          db,
+          "leagues",
+          leagueStored,
+          "calendar",
+          tournamentId,
+          "inscricoes",
+          userId
+        );
+        const snap = await getDoc(inscricaoRef);
+  
+        if (snap.exists()) {
+          newInscriptions[tournamentId] = {
+            deckId: snap.data().deckId,
+            createdAt: snap.data().createdAt,
+          };
         }
       }
-      setInscritoIds(inscritoSet);
+  
+      setUserInscriptions(newInscriptions);
     } catch (error) {
       console.error("Erro ao carregar inscrições do usuário:", error);
     }
   }
-
   
   // ================== DETALHES ==================
   function handleOpenDetalhes(t: Torneio) {
@@ -1257,7 +1315,7 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
     const headJudgeName = headJudgeMap[tor.headJudge] || "Sem Head Judge";
     const isThisJudgePending = tor.judge === playerId && tor.judgeAccepted === false;
     const canAccessDetails = isHost || (tor.judge === playerId && tor.judgeAccepted);
-    const isUserInscrito = inscritoIds.has(tor.id); // Verifica se o usuário está inscrito
+    const userData = userInscriptions[tor.id]; // Dados da inscrição do usuário
 
     const creatorFullname =
       playerNameMap[tor.createdBy] || `Jogador não cadastrado: ${tor.createdBy}`;
@@ -1327,6 +1385,7 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
         {/* Botões de Inscrever / Detalhes */}
         {isFuture ? (
           <View style={styles.cardActionsRow}>
+
             {canAccessDetails && (
               <TouchableOpacity
                 style={[styles.cardActionButton, { marginRight: 8 }]}
@@ -1336,13 +1395,10 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
                 <Text style={styles.cardActionButtonText}>  Detalhes</Text>
               </TouchableOpacity>
             )}
-            {inscritoIds.has(tor.id) ? (
-              // Botão desabilitado para torneios já inscritos
-              <View style={[styles.cardActionButton, { backgroundColor: "#777" }]}>
-                <Ionicons name="checkmark-circle" size={18} color="#FFF" />
-                <Text style={styles.cardActionButtonText}>  Inscrito</Text>
-              </View>
-            ) : (
+
+            {/** Verifica se o usuário está inscrito (userData existe) */}
+            {!userData ? (
+              // Usuário não inscrito => mostrar botão "Inscrever"
               <TouchableOpacity
                 style={styles.cardActionButton}
                 onPress={() => handleInscrever(tor)}
@@ -1350,9 +1406,43 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
                 <Ionicons name="checkmark-circle" size={18} color="#FFF" />
                 <Text style={styles.cardActionButtonText}>  Inscrever</Text>
               </TouchableOpacity>
+            ) : (
+              // Usuário inscrito (já existe userData)
+              !userData.deckId ? (
+                // Inscrito mas sem deck => botão amarelo "Enviar Lista"
+                <TouchableOpacity
+                  style={[styles.cardActionButton, { backgroundColor: "#FFC107" }]}
+                  onPress={() => openEditInscricao(tor)}
+                >
+                  <Ionicons name="warning" size={18} color="#FFF" />
+                  <Text style={styles.cardActionButtonText}>  Enviar Lista</Text>
+                </TouchableOpacity>
+              ) : (
+                // Inscrito com deck => "Inscrito" + botão "Editar"
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <View
+                    style={[
+                      styles.cardActionButton,
+                      { backgroundColor: "#777", marginRight: 8 },
+                    ]}
+                  >
+                    <Ionicons name="checkmark-circle" size={18} color="#FFF" />
+                    <Text style={styles.cardActionButtonText}>  Inscrito</Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.cardActionButton, { backgroundColor: "#2196F3" }]}
+                    onPress={() => openEditInscricao(tor)}
+                  >
+                    <Ionicons name="repeat" size={18} color="#FFF" />
+                    <Text style={styles.cardActionButtonText}>  Editar</Text>
+                  </TouchableOpacity>
+                </View>
+              )
             )}
           </View>
         ) : (
+          // Caso o torneio já tenha ocorrido
           <TouchableOpacity
             style={[styles.cardActionButton, { backgroundColor: "#777", marginTop: 8 }]}
             onPress={() => (canAccessDetails ? handleOpenDetalhes(tor) : null)}
@@ -1362,7 +1452,7 @@ async function deleteJudgeNotification(judgeId: string, torneioId: string) {
               {canAccessDetails ? " Detalhes (Ocorrido)" : " Já ocorreu"}
             </Text>
           </TouchableOpacity>
-)}
+        )}
       </Animatable.View>
     );
   }
