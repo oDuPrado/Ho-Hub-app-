@@ -1,9 +1,10 @@
 //////////////////////////////////////
 // ARQUIVO: titlesConfig.ts
 //////////////////////////////////////
-export type TitleCategory = "SÉRIA" | "ENGRAÇADA" | "ÚNICA";
+export type TitleCategory = "SÉRIA" | "ENGRAÇADA" | "ÚNICA" | "EXCLUSIVO";
 
 export interface PlayerStats {
+  userId: string;              // 🔥 Agora cada jogador tem um ID único
   wins: number;                // Vitórias
   losses: number;              // Derrotas
   draws: number;               // Empates
@@ -19,6 +20,7 @@ export interface TitleItem {
   category: TitleCategory;
   condition: (stats: PlayerStats) => boolean;
   unlocked?: boolean;
+  icon?: string; // ✅ Adicionamos a propriedade de ícone
 }
 
 // ==================================================
@@ -28,8 +30,8 @@ const titlesSeria: TitleItem[] = [
   {
     // [EXISTENTE: ID=101] (Renomeado)
     id: 101,
-    title: "Mestre Kanto",
-    description: "Atinja 20 vitórias para provar seu valor como Mestre na região de Kanto.",
+    title: "Mestre de Kanto",
+    description: "Você venceu 20 partidas, provando ser tão forte quanto o campeão original dos primórdios Pokémon!",
     category: "SÉRIA",
     condition: (stats) => stats.wins >= 20,
   },
@@ -44,24 +46,24 @@ const titlesSeria: TitleItem[] = [
   {
     // [EXISTENTE: ID=102] (Renomeado)
     id: 102,
-    title: "Kamehameha Vitorioso",
-    description: "Conquistou ao menos 30 vitórias, demonstrando a força de um verdadeiro guerreiro Z.",
+    title: "Kamehameha Final", 
+    description: "Com pelo menos 30 vitórias, seu poder é digno de um guerreiro que ultrapassou seus limites!",
     category: "SÉRIA",
     condition: (stats) => stats.wins >= 30,
   },
   {
     // [EXISTENTE: ID=401] (Renomeado)
     id: 401,
-    title: "Guardião de Rayquaza",
-    description: "Vença 50 partidas e proteja os céus como Rayquaza.",
+    title: "Guardião do Sky Pillar",
+    description: "Vença 50 partidas e proteja os céus.",
     category: "SÉRIA",
     condition: (stats) => stats.wins >= 50,
   },
   {
     // [EXISTENTE: ID=405] (Renomeado)
     id: 405,
-    title: "Caminho do Campeão",
-    description: "Atinja 100 partidas jogadas, mostrando a trajetória épica de um verdadeiro treinador.",
+    title: "Caminho do Poder",
+    description: "Atinja 100 partidas jogadas, mostrando a trajetórtoria do verdadeiro Poder.",
     category: "SÉRIA",
     condition: (stats) => stats.matchesTotal >= 100,
   },
@@ -121,25 +123,60 @@ const titlesSeria: TitleItem[] = [
   {
     id: 413,
     title: "Z-Crystal Supremo",
-    description: "Atinja 120 vitórias, liberando seu poder máximo em batalha.",
+    description: "Com 120 vitórias, seu golpe Z já ultrapassou o limite dos treinadores comuns.",
     category: "SÉRIA",
     condition: (stats) => stats.wins >= 120,
   },
   {
     id: 414,
-    title: "Símbolo da Superação",
-    description: "Mesmo após 10 derrotas, acumulou ao menos 10 vitórias para mostrar sua força.",
+    title: "Subindo a cachoeira",
+    description: "Mesmo após 10 derrotas, acumulou ao menos 10 vitórias para se tornar um dragão.",
     category: "SÉRIA",
     condition: (stats) => stats.losses >= 10 && stats.wins >= 10,
   },
   {
     id: 415,
-    title: "Top 1 Duas Vezes",
+    title: "Apenas 1 nao é o Suciente",
     description: "Conquiste o primeiro lugar em pelo menos 2 torneios diferentes.",
     category: "SÉRIA",
     condition: (stats) =>
       (stats.tournamentPlacements?.filter((p) => p === 1).length ?? 0) >= 2,
   },
+  {
+    id: 416,
+    title: "Jinchuuriki Pokémon",
+    description: "Você alcançou 200 vitórias. Sua força Pokémon desperta como um bijuu selado dentro de você.",
+    category: "SÉRIA",
+    condition: (stats) => stats.wins >= 200,
+  },
+  {
+    id: 417,
+    title: "Ultra Instinto Pokémon",
+    description: "Venceu 10 partidas consecutivas sem derrotas ou empates. Sua técnica já superou os limites humanos!",
+    category: "SÉRIA",
+    condition: (stats) => stats.wins >= 10 && stats.losses === 0 && stats.draws === 0,
+  },
+  {
+    id: 418,
+    title: "Lenda dos Sete Mares",
+    description: "Você enfrentou 50 oponentes únicos, navegando por batalhas como um verdadeiro Rei dos Piratas.",
+    category: "SÉRIA",
+    condition: (stats) => stats.uniqueOpponents >= 50,
+  },
+  {
+    id: 419,
+    title: "Exterminador de Titãs",
+    description: "Alcance 250 partidas, demonstrando coragem digna do Corpo de Exploração Pokémon.",
+    category: "SÉRIA",
+    condition: (stats) => stats.matchesTotal >= 250,
+  },
+  {
+    id: 420,
+    title: "Cavaleiro de Platina",
+    description: "Alcance o top 1 em pelo menos 3 torneios. Seu cosmo brilha mais que a armadura dos Cavaleiros.",
+    category: "SÉRIA",
+    condition: (stats) => (stats.tournamentPlacements?.filter(p => p === 1).length ?? 0) >= 3,
+  },  
 ];
 
 // ==================================================
@@ -166,8 +203,8 @@ const titlesEngracada: TitleItem[] = [
   // ======= Novos Títulos ENGRAÇADA (13 novos) =======
   {
     id: 202,
-    title: "One Punch Draw",
-    description: "Acumule 10 empates. Parece que Saitama pegou leve demais!",
+    title: "Empate denovo? Empate denovo!",
+    description: "Conseguiu 10 empates, deixando seus adversários confusos: isso é talento ou sorte?",
     category: "ENGRAÇADA",
     condition: (stats) => stats.draws >= 10,
   },
@@ -196,14 +233,14 @@ const titlesEngracada: TitleItem[] = [
   },
   {
     id: 206,
-    title: "Rivalidade de Shounen",
+    title: "Rivalidade de anime Shonen",
     description: "Já enfrentou 10 oponentes únicos, mas ainda não chegou a 10 vitórias.",
     category: "ENGRAÇADA",
     condition: (stats) => stats.uniqueOpponents >= 10 && stats.wins < 10,
   },
   {
     id: 207,
-    title: "Sofredor Shingeki",
+    title: "Sofredor das Muralhas",
     description: "Tenha 20 ou mais derrotas, erguendo muralhas de frustrações.",
     category: "ENGRAÇADA",
     condition: (stats) => stats.losses >= 20,
@@ -224,17 +261,17 @@ const titlesEngracada: TitleItem[] = [
   },
   {
     id: 210,
-    title: "Zubat Incessante",
-    description: "Acumulou 8 empates, atormentando todos como Zubats em cavernas.",
+    title: "Zubat? Zubat! Zubat...",
+    description: "Acumulou 20 empates, atormentando todos como Zubats em cavernas.",
     category: "ENGRAÇADA",
-    condition: (stats) => stats.draws >= 8,
+    condition: (stats) => stats.draws >= 20,
   },
   {
     id: 211,
     title: "Equipe Rocket Decolando Denovo",
-    description: "Jogou 50 partidas e conquistou menos de 5 vitórias. Que performance...",
+    description: "Jogou 50 partidas e conquistou menos de 20 vitórias. Que fase...",
     category: "ENGRAÇADA",
-    condition: (stats) => stats.matchesTotal >= 50 && stats.wins < 5,
+    condition: (stats) => stats.matchesTotal >= 50 && stats.wins < 20,
   },
   {
     id: 212,
@@ -258,6 +295,41 @@ const titlesEngracada: TitleItem[] = [
     category: "ENGRAÇADA",
     condition: (stats) => stats.losses >= 30,
   },
+  {
+    id: 215,
+    title: "Fuga das Galinhas Pokémon",
+    description: "Desistiu (W.O.) de pelo menos 3 partidas. Às vezes, correr é a melhor estratégia!",
+    category: "ENGRAÇADA",
+    condition: (stats) => stats.matchesTotal >= 3 && stats.losses >= 3 && stats.wins === 0,
+  },
+  {
+    id: 216,
+    title: "Slowpoke das Partidas",
+    description: "Fez 30 partidas e ainda não venceu nenhuma. Tudo ao seu tempo!",
+    category: "ENGRAÇADA",
+    condition: (stats) => stats.matchesTotal >= 30 && stats.wins === 0,
+  },
+  {
+    id: 217,
+    title: "Psyduck Confuso",
+    description: "Acumulou 15 empates. Seu Pokémon ainda não entendeu o que fazer...",
+    category: "ENGRAÇADA",
+    condition: (stats) => stats.draws >= 15,
+  },
+  {
+    id: 218,
+    title: "Itachi da Derrota",
+    description: "Perdeu 50 partidas. Talvez você esteja protegendo alguém em segredo?",
+    category: "ENGRAÇADA",
+    condition: (stats) => stats.losses >= 50,
+  },
+  {
+    id: 219,
+    title: "Saitama Entediado",
+    description: "Você venceu suas primeiras 3 partidas consecutivas, mas depois nunca mais jogou. Vitória demais também cansa!",
+    category: "ENGRAÇADA",
+    condition: (stats) => stats.wins === 3 && stats.matchesTotal === 3,
+  },  
 ];
 
 // ==================================================
@@ -294,7 +366,7 @@ const titlesUnica: TitleItem[] = [
   // ======= Novos Títulos ÚNICA (12 novos) =======
   {
     id: 302,
-    title: "Alquimista Fullmetal",
+    title: "Lendário Alquimista",
     description: "Participe de 300 partidas, transmutando derrotas e vitórias em experiência.",
     category: "ÚNICA",
     condition: (stats) => stats.matchesTotal >= 300,
@@ -378,7 +450,108 @@ const titlesUnica: TitleItem[] = [
     category: "ÚNICA",
     condition: (stats) => stats.losses === 0 && stats.wins >= 20,
   },
+  {
+    id: 314,
+    title: "Hokage Pokémon",
+    description: "Venceu 10 torneios. Você é reconhecido e respeitado em todas as vilas Pokémon!",
+    category: "ÚNICA",
+    condition: (stats) => (stats.tournamentPlacements?.filter(p => p === 1).length ?? 0) >= 10,
+  },
+  {
+    id: 315,
+    title: "Pokémon de Elite",
+    description: "Permaneça invicto após 30 partidas consecutivas, digno da Elite dos Quatro.",
+    category: "ÚNICA",
+    condition: (stats) => stats.losses === 0 && stats.matchesTotal >= 30,
+  },
+  {
+    id: 316,
+    title: "Dominador dos Quatro Elementos",
+    description: "Obteve 100 vitórias, 25 empates e 25 derrotas. Você dominou o equilíbrio das batalhas.",
+    category: "ÚNICA",
+    condition: (stats) => stats.wins === 100 && stats.draws === 25 && stats.losses === 25,
+  },
+  {
+    id: 317,
+    title: "Guerreiro Z Supremo",
+    description: "Com 500 vitórias, seu poder de luta ultrapassa 9000!",
+    category: "ÚNICA",
+    condition: (stats) => stats.wins >= 500,
+  },
+  {
+    id: 318,
+    title: "Senhor dos Dragões",
+    description: "Participe de 700 partidas, domando a força dos Pokémon mais poderosos.",
+    category: "ÚNICA",
+    condition: (stats) => stats.matchesTotal >= 700,
+  },  
 ];
+
+// ==================================================
+//  TÍTULOS - CATEGORIA: EXCLUSIVO
+// ==================================================
+export const titlesExclusivo: TitleItem[] = [
+  {
+    id: 5001,
+    title: "Choice Band Lendária",
+    description:
+      "Nos campos de batalha Pokémon existe uma lenda silenciosa, um treinador cuja identidade pouco importa, mas cuja Choice Band é reverenciada por todos que enfrentam seu poder. Alguns dizem que a força de seus Pokémon aumenta drasticamente ao vestir essa faixa. Somente o verdadeiro portador desse legado pode ostentar este título lendário.",
+    category: "EXCLUSIVO",
+    condition: (stats) => stats.userId === "4729671",
+    icon: "karate",
+  },
+  {
+    id: 5002,
+    title: "O Primeiro Campeão",
+    description:
+      "Em uma época em que as batalhas Pokémon eram apenas sonhos distantes, ele já dominava arenas e escrevia seu nome na história. Único campeão regional até hoje, seu legado não envelhece e sua glória permanece intocada pelo tempo. Este título é reservado ao lendário pioneiro cuja jornada inspira gerações.",
+    category: "EXCLUSIVO",
+    condition: (stats) => stats.userId === "4729671",
+    icon: "trophy",
+  },
+  {
+    id: 5003,
+    title: "Rei do Piratas",
+    description: "Um treinador cujo domínio sobre os torneios transcende eras e gerações.",
+    category: "EXCLUSIVO",
+    condition: (stats) => stats.userId === "ID_DO_JOGADOR",
+    icon: "crown",
+  },
+  {
+    id: 5004,
+    title: "Lenda Viva",
+    description: "Sua história e feitos são contados em todas as ligas. Um verdadeiro imortal das batalhas Pokémon.",
+    category: "EXCLUSIVO",
+    condition: (stats) => stats.userId === "ID_DO_JOGADOR",
+    icon: "sword-cross",
+  },
+  {
+    id: 5005,
+    title: "Aquele que Derrotou RED",
+    description: "Entre todos os treinadores, apenas um superou o lendário RED, vencendo a batalha que parecia impossível. Seu nome inspira temor e admiração, e sua técnica impecável é considerada o ápice absoluto das batalhas Pokémon.",
+    category: "EXCLUSIVO",
+    condition: (stats) => stats.userId === "ID_DO_JOGADOR",
+    icon: "yin-yang",
+  },  
+  {
+    id: 5006,
+    title: "Último Mestre Pokémon",
+    description: "Treinador definitivo, aquele cuja técnica é referência em todas as gerações.",
+    category: "EXCLUSIVO",
+    condition: (stats) => stats.userId === "ID_DO_JOGADOR",
+    icon: "pokeball",
+  },
+  {
+    id: 5007,
+    title: "Monarca das Sombras",
+    description: "Apenas corra se ver seu gengar!.",
+    category: "EXCLUSIVO",
+    condition: (stats) => stats.userId === "ID_DO_JOGADOR",
+    icon: "ghost",
+  },
+  
+];
+
 
 // ==================================================
 // JUNTA TUDO NUM SÓ ARRAY
@@ -390,6 +563,8 @@ const titles: TitleItem[] = [
   ...titlesEngracada,
   // ÚNICA
   ...titlesUnica,
+  // EXCLUSIVO
+  ...titlesExclusivo,
 ];
 
 export default titles;
@@ -399,4 +574,6 @@ export const TITLE_COLORS: Record<TitleCategory, string> = {
   SÉRIA: "#0C7BCD",
   ENGRAÇADA: "#F5A623",
   ÚNICA: "#7F12EE",
+  EXCLUSIVO: "#D4AF37", // 🔥 Dourado para destacar títulos exclusivos
 };
+

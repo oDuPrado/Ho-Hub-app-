@@ -127,6 +127,7 @@ export default function PlayerScreen() {
   const [loading, setLoading] = useState(true);
 
   const [stats, setStats] = useState<PlayerStats>({
+    userId: "", // 🔥 Adiciona um valor padrão para evitar erro
     wins: 0,
     losses: 0,
     draws: 0,
@@ -134,7 +135,7 @@ export default function PlayerScreen() {
     uniqueOpponents: 0,
     tournamentPlacements: [],
   });
-
+  
   // XP, level, xpNext
   const [xp, setXp] = useState(0);
   const [level, setLevel] = useState(1);
@@ -287,13 +288,14 @@ export default function PlayerScreen() {
       // 🔥 Agora chamamos nossa função que já faz o cálculo de XP e nível
       const aggregatedStats = await fetchAllStatsByFilter(storedId);
 
-      const adaptedStats: PlayerStats = {
+      const adaptedStats: PlayerStats & { userId: string } = {
         wins: aggregatedStats.wins,
         losses: aggregatedStats.losses,
         draws: aggregatedStats.draws,
         matchesTotal: aggregatedStats.matchesTotal,
         uniqueOpponents: aggregatedStats.opponentsList.length,
         tournamentPlacements: aggregatedStats.tournamentPlacements.map((item) => item.place),
+        userId: storedId, // ✅ Adicionamos o User ID aqui!
       };
       setStats(adaptedStats);
 
@@ -320,7 +322,7 @@ export default function PlayerScreen() {
     } finally {
       setLoading(false);
     }
-  }
+}
 
   function computeLocalTitles(ps: PlayerStats): TitleItem[] {
     return titles.map((t) => {
@@ -932,11 +934,12 @@ export default function PlayerScreen() {
         userXp={xp}
       />
 
-      <TitlesModal
-        visible={titlesModalVisible}
-        onClose={() => setTitlesModalVisible(false)}
-        titles={unlockedTitles}
-      />
+        <TitlesModal
+          visible={titlesModalVisible}
+          onClose={() => setTitlesModalVisible(false)}
+          titles={unlockedTitles}
+          userId={userId} // ✅ Passa o ID para validar
+        />
       <HistoryModal
         visible={historyModalVisible}
         onClose={() => setHistoryModalVisible(false)}

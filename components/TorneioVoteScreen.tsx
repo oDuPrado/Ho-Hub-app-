@@ -136,6 +136,10 @@ const [showConfirmClearModal, setShowConfirmClearModal] = useState(false);
     console.log("Nome atualizado do Jogador 2:", player2Name);
   }, [player1Name, player2Name]);
 
+  useEffect(() => {
+    console.log("📌 votedResult recebido:", votedResult);
+  }, [votedResult]);
+
   /**
    * Envia o voto para a API, usando o PIN (pode ser o salvo ou digitado).
    */
@@ -143,30 +147,42 @@ const [showConfirmClearModal, setShowConfirmClearModal] = useState(false);
     try {
       setLoading(true);
       setFeedbackMessage("");
-
+  
       const storedLeagueId = await AsyncStorage.getItem("@leagueId");
       const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
       const storedUserId = await AsyncStorage.getItem("@userId");
-
+  
+      console.log("🔍 Enviando voto...", {
+        league_id: storedLeagueId,
+        mesa_id: mesaId,
+        resultado: result,
+        pin: userPin,
+        token: firebaseToken ? "EXISTE" : "NÃO EXISTE",
+      });
+  
       if (!storedLeagueId || !mesaId || !firebaseToken || !storedUserId) {
         Alert.alert("Erro", "Dados incompletos. Verifique sua conta e tente novamente.");
+        console.error("⛔ Erro: Dados incompletos antes da requisição!");
         setLoading(false);
         return;
       }
-
+  
       if (!userPin.trim()) {
         Alert.alert("Erro", "Digite seu PIN antes de votar!");
+        console.error("⛔ Erro: PIN não preenchido!");
         setLoading(false);
         return;
       }
-
+  
       const body = {
         league_id: storedLeagueId,
         mesa_id: mesaId,
         resultado: result,
         pin: userPin.trim(),
       };
-
+  
+      console.log("📡 Enviando requisição para API...", body);
+  
       const resp = await fetch("https://Doprado.pythonanywhere.com/report", {
         method: "POST",
         headers: {
@@ -175,27 +191,39 @@ const [showConfirmClearModal, setShowConfirmClearModal] = useState(false);
         },
         body: JSON.stringify(body),
       });
-
+  
       const json = await resp.json();
-
-      if (!resp.ok) {
-        console.error("Erro ao votar:", json);
+  
+      console.log("📩 Resposta da API:", json);
+  
+      if (resp.status === 409) {
+        Alert.alert("Erro", "⚠️ Você já registrou um voto nesta mesa.");
+        setFeedbackMessage("⚠️ Você já votou!");
+      } else if (!resp.ok) {
+        console.error("⛔ Erro ao votar:", json);
         Alert.alert("Erro", json.message || "Falha ao registrar reporte.");
         setFeedbackMessage(json.message || "Erro ao registrar reporte.");
       } else {
-        console.log("Reporte registrado com sucesso!", json);
-        setFeedbackMessage(json.message || "Reporte registrado com sucesso!");
-        setVotedResult(result);
+        console.log("✅ Reporte registrado com sucesso!", json);
+  
+        // ✅ Se ainda não há resultado final, exibir o próprio voto do jogador
+        if (json.final_outcome === null) {
+          setFeedbackMessage("✅ Seu voto foi registrado! Aguardando o outro jogador.");
+          setVotedResult(result); // Exibe o que o jogador votou ao invés de "Aguardando outro jogador..."
+        } else {
+          setFeedbackMessage(json.message || "Reporte registrado com sucesso!");
+          setVotedResult(json.final_outcome); // Agora pega o resultado correto!
+        }
       }
     } catch (err) {
-      console.error("Erro no reporte:", err);
+      console.error("⛔ Erro no reporte:", err);
       Alert.alert("Erro", "Não foi possível conectar ao servidor.");
       setFeedbackMessage("Não foi possível conectar ao servidor.");
     } finally {
       setLoading(false);
     }
-  }
-
+  }      
+  
   /**
    * Limpa o voto (clear-report) para a mesa atual, chamando a API.
    */
@@ -462,20 +490,20 @@ const [showConfirmClearModal, setShowConfirmClearModal] = useState(false);
 
           {/* Feedback do voto (quem já votou) */}
           {votedResult && (
-            <Animatable.Text
-              style={styles.votedResultText}
-              animation="fadeIn"
-              duration={600}
-              easing="ease-in-out"
-            >
-              Seu reporte atual:{" "}
-              {votedResult === "Vitória Jogador 1"
-                ? `Vitória: ${player1Name}`
-                : votedResult === "Vitória Jogador 2"
-                ? `Vitória: ${player2Name}`
-                : "Empate"}
-            </Animatable.Text>
-          )}
+          <Animatable.Text
+            style={styles.votedResultText}
+            animation="fadeIn"
+            duration={600}
+            easing="ease-in-out"
+          >
+            Seu reporte atual:{" "}
+            {votedResult.startsWith("Vitória ") // Se começa com "Vitória "
+              ? votedResult // Exibe o nome do jogador corretamente
+              : votedResult === "Empate"
+              ? "Empate"
+              : "Erro ao processar resultado"}
+          </Animatable.Text>
+        )}
 
           {/* Feedback geral (erros ou sucesso do servidor) */}
           {feedbackMessage !== "" && (

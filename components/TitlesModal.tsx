@@ -16,7 +16,12 @@ import {
 } from "react-native";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { TitleItem, TITLE_COLORS } from "../app/titlesConfig";
+import * as Animatable from "react-native-animatable";
 
+
+/**
+ * Tipos de Parâmetros do Modal
+ */
 type TitlesModalProps = {
   visible: boolean;
   onClose: () => void;
@@ -25,16 +30,24 @@ type TitlesModalProps = {
    * Se estiver vazia, exibirá a mensagem "Escolha uma liga no Filtro para ver Títulos."
    */
   titles: TitleItem[];
+  userId: string;
 };
 
+/**
+ * Dimensões da tela, para eventuais cálculos de layout.
+ */
 const { width, height } = Dimensions.get("window");
 
+/**
+ * Este componente exibe os Títulos desbloqueados ou não, agrupados por categoria.
+ */
 export default function TitlesModal({ visible, onClose, titles }: TitlesModalProps) {
-  // Usamos selectedTitle para armazenar o título clicado
+  // Título clicado (para exibir em detalhe).
   const [selectedTitle, setSelectedTitle] = useState<TitleItem | null>(null);
 
-  // Animação de fade para o modal
+  // Animação de fade para o modal principal.
   const [fadeAnim] = useState(new Animated.Value(0));
+
   useEffect(() => {
     if (visible) {
       Animated.timing(fadeAnim, {
@@ -49,10 +62,14 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
     }
   }, [visible]);
 
-  // Se a lista estiver vazia, exibe mensagem pedindo para escolher uma liga
+  // Se a lista estiver vazia, pedimos ao usuário para escolher uma liga no filtro.
   const isEmptyList = !titles || titles.length === 0;
 
-  // O TitleCard agora não depende da condição de desbloqueio para abrir o detalhe.
+  /**
+   * Componente interno que representa o cartão de cada título.
+   * Utiliza animação de flip. Se o título for da categoria EXCLUSIVO,
+   * também possui um efeito de rotação contínua do ícone.
+   */
   const TitleCard = ({
     item,
     onPress,
@@ -60,15 +77,22 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
     item: TitleItem;
     onPress: (t: TitleItem) => void;
   }) => {
-    // Mantemos animação de flip para efeito visual, porém a ação ocorre para TODOS
+    // Animação básica de flip
     const [flipAnim] = useState(new Animated.Value(0));
+
+    // 🔥 Se for EXCLUSIVO, faremos uma rotação contínua do ícone.
+    const [exclusiveAnim] = useState(new Animated.Value(0));
+
+    // Definimos o ícone base, dependendo da categoria
     let iconName = "star";
     if (item.category === "SÉRIA") iconName = "trophy";
     if (item.category === "ÚNICA") iconName = "ribbon";
     if (item.category === "ENGRAÇADA") iconName = "emoticon-happy-outline";
+    if (item.category === "EXCLUSIVO") iconName = "fire";
 
     const borderColor = TITLE_COLORS[item.category];
 
+    // Interpolação do flip
     const frontInterpolate = flipAnim.interpolate({
       inputRange: [0, 180],
       outputRange: ["0deg", "180deg"],
@@ -78,6 +102,29 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
       outputRange: ["180deg", "360deg"],
     });
 
+    // 🔥 Se o título for EXCLUSIVO, iniciamos a rotação contínua
+    useEffect(() => {
+      if (item.category === "EXCLUSIVO") {
+        Animated.loop(
+          Animated.timing(exclusiveAnim, {
+            toValue: 1,
+            duration: 3000,
+            useNativeDriver: true,
+            easing: Easing.linear,
+          })
+        ).start();
+      }
+    }, [item.category]);
+
+    /* Interpolamos a rotação do ícone exclusivo
+    const exclusiveRotate = exclusiveAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ["0deg", "360deg"],
+    });
+
+    /**
+     * Handler de flip do cartão (mesmo para títulos bloqueados).
+     */
     const handleFlip = () => {
       Animated.sequence([
         Animated.timing(flipAnim, {
@@ -97,6 +144,7 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
       });
     };
 
+    // Estilos que aplicam o flip
     const frontStyle = {
       transform: [{ rotateY: frontInterpolate }],
     };
@@ -104,66 +152,100 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
       transform: [{ rotateY: backInterpolate }],
     };
 
-    // Mesmo que o título esteja bloqueado, agora ele é totalmente clicável
+    // Mesmo bloqueado, ainda é clicável ( lockOpacity = 1 ).
     const lockOpacity = 1;
+    const isTitleUnlocked = !!item.unlocked;
 
     return (
       <TouchableWithoutFeedback onPress={handleFlip}>
         <View style={styles.cardContainer}>
+          {/* Frente do cartão */}
           <Animated.View
             style={[
               styles.card,
-              { borderColor, opacity: lockOpacity, position: "absolute", backfaceVisibility: "hidden" },
+              {
+                borderColor,
+                opacity: lockOpacity,
+                position: "absolute",
+                backfaceVisibility: "hidden",
+              },
               frontStyle,
             ]}
           >
-            <MaterialCommunityIcons
-              name={isUnlocked(item) ? (iconName as any) : "lock-outline"}
-              size={50}
-              color={isUnlocked(item) ? "#fff" : "#999"}
-            />
+            {item.category === "EXCLUSIVO" ? (
+              <Animatable.View animation="pulse" iterationCount="infinite">
+                <MaterialCommunityIcons
+                  name={isTitleUnlocked ? (iconName as any) : "lock-outline"}
+                  size={50}
+                  color={isTitleUnlocked ? "#fff" : "#999"}
+                />
+              </Animatable.View>
+            ) : (
+              <MaterialCommunityIcons
+                name={isTitleUnlocked ? (iconName as any) : "lock-outline"}
+                size={50}
+                color={isTitleUnlocked ? "#fff" : "#999"}
+              />
+            )}
           </Animated.View>
+    
+          {/* Verso do cartão */}
           <Animated.View
             style={[
               styles.card,
-              { borderColor, position: "absolute", backfaceVisibility: "hidden" },
+              {
+                borderColor,
+                position: "absolute",
+                backfaceVisibility: "hidden",
+              },
               backStyle,
             ]}
           >
-            <MaterialCommunityIcons
-              name={isUnlocked(item) ? (iconName as any) : "lock-outline"}
-              size={50}
-              color={isUnlocked(item) ? "#fff" : "#999"}
-            />
+            {item.category === "EXCLUSIVO" ? (
+              <Animatable.View animation="pulse" iterationCount="infinite">
+                <MaterialCommunityIcons
+                  name={isTitleUnlocked ? (iconName as any) : "lock-outline"}
+                  size={50}
+                  color={isTitleUnlocked ? "#fff" : "#999"}
+                />
+              </Animatable.View>
+            ) : (
+              <MaterialCommunityIcons
+                name={isTitleUnlocked ? (iconName as any) : "lock-outline"}
+                size={50}
+                color={isTitleUnlocked ? "#fff" : "#999"}
+              />
+            )}
           </Animated.View>
         </View>
       </TouchableWithoutFeedback>
-    );
+    );    
   };
 
-  // Função para verificar se o título está desbloqueado (pode ser baseada em item.unlocked)
-  const isUnlocked = (item: TitleItem) => {
-    return !!item.unlocked;
-  };
-
-  // Renderiza os títulos agrupados por categoria no layout original (não mosaico)
+  /**
+   * Renderiza a lista de títulos, agrupados por categoria.
+   * Vamos exibir primeiro a categoria EXCLUSIVO (chamada de "Lenda" para o usuário),
+   * depois as demais.
+   */
   const renderTitlesList = () => {
     return (
       <ScrollView style={{ marginTop: 20 }}>
-        {renderCategory("Tier 0 - Únicas", titles.filter(t => t.category === "ÚNICA"))}
-        {renderCategory("Tier 1 - Épicas", titles.filter(t => t.category === "SÉRIA"))}
-        {renderCategory("Tier 2 - 4FUN", titles.filter(t => t.category === "ENGRAÇADA"))}
+        {renderCategory("Lenda", titles.filter((t) => t.category === "EXCLUSIVO"))}
+        {renderCategory("Tier 0 - Únicas", titles.filter((t) => t.category === "ÚNICA"))}
+        {renderCategory("Tier 1 - Épicas", titles.filter((t) => t.category === "SÉRIA"))}
+        {renderCategory("Tier 2 - 4FUN", titles.filter((t) => t.category === "ENGRAÇADA"))}
       </ScrollView>
     );
   };
 
-  // Renderiza cada categoria
+  /**
+   * Renderiza cada grupo de títulos (categoria).
+   */
   const renderCategory = (catLabel: string, list: TitleItem[]) => {
     if (list.length === 0) return null;
     return (
       <View style={{ marginBottom: 20 }}>
         <Text style={styles.categoryTitle}>{catLabel}</Text>
-        {/* Layout antigo: lista vertical */}
         {list.map((item) => (
           <View key={item.id} style={styles.titleRow}>
             <TitleCard item={item} onPress={setSelectedTitle} />
@@ -177,14 +259,25 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
     );
   };
 
+  /**
+   * Retorno principal do componente.
+   */
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
       <View style={styles.modalOverlay}>
         <Animated.View style={[styles.modalBody, { opacity: fadeAnim }]}>
+          {/* Botão de Fechar o Modal Principal */}
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
             <Ionicons name="close-circle" size={32} color="#fff" />
           </TouchableOpacity>
+
           <Text style={styles.modalHeader}>Seus Títulos</Text>
+
           {isEmptyList ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>
@@ -195,7 +288,8 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
             renderTitlesList()
           )}
         </Animated.View>
-        {/* Modal de detalhe do título, que aparece ao clicar (flip) */}
+
+        {/* Modal de Detalhe do Título (aparece ao clicar/flip) */}
         {selectedTitle && (
           <Modal
             visible={!!selectedTitle}
@@ -204,11 +298,18 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
             onRequestClose={() => setSelectedTitle(null)}
           >
             <View style={styles.detailOverlay}>
-              <TouchableOpacity style={styles.detailBg} onPress={() => setSelectedTitle(null)} />
+              <TouchableOpacity
+                style={styles.detailBg}
+                onPress={() => setSelectedTitle(null)}
+              />
               <View style={styles.detailModal}>
                 <Text style={styles.detailTitle}>{selectedTitle.title}</Text>
                 <Text style={styles.detailDesc}>{selectedTitle.description}</Text>
-                <TouchableOpacity style={styles.detailClose} onPress={() => setSelectedTitle(null)}>
+
+                <TouchableOpacity
+                  style={styles.detailClose}
+                  onPress={() => setSelectedTitle(null)}
+                >
                   <Text style={{ color: "#fff" }}>Fechar</Text>
                 </TouchableOpacity>
               </View>
@@ -221,6 +322,7 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
 }
 
 const styles = StyleSheet.create({
+  // Fundo escuro do modal
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.7)",
@@ -304,6 +406,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#ccc",
   },
+
+  // Detalhe do título
   detailOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.7)",
