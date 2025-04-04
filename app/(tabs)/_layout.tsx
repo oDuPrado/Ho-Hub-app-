@@ -26,6 +26,7 @@ import NoticiasScreen from "./Noticias";
 import SugestaoScreen from "./Sugestao";
 import PlayerScreen from "./Cadastros";
 import ClassicosScreen from "./classicos";
+import ColecaoScreen from "./Colecao";
 
 // CORES PADRÃO
 const DARK_BG = "#1E1E1E";
@@ -174,6 +175,16 @@ function DrawerLayout() {
           title: t("drawer.trocas"),
           drawerIcon: ({ color, size }) => (
             <Ionicons name="swap-horizontal-outline" size={size} color={color} />
+          ),
+        }}
+        />
+      <Drawer.Screen
+        name="Coleção"
+        component={ColecaoScreen}
+        options={{
+          title: t("drawer.colecao"),
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="albums" size={size} color={color} />
           ),
         }}
       />

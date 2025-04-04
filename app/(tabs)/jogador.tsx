@@ -1073,12 +1073,13 @@ export default function PlayerScreen() {
 
       {/* SCROLLVIEW HORIZONTAL PARA SWIPE ENTRE SEÇÕES */}
       <ScrollView
-        ref={scrollRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={onScrollEnd}
-      >
+      ref={scrollRef}
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      onMomentumScrollEnd={onScrollEnd}
+      contentContainerStyle={{ flexGrow: 1 }}
+    >
         {renderProfileSection()}
         {renderCustomizationSection()}
       </ScrollView>
@@ -1108,7 +1109,8 @@ const WHITE = "#FFFFFF";
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
-  },
+    minHeight: "100%",
+  }, 
   loaderContainer: {
     flex: 1,
     justifyContent: "center",
@@ -1310,8 +1312,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: "center",
     marginHorizontal: 16,
-    marginTop: 10,
-  },
+    paddingBottom: 20, // ✅ Trocar margem por padding
+  },  
   historyButtonText: {
     color: "#FFFFFF",
     fontWeight: "bold",
