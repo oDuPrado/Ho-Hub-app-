@@ -13,6 +13,7 @@ import {
   Alert,
   SafeAreaView,
   Dimensions,
+  FlatList,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { collection, doc, getDocs, setDoc } from "firebase/firestore";
@@ -89,6 +90,27 @@ interface CreatingState {
   obs: string;
 }
 
+interface MinimalCard {
+  id: string;
+  name: string;
+  images: {
+    small: string;
+    large?: string;
+  };
+  rarity?: string;
+  number?: string;
+}
+
+interface Binder {
+  id: string;
+  name: string;
+  binderType: "general" | "deck" | "theme";
+  createdAt: number;
+  allCards: MinimalCard[];
+  quantityMap: Record<string, number>;
+}
+
+
 /** Modal para adicionar à Coleção (Tenho/Quero) */
 interface AddToCollectionModalState {
   visible: boolean;
@@ -125,6 +147,7 @@ export default function CardsSearchScreen() {
 
   /** Modal de detalhes */
   const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [binders, setBinders] = useState<Binder[]>([]);
 
   /** Modal de criação/edição (Tenho/Quero) */
   const [createState, setCreateState] = useState<CreatingState>({
@@ -148,6 +171,16 @@ export default function CardsSearchScreen() {
   /** 3) Modal para ordenação (engrenagem) */
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>("none");
+  
+  //Modal para renomear binder
+  const [nameBinderModalVisible, setNameBinderModalVisible] = useState(false);
+  const [newBinderName, setNewBinderName] = useState("");
+  const [pendingCard, setPendingCard] = useState<CardData | null>(null);
+
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMoreCards, setHasMoreCards] = useState(true);
+
 
   /** 4) Modal para "Tenho" e "Quero" do grid */
   const [addToCollectionModal, setAddToCollectionModal] =
@@ -174,6 +207,12 @@ export default function CardsSearchScreen() {
         const storedName = (await AsyncStorage.getItem("@userName")) || "Jogador";
         const storedFilterType = await AsyncStorage.getItem("@filterType");
         const storedLeagueId = await AsyncStorage.getItem("@leagueId");
+        // NOVO: Carregar os binders do AsyncStorage
+        const storedBinders = await AsyncStorage.getItem("@userBinders");
+        if (storedBinders) {
+          setBinders(JSON.parse(storedBinders));
+        }
+
 
         setPlayerId(storedId);
         setPlayerName(storedName);
@@ -287,22 +326,110 @@ export default function CardsSearchScreen() {
   }
 
   /** Busca cartas pela coleção */
-  async function fetchCardsByCollection(colId: string) {
+  async function fetchCardsByCollection(colId: string, page = 1, append = false) {
     if (!colId) return;
     setLoading(true);
     try {
-      const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${colId}"&pageSize=300`;
+      const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${colId}"&page=${page}&pageSize=50`;
       const resp = await fetch(url);
       const data = await resp.json();
-      if (data && data.data) setFilteredCards(data.data);
-      else setFilteredCards([]);
+  
+      if (data && data.data) {
+        if (append) {
+          setFilteredCards((prev) => [...prev, ...data.data]);
+        } else {
+          setFilteredCards(data.data);
+        }
+  
+        // Se o retorno for menor que o limite, acabou as cartas
+        setHasMoreCards(data.data.length === 50);
+      } else {
+        if (!append) setFilteredCards([]);
+        setHasMoreCards(false);
+      }
     } catch (err) {
       console.error("Erro ao buscar cartas da coleção:", err);
-      setFilteredCards([]);
+      if (!append) setFilteredCards([]);
     } finally {
       setLoading(false);
     }
+  }  
+
+  async function addCardToBinder(binderId: string, card: CardData) {
+    try {
+      const minimalCard = {
+        id: card.id,
+        name: card.name,
+        images: card.images,
+        rarity: card.rarity,
+        number: card.number,
+      };
+  
+      const raw = await AsyncStorage.getItem("@userBinders");
+      const allBinders: Binder[] = raw ? JSON.parse(raw) : [];
+  
+      const updated = allBinders.map((binder) => {
+        if (binder.id !== binderId) return binder;
+  
+        const alreadyHas = binder.allCards.some((c) => c.id === card.id);
+        if (!alreadyHas) {
+          binder.allCards.push(minimalCard);
+        }
+  
+        const isWishlist = addToCollectionModal.mode === "wish";
+        const currentQty = binder.quantityMap[card.id] || 0;
+  
+        binder.quantityMap[card.id] = isWishlist ? 0 : currentQty + 1;
+        return binder;
+      });
+  
+      await AsyncStorage.setItem("@userBinders", JSON.stringify(updated));
+      setBinders(updated);
+      Alert.alert("Sucesso", `Carta adicionada ao binder com sucesso!`);
+      setAddToCollectionModal({ visible: false, card: null, mode: "have" });
+    } catch (err) {
+      console.log("Erro ao adicionar carta ao binder:", err);
+    }
+  }  
+
+  function askBinderName(card: CardData) {
+    setPendingCard(card);
+    setNewBinderName("Meu Binder");
+    setNameBinderModalVisible(true);
   }
+  
+  async function confirmCreateBinder() {
+    if (!pendingCard) return;
+  
+    const newBinder: Binder = {
+      id: `binder_${Date.now()}`,
+      name: newBinderName.trim() || "Binder sem Nome",
+      binderType: "general",
+      createdAt: Date.now(),
+      allCards: [
+        {
+          id: pendingCard.id,
+          name: pendingCard.name,
+          images: pendingCard.images,
+          rarity: pendingCard.rarity,
+          number: pendingCard.number,
+        },
+      ],
+      quantityMap: {
+        [pendingCard.id]: 1,
+      },
+    };
+  
+    const updated = [...binders, newBinder];
+    await AsyncStorage.setItem("@userBinders", JSON.stringify(updated));
+    setBinders(updated);
+  
+    setNameBinderModalVisible(false);
+    setPendingCard(null);
+    setAddToCollectionModal({ visible: false, card: null, mode: "have" });
+    Alert.alert("Sucesso", "Binder criado com a carta!");
+  }
+  
 
   /** Abrir / fechar modal de coleção */
   function openCollectionModal() {
@@ -317,8 +444,14 @@ export default function CardsSearchScreen() {
   async function handleSelectCollection(colId: string) {
     setSelectedCollectionId(colId);
     setSearchQuery("");
+    setCurrentPage(1); // <- Reinicia paginação
     closeCollectionModal();
     await fetchCardsByCollection(colId);
+     // Atualiza os binders ao trocar de coleção
+  const storedBinders = await AsyncStorage.getItem("@userBinders");
+  if (storedBinders) {
+    setBinders(JSON.parse(storedBinders));
+  }
   }
 
   /** Botão "Limpar filtro" => remove coleção selecionada */
@@ -327,6 +460,13 @@ export default function CardsSearchScreen() {
     setFilteredCards([]);
     closeCollectionModal();
   }
+
+  function handleLoadMore() {
+    if (!hasMoreCards || loading) return;
+    const nextPage = currentPage + 1;
+    setCurrentPage(nextPage);
+    fetchCardsByCollection(selectedCollectionId, nextPage, true);
+  }  
 
   /** Filtro de coleções dentro do modal (por nome) */
   const filteredCollectionList = useMemo(() => {
@@ -558,11 +698,22 @@ export default function CardsSearchScreen() {
   /** Quantas cartas tenho dessa coleção */
   const totalInCollection = useMemo(() => {
     if (!selectedCollectionId) return 0;
-    return userOwnedCards.filter((cardId) => {
-      const c = filteredCards.find((fc) => fc.id === cardId);
-      return c?.set?.id === selectedCollectionId;
-    }).length;
-  }, [userOwnedCards, selectedCollectionId, filteredCards]);
+  
+    let count = 0;
+  
+    binders.forEach((binder) => {
+      binder.allCards.forEach((card) => {
+        const original = filteredCards.find((c) => c.id === card.id);
+        const qty = binder.quantityMap[card.id] || 0;
+  
+        if (original?.set?.id === selectedCollectionId && qty >= 1) {
+          count += 1;
+        }
+      });
+    });
+  
+    return count;
+  }, [binders, selectedCollectionId, filteredCards]);   
 
   const totalCardsInSet = selectedCollectionInfo?.printedTotal || 0;
   const completionPercentage =
@@ -658,81 +809,95 @@ export default function CardsSearchScreen() {
       )}
 
       {/* GRID */}
-      <ScrollView contentContainerStyle={styles.gridContainer}>
-        {!loading && displayedCards.length === 0 && searchQuery.length > 0 && (
-          <Animatable.Text
-            style={styles.noResultsText}
-            animation="fadeIn"
-            duration={500}
-          >
-            Nenhuma carta encontrada.
-          </Animatable.Text>
-        )}
+      <FlatList
+  data={displayedCards}
+  keyExtractor={(item) => item.id}
+  numColumns={3}
+  contentContainerStyle={styles.gridContainer}
+  onEndReached={handleLoadMore}
+  onEndReachedThreshold={0.5}
+  ListEmptyComponent={() =>
+    !loading && searchQuery.length > 0 ? (
+      <Animatable.Text
+        style={styles.noResultsText}
+        animation="fadeIn"
+        duration={500}
+      >
+        Nenhuma carta encontrada.
+      </Animatable.Text>
+    ) : null
+  }
+  renderItem={({ item: card }) => {
+    const iHaveIt = userOwnedCards.includes(card.id);
+    const iWantIt = userWishlist.includes(card.id);
 
-        <View style={styles.gridWrapper}>
-          {displayedCards.map((card) => {
-            const iHaveIt = userOwnedCards.includes(card.id);
-            const iWantIt = userWishlist.includes(card.id);
+    return (
+      <Animatable.View
+        key={card.id}
+        style={[
+          styles.gridItem,
+          { width: CARD_GRID_WIDTH, marginHorizontal: 4 },
+        ]}
+        animation="fadeInUp"
+        duration={600}
+      >
+        <TouchableOpacity
+          style={styles.cardInner}
+          onPress={() => openCardModal(card)}
+          activeOpacity={0.9}
+        >
 
-            return (
-              <Animatable.View
-                key={card.id}
-                style={[
-                  styles.gridItem,
-                  { width: CARD_GRID_WIDTH, marginHorizontal: 4 },
-                ]}
-                animation="fadeInUp"
-                duration={600}
-              >
-                {/* Clique abre modal de detalhes */}
-                <TouchableOpacity
-                  style={styles.cardInner}
-                  onPress={() => openCardModal(card)}
-                  activeOpacity={0.9}
-                >
-                  <Image
-                    source={{ uri: card.images.small }}
-                    style={{
-                      width: CARD_GRID_WIDTH * 0.9,
-                      height: CARD_GRID_WIDTH * 1.2,
-                      marginBottom: 4,
-                    }}
-                    resizeMode="contain"
-                  />
-                  <Text style={styles.cardNameGrid} numberOfLines={1}>
-                    {card.name}
-                  </Text>
-                  <Text style={styles.cardSetInfoGrid} numberOfLines={1}>
-                    {card.set?.name} - {card.number}
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Botões "Tenho" e "Quero" */}
-                <View style={styles.gridButtonsRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.haveButton,
-                      iHaveIt && { backgroundColor: "#66BB6A" },
-                    ]}
-                    onPress={() => onPressHaveInGrid(card)}
-                  >
-                    <Ionicons name="checkmark-done" size={18} color="#FFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.wantButton,
-                      iWantIt && { backgroundColor: "#EC407A" },
-                    ]}
-                    onPress={() => onPressWantInGrid(card)}
-                  >
-                    <Ionicons name="heart" size={18} color="#FFF" />
-                  </TouchableOpacity>
-                </View>
-              </Animatable.View>
-            );
-          })}
+          {/* FLAG VISUAL */}
+        <View style={styles.cardFlagWrapper}>
+          {iHaveIt && (
+            <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
+          )}
+          {!iHaveIt && iWantIt && (
+            <Ionicons name="heart" size={18} color="#EC407A" />
+          )}
         </View>
-      </ScrollView>
+          <Image
+            source={{ uri: card.images.small }}
+            style={{
+              width: CARD_GRID_WIDTH * 0.9,
+              height: CARD_GRID_WIDTH * 1.2,
+              marginBottom: 4,
+            }}
+            resizeMode="contain"
+          />
+          <Text style={styles.cardNameGrid} numberOfLines={1}>
+            {card.name}
+          </Text>
+          <Text style={styles.cardSetInfoGrid} numberOfLines={1}>
+            {card.set?.name} - {card.number}
+          </Text>
+          
+        </TouchableOpacity>
+
+        <View style={styles.gridButtonsRow}>
+          <TouchableOpacity
+            style={[
+              styles.haveButton,
+              iHaveIt && { backgroundColor: "#66BB6A" },
+            ]}
+            onPress={() => onPressHaveInGrid(card)}
+          >
+            <Ionicons name="checkmark-done" size={18} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.wantButton,
+              iWantIt && { backgroundColor: "#EC407A" },
+            ]}
+            onPress={() => onPressWantInGrid(card)}
+          >
+            <Ionicons name="heart" size={18} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      </Animatable.View>
+    );
+  }}
+/>
 
       {/** MODAL de Detalhes */}
       <Modal
@@ -1051,97 +1216,112 @@ export default function CardsSearchScreen() {
 
       {/** Modal "Tenho / Quero" do grid */}
       <Modal
-        visible={addToCollectionModal.visible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={handleCloseAddCollectionModal}
+  visible={addToCollectionModal.visible}
+  animationType="slide"
+  transparent={true}
+  onRequestClose={handleCloseAddCollectionModal}
+>
+  <View style={styles.addCollectionOverlay}>
+    <View style={styles.addCollectionContainer}>
+      <Text style={styles.modalTitle}>Escolher Binder</Text>
+
+      {addToCollectionModal.card && (
+        <>
+          <Image
+            source={{ uri: addToCollectionModal.card.images.small }}
+            style={styles.modalImage}
+            resizeMode="contain"
+          />
+          <Text style={styles.modalText}>{addToCollectionModal.card.name}</Text>
+        </>
+      )}
+
+      <ScrollView style={{ maxHeight: 200, marginTop: 10, width: "100%" }}>
+        {binders.map((binder) => (
+          <TouchableOpacity
+            key={binder.id}
+            style={[styles.switchTypeButton, { marginBottom: 6 }]}
+            onPress={() => addCardToBinder(binder.id, addToCollectionModal.card!)}
+          >
+            <Ionicons
+              name="albums"
+              size={16}
+              color="#FFF"
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.switchTypeText}>{binder.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <TouchableOpacity
+        style={[
+          styles.switchTypeButton,
+          { backgroundColor: "#555", marginTop: 10 },
+        ]}
+        onPress={() => askBinderName(addToCollectionModal.card!)}
       >
-        <View style={styles.addCollectionOverlay}>
-          <View style={styles.addCollectionContainer}>
-            <Text style={styles.modalTitle}>
-              {addToCollectionModal.mode === "have"
-                ? "Adicionar à Minha Coleção"
-                : "Adicionar à Wishlist"}
-            </Text>
+        <Ionicons
+          name="add-circle"
+          size={16}
+          color="#FFF"
+          style={{ marginRight: 4 }}
+        />
+        <Text style={styles.switchTypeText}>Criar Novo Binder com essa Carta</Text>
+      </TouchableOpacity>
 
-            {addToCollectionModal.card && (
-              <>
-                <Image
-                  source={{ uri: addToCollectionModal.card.images.small }}
-                  style={styles.modalImage}
-                  resizeMode="contain"
-                />
-                <Text
-                  style={[
-                    styles.modalText,
-                    { marginBottom: 8, textAlign: "center" },
-                  ]}
-                >
-                  {addToCollectionModal.card.name}
-                </Text>
-              </>
-            )}
+      <TouchableOpacity
+        style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
+        onPress={handleCloseAddCollectionModal}
+      >
+        <Ionicons
+          name="close-circle"
+          size={16}
+          color="#FFF"
+          style={{ marginRight: 4 }}
+        />
+        <Text style={styles.buttonText}>Fechar</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
 
-            <Text style={styles.modalLabel}>Selecione uma pasta:</Text>
-            <View style={{ flexDirection: "row", marginVertical: 6 }}>
-              <TouchableOpacity
-                style={styles.switchTypeButton}
-                onPress={() => handleConfirmAddCollection("Coleção Geral")}
-              >
-                <Ionicons
-                  name="albums"
-                  size={16}
-                  color="#FFF"
-                  style={{ marginRight: 4 }}
-                />
-                <Text style={styles.switchTypeText}>Coleção Geral</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.switchTypeButton, { marginLeft: 8 }]}
-                onPress={() => handleConfirmAddCollection("Pasta Específica")}
-              >
-                <Ionicons
-                  name="folder-open"
-                  size={16}
-                  color="#FFF"
-                  style={{ marginRight: 4 }}
-                />
-                <Text style={styles.switchTypeText}>Pasta Específica</Text>
-              </TouchableOpacity>
-            </View>
+<Modal
+  visible={nameBinderModalVisible}
+  animationType="fade"
+  transparent
+  onRequestClose={() => setNameBinderModalVisible(false)}
+>
+  <View style={styles.addCollectionOverlay}>
+    <View style={styles.addCollectionContainer}>
+      <Text style={styles.modalTitle}>Nome do Novo Binder</Text>
 
-            <Text style={styles.modalLabel}>Ou crie uma pasta nova:</Text>
-            <TouchableOpacity
-              style={[
-                styles.switchTypeButton,
-                { backgroundColor: "#555", marginTop: 4 },
-              ]}
-              onPress={() => handleConfirmAddCollection("Nova Pasta")}
-            >
-              <Ionicons
-                name="add-circle"
-                size={16}
-                color="#FFF"
-                style={{ marginRight: 4 }}
-              />
-              <Text style={styles.switchTypeText}>Criar Pasta</Text>
-            </TouchableOpacity>
+      <TextInput
+        style={styles.modalInput}
+        value={newBinderName}
+        onChangeText={setNewBinderName}
+        placeholder="Digite um nome..."
+        placeholderTextColor="#999"
+      />
 
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
-              onPress={handleCloseAddCollectionModal}
-            >
-              <Ionicons
-                name="close-circle"
-                size={16}
-                color="#FFF"
-                style={{ marginRight: 4 }}
-              />
-              <Text style={styles.buttonText}>Fechar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <TouchableOpacity
+        style={[styles.button, { marginTop: 12 }]}
+        onPress={confirmCreateBinder}
+      >
+        <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+        <Text style={styles.buttonText}>Criar</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.button, { backgroundColor: "#999", marginTop: 10 }]}
+        onPress={() => setNameBinderModalVisible(false)}
+      >
+        <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+        <Text style={styles.buttonText}>Cancelar</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
 
       {/** MODAL Ordenação */}
       <Modal
@@ -1418,6 +1598,7 @@ const styles = StyleSheet.create({
   },
   cardInner: {
     alignItems: "center",
+    position: "relative", // <- necessário pra o flag funcionar direito
   },
   cardNameGrid: {
     color: SECONDARY,
@@ -1594,7 +1775,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 8,
     marginTop: 4,
-  },
+    height: 40, // 👈 altura fixa aqui
+  },  
   modalButtons: {
     flexDirection: "row",
     marginTop: 16,
@@ -1675,4 +1857,11 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 14,
   },
+  cardFlagWrapper: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    zIndex: 10,
+  },
+  
 });

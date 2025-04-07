@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   View,
   Text,
@@ -17,9 +17,12 @@ import {
 import * as Animatable from "react-native-animatable";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 
-/** Tipagens para Binder e Cartas */
+/** Tipos */
 type BinderType = "master" | "pokemon" | "trainer" | "general";
+type TrainerCategory = "energy" | "all"; // agora SÓ "energy" e "all"
+type BinderSortOption = "number" | "name" | "rarity" | "quantity" | "release";
 
 interface MinimalCardData {
   id: string;
@@ -30,40 +33,35 @@ interface MinimalCardData {
   rarity?: string;
   number?: string;
   releaseDate?: string;
-  setId?: string; // <- agora tá de boa
+  setId?: string;
+  setSeries?: string;
 }
 
 interface Binder {
   id: string;
   name: string;
   binderType: BinderType;
-  reference?: string; // Ex: setId, pokemonName, "AllTrainers"
+  reference?: string;
   createdAt: number;
-
   allCards: MinimalCardData[];
   quantityMap: Record<string, number>;
 }
 
-/** Para criar o Blinder via Modal */
-interface CreatingBinderState {
-  visible: boolean;
-  step: number;                // 1=Tipo, 2=Detalhes, 3=Treinador
-  name: string;
-  binderType: BinderType | null;
+/** Lista “oficial” de raridades (ficou, mas não será usada em Pokémon) */
+const ALL_RARITIES = [
+  "Common",
+  "Uncommon",
+  "Rare",
+  "Holo Rare",
+  "Ultra Rare",
+  "Secret Rare",
+  "Promo",
+  "Rare Holo",
+  "Rare ACE",
+  "Amazing Rare",
+  "Radiant",
+];
 
-  // Master e Pokémon
-  selectedCollectionId: string;
-  pokemonName: string;
-
-  // Trainer
-  trainerCategory: "item" | "supporter" | "energy" | "all";
-  trainerCollectionId: string; // setId ou ""
-
-  loadingCards: boolean;
-  fetchedCards: MinimalCardData[];
-}
-
-/** Para coleções (Master Set, Trainer...) */
 interface CollectionData {
   id: string;
   name: string;
@@ -77,69 +75,94 @@ interface CollectionData {
   };
 }
 
-/** Ordenação do Binder Detalhe */
-type BinderSortOption = "number" | "name" | "rarity" | "quantity" | "release";
+/** Estado do modal de criação */
+interface CreatingBinderState {
+  visible: boolean;
+  step: number;
+  name: string;
+  binderType: BinderType | null;
 
-/** Componente Principal */
+  // multi sets + multi series
+  selectedSets: string[];
+  selectedSeries: string[];
+
+  // para Pokémon
+  pokemonName: string;
+
+  // trainer
+  trainerCategory: TrainerCategory;
+
+  // raridades
+  selectedRarities: string[];
+
+  // Loading
+  loadingCards: boolean;
+  fetchedCards: MinimalCardData[];
+}
+
 export default function CollectionsScreen() {
-  /** Lista de Binders, selectedBinder */
   const [binders, setBinders] = useState<Binder[]>([]);
   const [selectedBinder, setSelectedBinder] = useState<Binder | null>(null);
 
-  /** Coleções (para Master / Trainer) */
   const [collections, setCollections] = useState<CollectionData[]>([]);
-  const [collectionModalVisible, setCollectionModalVisible] = useState(false);
-  const [collectionSearchQuery, setCollectionSearchQuery] = useState("");
-
-  /** Ordenação do Blinder Detalhe (padrão = 'number') */
-  const [binderSort, setBinderSort] = useState<BinderSortOption>("number");
+  const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
 
-  /** Criação do Blinder (modal “bonitão”) */
+  const [binderSort, setBinderSort] = useState<BinderSortOption>("number"); // default
   const [createBinderState, setCreateBinderState] = useState<CreatingBinderState>({
     visible: false,
     step: 1,
     name: "",
     binderType: null,
-    selectedCollectionId: "",
+    selectedSets: [],
+    selectedSeries: [],
     pokemonName: "",
-    trainerCategory: "all",
-    trainerCollectionId: "",
+    trainerCategory: "all", // só all e energy agora
+    selectedRarities: [],
     loadingCards: false,
     fetchedCards: [],
   });
 
-  /** Carrega do AsyncStorage + Coleções */
+  /**
+   * Recarregar binders sempre que a tela estiver em foco.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      loadBindersFromStorage();
+    }, [])
+  );
+
   useEffect(() => {
-    loadBindersFromStorage();
+    // Carrega coleções (API pokemontcg) 1x
     loadCollections();
   }, []);
 
   async function loadBindersFromStorage() {
     try {
-      const json = await AsyncStorage.getItem("@userBinders");
-      if (json) {
-        const arr = JSON.parse(json) as Binder[];
-        setBinders(arr);
+      const raw = await AsyncStorage.getItem("@userBinders");
+      if (raw) {
+        setBinders(JSON.parse(raw));
       }
     } catch (err) {
-      console.log("Erro ao carregar binders:", err);
+      console.log("Erro loadBinders:", err);
     }
   }
+
   async function saveBindersToStorage(updated: Binder[]) {
     setBinders(updated);
     try {
       await AsyncStorage.setItem("@userBinders", JSON.stringify(updated));
     } catch (err) {
-      console.log("Erro ao salvar binders:", err);
+      console.log("Erro saveBinders:", err);
     }
   }
+
   async function loadCollections() {
     try {
       const resp = await fetch("https://api.pokemontcg.io/v2/sets");
       const data = await resp.json();
       if (data && data.data) {
-        const all: CollectionData[] = data.data.map((col: any) => ({
+        const arr: CollectionData[] = data.data.map((col: any) => ({
           id: col.id,
           name: col.name,
           ptcgoCode: col.ptcgoCode,
@@ -148,42 +171,43 @@ export default function CollectionsScreen() {
           releaseDate: col.releaseDate,
           images: col.images,
         }));
-        setCollections(all);
+        setCollections(arr);
       }
     } catch (err) {
-      console.log("Erro ao carregar coleções:", err);
+      console.log("Erro loadCollections:", err);
     }
   }
 
-  /** HOME */
+  /** HOME - criar binder */
   function openCreateBinderModal() {
     setCreateBinderState({
       visible: true,
       step: 1,
       name: "",
       binderType: null,
-      selectedCollectionId: "",
+      selectedSets: [],
+      selectedSeries: [],
       pokemonName: "",
       trainerCategory: "all",
-      trainerCollectionId: "",
+      selectedRarities: [],
       loadingCards: false,
       fetchedCards: [],
     });
   }
   function closeCreateBinderModal() {
-    setCreateBinderState((prev) => ({ ...prev, visible: false }));
+    setCreateBinderState((p) => ({ ...p, visible: false }));
   }
 
   function openBinderDetail(binder: Binder) {
     setSelectedBinder(binder);
-    setBinderSort("number"); // padrão
+    setBinderSort("number");
   }
   function closeBinderDetail() {
     setSelectedBinder(null);
   }
 
   function handleDeleteBinder(binder: Binder) {
-    Alert.alert("Excluir", `Deseja excluir o binder "${binder.name}"?`, [
+    Alert.alert("Excluir Binder", `Deseja excluir "${binder.name}"?`, [
       { text: "Cancelar", style: "cancel" },
       {
         text: "Excluir",
@@ -197,175 +221,59 @@ export default function CollectionsScreen() {
     ]);
   }
 
-  /** =========== CRIAÇÃO DE BINDER (Modal) =========== */
-  function goToStep(step: number) {
-    setCreateBinderState((prev) => ({ ...prev, step }));
-  }
+  // ========= CRIAÇÃO DE BINDER =========
   function selectBinderType(tp: BinderType) {
-    // Se for “trainer”, vamos step=3 (tela trainerCategory)
     if (tp === "trainer") {
-      setCreateBinderState((prev) => ({
-        ...prev,
-        binderType: "trainer",
-        step: 3,  // pular direto p/ trainerCategory
-      }));
+      // Passa direto pro step 3
+      setCreateBinderState((p) => ({ ...p, binderType: "trainer", step: 3 }));
     } else {
-      setCreateBinderState((prev) => ({
-        ...prev,
-        binderType: tp,
-        step: 2,
-      }));
+      setCreateBinderState((p) => ({ ...p, binderType: tp, step: 2 }));
     }
   }
 
-  /** Sub-step: para “trainer”, user escolhe category e setId ou "All" */
-  function handleSelectTrainerCategory(cat: "item"|"supporter"|"energy"|"all") {
-    setCreateBinderState((prev) => ({ ...prev, trainerCategory: cat }));
-  }
-  function handleSelectTrainerCollection(setId: string) {
-    setCreateBinderState((prev) => ({ ...prev, trainerCollectionId: setId }));
+  function goToStep(s: number) {
+    setCreateBinderState((p) => ({ ...p, step: s }));
   }
 
-  /** Filtra coleções no modal (master/trainer) */
-  const filteredCollectionList = useMemo(() => {
-    if (!collectionSearchQuery.trim()) return collections;
-    return collections.filter((col) =>
-      col.name.toLowerCase().includes(collectionSearchQuery.toLowerCase())
-    );
-  }, [collectionSearchQuery, collections]);
-
-  function openCollectionModal() {
-    setCollectionSearchQuery("");
-    setCollectionModalVisible(true);
-  }
-  function closeCollectionModal() {
-    setCollectionModalVisible(false);
-  }
-  function selectCollection(colId: string) {
-    if (createBinderState.binderType === "master") {
-      // Master Set
-      setCreateBinderState((prev) => ({ ...prev, selectedCollectionId: colId }));
-    } else if (createBinderState.binderType === "trainer") {
-      // Trainer
-      setCreateBinderState((prev) => ({ ...prev, trainerCollectionId: colId }));
-    }
-    closeCollectionModal();
+  /** Rarities toggle (exceto se for binderType=pokemon, não vamos mostrar no UI) */
+  function toggleRarity(r: string) {
+    setCreateBinderState((p) => {
+      const has = p.selectedRarities.includes(r);
+      if (has) {
+        return {
+          ...p,
+          selectedRarities: p.selectedRarities.filter((x) => x !== r),
+        };
+      } else {
+        return {
+          ...p,
+          selectedRarities: [...p.selectedRarities, r],
+        };
+      }
+    });
   }
 
-  /** Busca Cartas da API */
+  /** Múltiplo sets e series */
+  function openCollectionsModal() {
+    setCollectionsModalVisible(true);
+  }
+  function closeCollectionsModal() {
+    setCollectionsModalVisible(false);
+  }
+
   async function fetchCardsForBinder() {
-    const {
-      binderType,
-      selectedCollectionId,
-      pokemonName,
-      trainerCategory,
-      trainerCollectionId,
-    } = createBinderState;
-
-    setCreateBinderState((prev) => ({ ...prev, loadingCards: true, fetchedCards: [] }));
-
+    setCreateBinderState((p) => ({ ...p, loadingCards: true, fetchedCards: [] }));
     try {
-      if (binderType === "master") {
-        if (!selectedCollectionId) {
-          Alert.alert("Erro", "Selecione uma coleção para o Master Set.");
-          setCreateBinderState((prev) => ({ ...prev, loadingCards: false }));
-          return;
-        }
-        const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${selectedCollectionId}"&pageSize=500`;
-        const data = await fetchApi(url);
-        setCreateBinderState((prev) => ({ ...prev, fetchedCards: data, loadingCards: false }));
-      }
-      else if (binderType === "pokemon") {
-        if (!pokemonName.trim()) {
-          Alert.alert("Erro", "Digite o nome do Pokémon.");
-          setCreateBinderState((prev) => ({ ...prev, loadingCards: false }));
-          return;
-        }
-        const query = encodeURIComponent(`name:"${pokemonName}" supertype:pokemon`);
-        const url = `https://api.pokemontcg.io/v2/cards?q=${query}&pageSize=500`;
-        const data = await fetchApi(url);
-        setCreateBinderState((prev) => ({ ...prev, fetchedCards: data, loadingCards: false }));
-      }
-      else if (binderType === "trainer") {
-        // Monta a query de trainer
-        let typeQuery = "";
-        if (trainerCategory === "item") {
-          typeQuery = `supertype:trainer subtype:item`;
-        } else if (trainerCategory === "supporter") {
-          typeQuery = `supertype:trainer subtype:supporter`;
-        } else if (trainerCategory === "energy") {
-          // Nesse caso, supertype=energy
-          typeQuery = `supertype:energy`;
-        } else {
-          // all => supertype:trainer ou supertype:energy
-          // podemos separar e unir? Pra simplificar, coloco: (supertype:trainer or supertype:energy)
-          // mas a API não lida bem com "or"
-          // Então vamos buscar trainer + energy
-          // OU consultamos 2x e juntamos. Farei 2 fetch e junto.
-          const data1 = await fetchApi(`https://api.pokemontcg.io/v2/cards?q=supertype:trainer&pageSize=500`);
-          const data2 = await fetchApi(`https://api.pokemontcg.io/v2/cards?q=supertype:energy&pageSize=500`);
-          let combined = [...data1, ...data2];
-
-          // Se trainerCollectionId != "", filtra por set.id
-          if (trainerCollectionId) {
-            combined = combined.filter((c) => c.setId === trainerCollectionId);
-          }
-
-          setCreateBinderState((prev) => ({ ...prev, fetchedCards: combined, loadingCards: false }));
-          return;
-        }
-
-        // Agora, se trainerCollectionId != "", incluímos set.id
-        let finalUrl = `https://api.pokemontcg.io/v2/cards?q=${typeQuery}`;
-        if (trainerCollectionId) {
-          finalUrl += ` set.id:"${trainerCollectionId}"`;
-        }
-        finalUrl += `&pageSize=500`;
-        const data = await fetchApi(finalUrl);
-        setCreateBinderState((prev) => ({ ...prev, fetchedCards: data, loadingCards: false }));
-      }
-      else {
-        // "general" => sem busca
-        Alert.alert("Ops", "Por enquanto esse tipo não faz busca automática.");
-        setCreateBinderState((prev) => ({ ...prev, loadingCards: false }));
-      }
+      const data = await doFetchWithMultiOptions(createBinderState, collections);
+      setCreateBinderState((p) => ({ ...p, fetchedCards: data, loadingCards: false }));
     } catch (err) {
-      console.log("Erro no fetchCardsForBinder:", err);
-      setCreateBinderState((prev) => ({ ...prev, loadingCards: false, fetchedCards: [] }));
+      console.log("fetchCardsForBinder erro:", err);
+      setCreateBinderState((p) => ({ ...p, loadingCards: false, fetchedCards: [] }));
     }
   }
 
-  /** Aux: fetch e parse minimal data */
-  async function fetchApi(url: string): Promise<MinimalCardData[]> {
-    const resp = await fetch(url);
-    const json = await resp.json();
-    if (json && json.data) {
-      return json.data.map((c: any) => ({
-        id: c.id,
-        name: c.name,
-        images: c.images,
-        rarity: c.rarity || "",
-        number: c.number,
-        releaseDate: c.set?.releaseDate,
-        // Extra: c.setId?
-        setId: c.set?.id,
-      }));
-    }
-    return [];
-  }
-
-  /** Finalizar a criação do Blinder => Salva local */
   function handleCreateBinder() {
-    const {
-      name,
-      binderType,
-      fetchedCards,
-      selectedCollectionId,
-      pokemonName,
-      trainerCategory,
-      trainerCollectionId,
-    } = createBinderState;
-
+    const { binderType, name, fetchedCards } = createBinderState;
     if (!binderType) {
       Alert.alert("Erro", "Selecione um tipo de Binder.");
       return;
@@ -382,56 +290,91 @@ export default function CollectionsScreen() {
       createdAt: Date.now(),
       allCards: fetchedCards,
       quantityMap: {},
+      reference: buildReference(createBinderState),
     };
-
-    // reference
-    if (binderType === "master") {
-      newBinder.reference = selectedCollectionId || "AllSets";
-    } else if (binderType === "pokemon") {
-      newBinder.reference = pokemonName.trim();
-    } else if (binderType === "trainer") {
-      if (trainerCategory === "all") {
-        newBinder.reference = trainerCollectionId
-          ? `AllTrainers + set:${trainerCollectionId}`
-          : `AllTrainers(AllSets)`;
-      } else {
-        newBinder.reference = `${trainerCategory} + set:${trainerCollectionId || "AllSets"}`;
-      }
-    }
 
     const updated = [...binders, newBinder];
     saveBindersToStorage(updated);
-
-    Alert.alert("Sucesso", "Binder criado com sucesso!");
+    Alert.alert("Sucesso", `Blinder "${newBinder.name}" criado!`);
     closeCreateBinderModal();
   }
 
-  // =========== DETALHES DO BINDER (FlatList c/3 colunas) ===========
+  /** Monta reference (exibida no card) */
+  function buildReference(st: CreatingBinderState) {
+    let ref = st.binderType || "Binder";
+
+    if (st.binderType === "master") {
+      ref += ` S=${st.selectedSets.length} Se=${st.selectedSeries.length}`;
+    } else if (st.binderType === "pokemon") {
+      ref += `(${st.pokemonName}), S=${st.selectedSets.length}, Se=${st.selectedSeries.length}`;
+    } else if (st.binderType === "trainer") {
+      ref += `(${st.trainerCategory}), S=${st.selectedSets.length} Se=${st.selectedSeries.length}`;
+    }
+
+    // Se binderType for "pokemon", não mostramos raridades
+    // mas se for outro, ainda podemos exibir se existirem
+    if (st.binderType !== "pokemon" && st.selectedRarities.length > 0) {
+      ref += ` R:${st.selectedRarities.join(",")}`;
+    }
+    return ref;
+  }
+
+  // ========== DETALHE BINDER ==========
 
   function incrementCardQuantity(cardId: string) {
     if (!selectedBinder) return;
-    const oldVal = selectedBinder.quantityMap[cardId] || 0;
-    const newVal = oldVal + 1;
-    const updatedQuantity = { ...selectedBinder.quantityMap, [cardId]: newVal };
-    const updatedBinder = { ...selectedBinder, quantityMap: updatedQuantity };
-    const updatedList = binders.map((b) => (b.id === updatedBinder.id ? updatedBinder : b));
-    saveBindersToStorage(updatedList);
-    setSelectedBinder(updatedBinder);
+    const old = selectedBinder.quantityMap[cardId] || 0;
+    const updated = { ...selectedBinder.quantityMap, [cardId]: old + 1 };
+    const newBinder: Binder = { ...selectedBinder, quantityMap: updated };
+    const newList = binders.map((b) => (b.id === newBinder.id ? newBinder : b));
+    saveBindersToStorage(newList);
+    setSelectedBinder(newBinder);
   }
 
   function decrementCardQuantity(cardId: string) {
     if (!selectedBinder) return;
-    const oldVal = selectedBinder.quantityMap[cardId] || 0;
-    if (oldVal === 0) return;
-    const newVal = oldVal - 1;
-    const updatedQuantity = { ...selectedBinder.quantityMap, [cardId]: newVal };
-    const updatedBinder = { ...selectedBinder, quantityMap: updatedQuantity };
-    const updatedList = binders.map((b) => (b.id === updatedBinder.id ? updatedBinder : b));
-    saveBindersToStorage(updatedList);
-    setSelectedBinder(updatedBinder);
+    const old = selectedBinder.quantityMap[cardId] || 0;
+    if (old === 0) return;
+
+    const updatedQty = old - 1;
+    const updatedMap = { ...selectedBinder.quantityMap, [cardId]: updatedQty };
+
+    // Se chegou em 0, fica 0 ou removemos do array? — A ideia é não remover do array, só ficar “(Falta)”
+    const newBinder: Binder = { ...selectedBinder, quantityMap: updatedMap };
+    const newList = binders.map((b) => (b.id === newBinder.id ? newBinder : b));
+    saveBindersToStorage(newList);
+    setSelectedBinder(newBinder);
   }
 
-  /** Monta array final do Binder (aplica sort) */
+  /** NOVO: remover completamente a carta do binder (allCards e quantityMap) */
+  function removeCardFromBinder(cardId: string) {
+    if (!selectedBinder) return;
+
+    Alert.alert("Remover Carta", "Deseja remover essa carta do binder?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Remover",
+        style: "destructive",
+        onPress: () => {
+          const newAllCards = selectedBinder.allCards.filter((c) => c.id !== cardId);
+          const newMap = { ...selectedBinder.quantityMap };
+          delete newMap[cardId];
+
+          const newBinder = {
+            ...selectedBinder,
+            allCards: newAllCards,
+            quantityMap: newMap,
+          };
+          const newList = binders.map((b) => (b.id === newBinder.id ? newBinder : b));
+          saveBindersToStorage(newList);
+          setSelectedBinder(newBinder);
+
+          Alert.alert("Removida", "A carta foi removida do binder!");
+        },
+      },
+    ]);
+  }
+
   const binderDisplayCards = useMemo(() => {
     if (!selectedBinder) return [];
     const arr = [...selectedBinder.allCards];
@@ -454,14 +397,11 @@ export default function CollectionsScreen() {
         });
         break;
       case "release":
-        arr.sort((a, b) => {
-          const da = a.releaseDate || "9999/99/99";
-          const db = b.releaseDate || "9999/99/99";
-          return da.localeCompare(db);
-        });
+        arr.sort((a, b) =>
+          (a.releaseDate || "9999/99/99").localeCompare(b.releaseDate || "9999/99/99")
+        );
         break;
     }
-
     return arr;
   }, [selectedBinder, binderSort]);
 
@@ -472,14 +412,12 @@ export default function CollectionsScreen() {
     return parseInt(match[1], 10);
   }
 
-  /** Render item do FlatList */
-  const SCREEN_WIDTH = Dimensions.get("window").width;
-  const cardWidth = (SCREEN_WIDTH - 42) / 3; // ajustado p/ 3 colunas
-
   function renderCardItem({ item }: { item: MinimalCardData }) {
     if (!selectedBinder) return null;
     const q = selectedBinder.quantityMap[item.id] || 0;
     const hasIt = q > 0;
+    const cardWidth = (Dimensions.get("window").width - 42) / 3;
+
     return (
       <Animatable.View
         style={[styles.cardItemContainer, { width: cardWidth }]}
@@ -506,11 +444,11 @@ export default function CollectionsScreen() {
           {item.rarity}
         </Text>
 
-        {/* +, Q, - */}
         <View style={styles.qtyRow}>
           <TouchableOpacity style={styles.qtyButton} onPress={() => incrementCardQuantity(item.id)}>
             <Ionicons name="add-circle" size={20} color="#FFF" />
           </TouchableOpacity>
+
           {q > 0 ? (
             <Text style={styles.cardQuantityText}>x{q}</Text>
           ) : (
@@ -518,15 +456,26 @@ export default function CollectionsScreen() {
               (Falta)
             </Text>
           )}
-          <TouchableOpacity style={styles.qtyButton} onPress={() => decrementCardQuantity(item.id)}>
+
+          <TouchableOpacity
+            style={styles.qtyButton}
+            onPress={() => decrementCardQuantity(item.id)}
+          >
             <Ionicons name="remove-circle" size={20} color="#FFF" />
           </TouchableOpacity>
         </View>
+
+        {/* Botão EXTRA para remover completamente do binder */}
+        <TouchableOpacity
+          style={styles.removeCardButton}
+          onPress={() => removeCardFromBinder(item.id)}
+        >
+          <Ionicons name="trash" size={16} color="#FFF" />
+        </TouchableOpacity>
       </Animatable.View>
     );
   }
 
-  /** Modal de ordenação (engrenagem) */
   function openSortModal() {
     setSortModalVisible(true);
   }
@@ -538,33 +487,31 @@ export default function CollectionsScreen() {
     setSortModalVisible(false);
   }
 
-  // =========== RENDER PRINCIPAL ===========
   return (
     <SafeAreaView style={styles.container}>
-      {/* HOME (se !selectedBinder) */}
+      {/* HOME */}
       {!selectedBinder && (
         <View style={styles.headerRow}>
-          <Text style={styles.title}>Minhas Coleções (Binders)</Text>
-
+          <Text style={styles.title}>Minhas Coleções (Blinders)</Text>
           <TouchableOpacity style={styles.createButton} onPress={openCreateBinderModal}>
             <Ionicons name="add-circle" size={20} color="#FFF" style={{ marginRight: 6 }} />
-            <Text style={{ color: "#FFF", fontWeight: "bold" }}>Criar Binder</Text>
+            <Text style={{ color: "#FFF", fontWeight: "bold" }}>Criar Blinder</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Grid de Binders */}
+      {/* GRID DE BINDERS */}
       {!selectedBinder && (
         <ScrollView contentContainerStyle={styles.gridContainer}>
           {binders.length === 0 && (
             <Text style={{ color: "#999", marginTop: 20 }}>
-              Você ainda não criou nenhum Binder.
+              Você ainda não criou nenhum Blinder.
             </Text>
           )}
           <View style={styles.gridWrapper}>
             {binders.map((binder) => {
               const total = binder.allCards.length;
-              const hasCount = Object.values(binder.quantityMap).reduce((acc, q) => acc + q, 0);
+              const hasCount = Object.values(binder.quantityMap).reduce((a, b) => a + b, 0);
               const perc = total > 0 ? Math.round((hasCount / total) * 100) : 0;
 
               return (
@@ -574,24 +521,22 @@ export default function CollectionsScreen() {
                   animation="fadeInUp"
                   duration={600}
                 >
-                  <TouchableOpacity
-                    style={styles.binderInner}
-                    onPress={() => openBinderDetail(binder)}
-                  >
+                  <TouchableOpacity style={styles.binderInner} onPress={() => openBinderDetail(binder)}>
                     <Ionicons name="albums" size={40} color="#FFF" style={{ marginBottom: 8 }} />
                     <Text style={styles.binderName}>{binder.name}</Text>
                     <Text style={styles.binderType}>
                       Tipo: {binder.binderType.toUpperCase()}
                     </Text>
+
                     {binder.reference && (
                       <Text style={styles.binderReference}>{binder.reference}</Text>
                     )}
+
                     <Text style={styles.binderProgress}>
                       {hasCount}/{total} ({perc}%)
                     </Text>
                   </TouchableOpacity>
 
-                  {/* Botão Excluir */}
                   <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={() => handleDeleteBinder(binder)}
@@ -605,12 +550,14 @@ export default function CollectionsScreen() {
         </ScrollView>
       )}
 
-      {/* Detalhe do Blinder (FlatList 3 colunas) */}
+      {/* DETALHE DO BINDER */}
       {selectedBinder && (
         <View style={{ flex: 1, backgroundColor: "#111" }}>
-          {/* Header do Binder */}
           <View style={styles.binderDetailHeader}>
-            <TouchableOpacity style={{ flexDirection: "row", alignItems: "center" }} onPress={closeBinderDetail}>
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center" }}
+              onPress={closeBinderDetail}
+            >
               <Ionicons name="arrow-back" size={22} color="#FFF" />
               <Text style={{ color: "#FFF", marginLeft: 6 }}>Voltar</Text>
             </TouchableOpacity>
@@ -633,7 +580,7 @@ export default function CollectionsScreen() {
         </View>
       )}
 
-      {/* ============== MODAL CRIAÇÃO DE BLINDER BONITÃO ============== */}
+      {/* MODAL CRIAÇÃO PASSO A PASSO */}
       <Modal
         visible={createBinderState.visible}
         animationType="slide"
@@ -642,42 +589,55 @@ export default function CollectionsScreen() {
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: "#222" }}>
           <Animatable.View animation="fadeInUp" style={{ flex: 1 }}>
+            {/* Step 1: Tipo */}
             {createBinderState.step === 1 && (
               <ScrollView contentContainerStyle={styles.modalStepContainer}>
-                <Text style={styles.modalTitle}>Criar Novo Blinder</Text>
+                <Animatable.Text
+                  style={styles.modalTitle}
+                  animation="pulse"
+                  iterationCount="infinite"
+                  duration={5000}
+                >
+                  Criar Novo Blinder
+                </Animatable.Text>
+
                 <Text style={styles.label}>Escolha o Tipo:</Text>
 
-                {/* Opções de Type com ícones */}
                 <View style={styles.typeIconsRow}>
                   <TouchableOpacity
-                    style={styles.typeIconOption}
+                    style={[styles.typeIconOption, { borderColor: "#FDD835", borderWidth: 1 }]}
                     onPress={() => selectBinderType("master")}
                   >
-                    <Ionicons name="ribbon" size={40} color="#FDD835" style={{ marginBottom: 6 }}/>
+                    <Ionicons name="ribbon" size={40} color="#FDD835" style={{ marginBottom: 6 }} />
                     <Text style={styles.typeIconText}>Master Set</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={styles.typeIconOption}
+                    style={[styles.typeIconOption, { borderColor: "#42A5F5", borderWidth: 1 }]}
                     onPress={() => selectBinderType("pokemon")}
                   >
-                    <Ionicons name="logo-octocat" size={40} color="#42A5F5" style={{ marginBottom: 6 }}/>
+                    <Ionicons
+                      name="logo-octocat"
+                      size={40}
+                      color="#42A5F5"
+                      style={{ marginBottom: 6 }}
+                    />
                     <Text style={styles.typeIconText}>Pokémon</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={styles.typeIconOption}
+                    style={[styles.typeIconOption, { borderColor: "#EF5350", borderWidth: 1 }]}
                     onPress={() => selectBinderType("trainer")}
                   >
-                    <Ionicons name="school" size={40} color="#EF5350" style={{ marginBottom: 6 }}/>
+                    <Ionicons name="school" size={40} color="#EF5350" style={{ marginBottom: 6 }} />
                     <Text style={styles.typeIconText}>Trainer</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={styles.typeIconOption}
+                    style={[styles.typeIconOption, { borderColor: "#AB47BC", borderWidth: 1 }]}
                     onPress={() => selectBinderType("general")}
                   >
-                    <Ionicons name="globe" size={40} color="#AB47BC" style={{ marginBottom: 6 }}/>
+                    <Ionicons name="globe" size={40} color="#AB47BC" style={{ marginBottom: 6 }} />
                     <Text style={styles.typeIconText}>Geral</Text>
                   </TouchableOpacity>
                 </View>
@@ -696,60 +656,76 @@ export default function CollectionsScreen() {
               </ScrollView>
             )}
 
+            {/* Step 2: Master/Pokemon/Geral => multi sets, multi series, e rarities (mas se binderType=“pokemon”, não exibe raridades) */}
             {createBinderState.step === 2 && (
               <ScrollView contentContainerStyle={styles.modalStepContainer}>
-                <Text style={styles.modalTitle}>Detalhes do Binder</Text>
+                <Animatable.Text
+                  style={styles.modalTitle}
+                  animation="fadeInLeft"
+                  duration={1500}
+                >
+                  Detalhes do Blinder
+                </Animatable.Text>
 
-                {/* Nome */}
-                <Text style={styles.label}>Nome do Binder</Text>
+                <Text style={styles.label}>Nome do Blinder</Text>
                 <TextInput
                   style={styles.modalInput}
                   value={createBinderState.name}
-                  onChangeText={(val) =>
-                    setCreateBinderState((prev) => ({ ...prev, name: val }))
-                  }
+                  onChangeText={(val) => setCreateBinderState((p) => ({ ...p, name: val }))}
                   placeholder="Ex: 'Meu Master Set SWSH9'"
                   placeholderTextColor="#999"
                 />
 
-                {/* Se for Master => escolhe a coleção */}
-                {createBinderState.binderType === "master" && (
-                  <>
-                    <Text style={styles.label}>Coleção (Master Set)</Text>
-                    <TouchableOpacity
-                      style={styles.selectCollectionButton}
-                      onPress={() => {
-                        openCollectionModal();
-                      }}
-                    >
-                      <Ionicons name="albums" size={16} color="#FFF" style={{ marginRight: 6 }} />
-                      <Text style={{ color: "#FFF", fontWeight: "bold" }}>
-                        {createBinderState.selectedCollectionId
-                          ? `Selecionada: ${createBinderState.selectedCollectionId}`
-                          : "Selecionar Coleção"}
-                      </Text>
-                    </TouchableOpacity>
-                  </>
-                )}
+                <Text style={[styles.label, { marginTop: 12 }]}>Coleções / Séries</Text>
+                <TouchableOpacity style={styles.selectCollectionButton} onPress={() => setCollectionsModalVisible(true)}>
+                  <Ionicons name="albums" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                    {createBinderState.selectedSets.length === 0 &&
+                    createBinderState.selectedSeries.length === 0
+                      ? "Todas"
+                      : `Sets:${createBinderState.selectedSets.length}, Series:${createBinderState.selectedSeries.length}`}
+                  </Text>
+                </TouchableOpacity>
 
-                {/* Se for Pokémon => pede o nome do Pokémon */}
+                {/* Se for Pokémon => nome do Pokémon */}
                 {createBinderState.binderType === "pokemon" && (
                   <>
                     <Text style={styles.label}>Nome do Pokémon</Text>
                     <TextInput
                       style={styles.modalInput}
                       value={createBinderState.pokemonName}
-                      onChangeText={(val) =>
-                        setCreateBinderState((prev) => ({ ...prev, pokemonName: val }))
-                      }
+                      onChangeText={(val) => setCreateBinderState((p) => ({ ...p, pokemonName: val }))}
                       placeholder="Ex: 'Charizard'"
                       placeholderTextColor="#999"
                     />
                   </>
                 )}
 
-                {/* Se for 'general' => só define um nome, sem busca */}
-                {/* Botão de buscar se for master/pokemon */}
+                {/* Filtrar Raridades (não exibe se for pokemon) */}
+                {createBinderState.binderType !== "pokemon" && (
+                  <>
+                    <Text style={[styles.label, { marginTop: 12 }]}>
+                      Filtrar Raridades (opcional)
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+                      {ALL_RARITIES.map((r) => {
+                        const isSel = createBinderState.selectedRarities.includes(r);
+                        return (
+                          <TouchableOpacity
+                            key={r}
+                            style={[styles.rarityButton, isSel && styles.rarityButtonActive]}
+                            onPress={() => toggleRarity(r)}
+                          >
+                            <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 10 }}>
+                              {r}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
+
                 {(createBinderState.binderType === "master" ||
                   createBinderState.binderType === "pokemon") && (
                   <TouchableOpacity
@@ -760,6 +736,7 @@ export default function CollectionsScreen() {
                     <Text style={styles.buttonText}>Buscar Cartas</Text>
                   </TouchableOpacity>
                 )}
+
                 {createBinderState.loadingCards && (
                   <ActivityIndicator size="large" color="#E3350D" style={{ marginTop: 10 }} />
                 )}
@@ -769,19 +746,16 @@ export default function CollectionsScreen() {
                   </Text>
                 )}
 
-                {/* Botões */}
                 <View style={{ flexDirection: "row", justifyContent: "space-evenly", marginTop: 20 }}>
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: "#999" }]}
-                    onPress={() => setCreateBinderState((prev) => ({ ...prev, step: 1 }))}
+                    onPress={() => goToStep(1)}
                   >
                     <Ionicons name="arrow-back" size={16} color="#FFF" style={{ marginRight: 4 }} />
                     <Text style={styles.buttonText}>Voltar</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.button]}
-                    onPress={handleCreateBinder}
-                  >
+
+                  <TouchableOpacity style={[styles.button]} onPress={handleCreateBinder}>
                     <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 6 }} />
                     <Text style={styles.buttonText}>Criar</Text>
                   </TouchableOpacity>
@@ -789,61 +763,82 @@ export default function CollectionsScreen() {
               </ScrollView>
             )}
 
+            {/* Step 3: Trainer => multi sets, multi series, mas SÓ “all” e “energy” */}
             {createBinderState.step === 3 && (
               <ScrollView contentContainerStyle={styles.modalStepContainer}>
-                <Text style={styles.modalTitle}>Treinadores</Text>
+                <Animatable.Text style={styles.modalTitle} animation="fadeInRight" duration={1500}>
+                  Treinadores
+                </Animatable.Text>
+
                 <Text style={styles.label}>Nome do Blinder</Text>
                 <TextInput
                   style={styles.modalInput}
                   value={createBinderState.name}
-                  onChangeText={(val) =>
-                    setCreateBinderState((prev) => ({ ...prev, name: val }))
-                  }
+                  onChangeText={(val) => setCreateBinderState((p) => ({ ...p, name: val }))}
                   placeholder="Ex: 'Treinadores SWSH9'"
                   placeholderTextColor="#999"
                 />
 
                 <Text style={styles.label}>Categoria:</Text>
+                {/* Agora só ‘all’ e ‘energy’ */}
                 <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-                  {(["all","item","supporter","energy"] as const).map((cat) => {
+                  {(["all", "energy"] as TrainerCategory[]).map((cat) => {
+                    const isActive = createBinderState.trainerCategory === cat;
                     return (
                       <TouchableOpacity
                         key={cat}
                         style={[
                           styles.trainerCatButton,
-                          createBinderState.trainerCategory === cat && styles.trainerCatButtonActive,
+                          isActive && styles.trainerCatButtonActive,
                         ]}
-                        onPress={() => handleSelectTrainerCategory(cat)}
+                        onPress={() => setCreateBinderState((p) => ({ ...p, trainerCategory: cat }))}
                       >
                         <Ionicons
-                          name={cat === "energy" ? "flash" : (cat === "supporter" ? "people" : (cat==="item"?"briefcase":"apps"))}
+                          name={cat === "energy" ? "flash" : "apps"}
                           size={16}
                           color="#FFF"
                           style={{ marginRight: 4 }}
                         />
-                        <Text style={{ color: "#FFF", fontWeight: "bold" }}>{cat.toUpperCase()}</Text>
+                        <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                          {cat.toUpperCase()}
+                        </Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
 
-                {/* Selecionar coleção ou "todas" */}
-                <Text style={styles.label}>Coleção (opcional)</Text>
+                <Text style={[styles.label, { marginTop: 12 }]}>Coleções / Séries</Text>
                 <TouchableOpacity
                   style={styles.selectCollectionButton}
-                  onPress={() => {
-                    openCollectionModal();
-                  }}
+                  onPress={() => setCollectionsModalVisible(true)}
                 >
                   <Ionicons name="albums" size={16} color="#FFF" style={{ marginRight: 6 }} />
                   <Text style={{ color: "#FFF", fontWeight: "bold" }}>
-                    {createBinderState.trainerCollectionId
-                      ? `Selecionada: ${createBinderState.trainerCollectionId}`
-                      : "Todas as Coleções"}
+                    {createBinderState.selectedSets.length === 0 &&
+                    createBinderState.selectedSeries.length === 0
+                      ? "Todas"
+                      : `Sets:${createBinderState.selectedSets.length}, Series:${createBinderState.selectedSeries.length}`}
                   </Text>
                 </TouchableOpacity>
 
-                {/* Botão fetch */}
+                {/* Se quiser remover a parte de raridades, mas no trainer poderia deixar OPCIONAL. Vou manter se quiser! 
+                    Se você quer remover, é só ocultar o chunk abaixo. */}
+                <Text style={[styles.label, { marginTop: 12 }]}>Filtrar Raridades (opcional)</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+                  {ALL_RARITIES.map((r) => {
+                    const isSel = createBinderState.selectedRarities.includes(r);
+                    return (
+                      <TouchableOpacity
+                        key={r}
+                        style={[styles.rarityButton, isSel && styles.rarityButtonActive]}
+                        onPress={() => toggleRarity(r)}
+                      >
+                        <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 10 }}>{r}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
                 <TouchableOpacity
                   style={[styles.button, { marginTop: 12 }]}
                   onPress={fetchCardsForBinder}
@@ -851,6 +846,7 @@ export default function CollectionsScreen() {
                   <Ionicons name="cloud-download" size={16} color="#FFF" style={{ marginRight: 6 }} />
                   <Text style={styles.buttonText}>Buscar Cartas</Text>
                 </TouchableOpacity>
+
                 {createBinderState.loadingCards && (
                   <ActivityIndicator size="large" color="#E3350D" style={{ marginTop: 10 }} />
                 )}
@@ -860,15 +856,15 @@ export default function CollectionsScreen() {
                   </Text>
                 )}
 
-                {/* Botões */}
                 <View style={{ flexDirection: "row", justifyContent: "space-evenly", marginTop: 20 }}>
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: "#999" }]}
-                    onPress={() => setCreateBinderState((prev) => ({ ...prev, step: 1 }))}
+                    onPress={() => goToStep(1)}
                   >
                     <Ionicons name="arrow-back" size={16} color="#FFF" style={{ marginRight: 4 }} />
                     <Text style={styles.buttonText}>Voltar</Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity style={[styles.button]} onPress={handleCreateBinder}>
                     <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 6 }} />
                     <Text style={styles.buttonText}>Criar</Text>
@@ -880,92 +876,35 @@ export default function CollectionsScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* MODAL Coleções (Master / Trainer) */}
-      <Modal
-        visible={collectionModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={closeCollectionModal}
-      >
-        <View style={styles.overlay}>
-          <View style={styles.collectionModalContainer}>
-            <Text style={styles.modalTitle}>Selecionar Coleção</Text>
-
-            <View style={styles.searchContainer}>
-              <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Buscar coleção..."
-                placeholderTextColor="#999"
-                value={collectionSearchQuery}
-                onChangeText={setCollectionSearchQuery}
-              />
-            </View>
-
-            <ScrollView style={{ maxHeight: 300, width: "100%", marginTop: 10 }}>
-              <TouchableOpacity
-                style={[styles.collectionItem, { backgroundColor: "#444" }]}
-                onPress={() => {
-                  // "Nenhuma" => define ""
-                  selectCollection("");
-                }}
-              >
-                <Text style={styles.collectionItemText}>Todas as Coleções</Text>
-              </TouchableOpacity>
-
-              {filteredCollectionList.map((col) => (
-                <TouchableOpacity
-                  key={col.id}
-                  style={styles.collectionItem}
-                  onPress={() => {
-                    selectCollection(col.id);
-                  }}
-                >
-                  <Text style={styles.collectionItemText}>{col.name}</Text>
-                  {col.series && (
-                    <Text style={{ color: "#ccc", fontSize: 10 }}>{col.series}</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 10 }]}
-              onPress={closeCollectionModal}
-            >
-              <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
-              <Text style={styles.buttonText}>Fechar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* MODAL Ordenacao (engrenagem) */}
+      {/* MODAL de Ordenação (engrenagem) */}
       <Modal
         visible={sortModalVisible}
         animationType="fade"
         transparent
-        onRequestClose={closeSortModal}
+        onRequestClose={() => setSortModalVisible(false)}
       >
         <View style={styles.overlay}>
           <View style={styles.sortModalContainer}>
             <Text style={styles.modalTitle}>Ordenar por</Text>
-            {(["number","name","rarity","quantity","release"] as BinderSortOption[]).map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                style={styles.sortOptionButton}
-                onPress={() => selectSortOption(opt)}
-              >
-                <Text style={styles.sortOptionText}>
-                  {binderSort === opt ? "✓ " : ""}
-                  {labelForSort(opt)}
-                </Text>
-              </TouchableOpacity>
-            ))}
+
+            {(["number", "name", "rarity", "quantity", "release"] as BinderSortOption[]).map(
+              (opt) => (
+                <TouchableOpacity
+                  key={opt}
+                  style={styles.sortOptionButton}
+                  onPress={() => selectSortOption(opt)}
+                >
+                  <Text style={styles.sortOptionText}>
+                    {binderSort === opt ? "✓ " : ""}
+                    {labelForSort(opt)}
+                  </Text>
+                </TouchableOpacity>
+              )
+            )}
 
             <TouchableOpacity
               style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
-              onPress={closeSortModal}
+              onPress={() => setSortModalVisible(false)}
             >
               <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
               <Text style={styles.buttonText}>Fechar</Text>
@@ -973,23 +912,378 @@ export default function CollectionsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* MODAL multi-coleções e multi-séries */}
+      {collectionsModalVisible && (
+        <MultiCollectionsModal
+          visible={collectionsModalVisible}
+          onClose={() => setCollectionsModalVisible(false)}
+          collections={collections}
+          createBinderState={createBinderState}
+          setCreateBinderState={setCreateBinderState}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
-/** Label p/ cada sortOption */
-function labelForSort(opt: BinderSortOption): string {
-  switch(opt) {
-    case "number": return "Número (Padrão)";
-    case "name": return "Nome";
-    case "rarity": return "Raridade";
-    case "quantity": return "Quantidade";
-    case "release": return "Lançamento";
-    default: return opt;
+/** Modal para multi-selecionar sets e series */
+function MultiCollectionsModal({
+  visible,
+  onClose,
+  collections,
+  createBinderState,
+  setCreateBinderState,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  collections: CollectionData[];
+  createBinderState: CreatingBinderState;
+  setCreateBinderState: React.Dispatch<React.SetStateAction<CreatingBinderState>>;
+}) {
+  const [searchTxt, setSearchTxt] = useState("");
+
+  const allSeries = useMemo(() => {
+    const sset = new Set<string>();
+    for (const col of collections) {
+      if (col.series) sset.add(col.series);
+    }
+    return Array.from(sset).sort();
+  }, [collections]);
+
+  // Filtra coleções pelo nome
+  const filteredCollections = useMemo(() => {
+    if (!searchTxt.trim()) return collections;
+    return collections.filter((col) =>
+      col.name.toLowerCase().includes(searchTxt.toLowerCase())
+    );
+  }, [searchTxt, collections]);
+
+  /** Toggle set */
+  function toggleSet(colId: string) {
+    setCreateBinderState((prev) => {
+      const already = prev.selectedSets.includes(colId);
+      if (already) {
+        return {
+          ...prev,
+          selectedSets: prev.selectedSets.filter((x) => x !== colId),
+        };
+      } else {
+        return {
+          ...prev,
+          selectedSets: [...prev.selectedSets, colId],
+        };
+      }
+    });
+  }
+
+  /** Toggle series */
+  function toggleSeries(series: string) {
+    setCreateBinderState((prev) => {
+      const already = prev.selectedSeries.includes(series);
+      if (already) {
+        return {
+          ...prev,
+          selectedSeries: prev.selectedSeries.filter((x) => x !== series),
+        };
+      } else {
+        return {
+          ...prev,
+          selectedSeries: [...prev.selectedSeries, series],
+        };
+      }
+    });
+  }
+
+  return (
+    <Modal visible={visible} transparent onRequestClose={onClose} animationType="slide">
+      <View style={styles.overlay}>
+        <View style={styles.collectionModalContainer}>
+          <Text style={styles.modalTitle}>Coleções / Séries</Text>
+
+          <Text style={[styles.label, { alignSelf: "center" }]}>Filtrar Coleções</Text>
+
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar coleção..."
+              placeholderTextColor="#999"
+              value={searchTxt}
+              onChangeText={setSearchTxt}
+            />
+          </View>
+
+          <ScrollView style={{ maxHeight: 160, width: "100%", marginVertical: 8 }}>
+            {filteredCollections.map((col) => {
+              const isSel = createBinderState.selectedSets.includes(col.id);
+              return (
+                <TouchableOpacity
+                  key={col.id}
+                  style={styles.collectionItem}
+                  onPress={() => toggleSet(col.id)}
+                >
+                  <Text style={[styles.collectionItemText, isSel && { color: "#66BB6A" }]}>
+                    {col.name}
+                  </Text>
+
+                  {col.series && (
+                    <Text style={[{ color: "#ccc", fontSize: 10 }, isSel && { color: "#66BB6A" }]}>
+                      {col.series}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <Text style={[styles.label, { alignSelf: "center", marginTop: 6 }]}>Séries</Text>
+
+          <ScrollView style={{ maxHeight: 130, width: "100%", marginVertical: 6 }}>
+            {allSeries.map((sr) => {
+              const isSel = createBinderState.selectedSeries.includes(sr);
+              return (
+                <TouchableOpacity
+                  key={sr}
+                  style={styles.collectionItem}
+                  onPress={() => toggleSeries(sr)}
+                >
+                  <Text style={[styles.collectionItemText, isSel && { color: "#66BB6A" }]}>
+                    {sr}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: "#999", marginTop: 14, alignSelf: "center" }]}
+            onPress={onClose}
+          >
+            <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+            <Text style={styles.buttonText}>Fechar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** ============= Funções para buscar cartas (mesmo do original) ============= */
+async function doFetchWithMultiOptions(
+  st: CreatingBinderState,
+  allCollections: CollectionData[]
+): Promise<MinimalCardData[]> {
+  // Monta array final de results
+  let finalArr: MinimalCardData[] = [];
+
+  if (st.binderType === "general") {
+    // sem fetch
+    return [];
+  }
+
+  if (st.binderType === "master") {
+    // Precisamos de sets e series => combos
+    if (st.selectedSets.length === 0 && st.selectedSeries.length === 0) {
+      Alert.alert("Aviso", "Nenhuma coleção ou série selecionada => sem busca");
+      return [];
+    }
+    // Monta combos
+    const combos = buildSetSeriesCombos(st.selectedSets, st.selectedSeries);
+    let combined: MinimalCardData[] = [];
+    for (const c of combos) {
+      const partial = await fetchApi(c);
+      combined.push(...partial);
+    }
+    // Filtra rarities (se existirem)
+    if (st.selectedRarities.length > 0) {
+      combined = combined.filter(
+        (card) => card.rarity && st.selectedRarities.includes(card.rarity)
+      );
+    }
+    finalArr = unifyResults(combined);
+  } else if (st.binderType === "pokemon") {
+    // Nome do Pokémon é obrigatório
+    if (!st.pokemonName.trim()) {
+      throw new Error("Digite o nome do Pokémon.");
+    }
+    const baseQ = encodeURIComponent(`name:"${st.pokemonName}" supertype:pokemon`);
+    const combos = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, baseQ);
+
+    let combined: MinimalCardData[] = [];
+    if (combos.length === 0) {
+      const globalUrl = `https://api.pokemontcg.io/v2/cards?q=${baseQ}&pageSize=500`;
+      const dataAll = await fetchApi(globalUrl);
+      combined.push(...dataAll);
+    } else {
+      for (const c of combos) {
+        const partial = await fetchApi(c);
+        combined.push(...partial);
+      }
+    }
+    finalArr = unifyResults(combined);
+  } else if (st.binderType === "trainer") {
+    let finalTrainers: MinimalCardData[] = [];
+    if (st.trainerCategory === "all") {
+      // combos p/ supertype:trainer e combos p/ supertype:energy
+      const combos1 = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, "supertype:Trainer");
+      const combos2 = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, "supertype:energy");
+
+      if (combos1.length === 0) {
+        const allTrainer = await fetchApi(
+          `https://api.pokemontcg.io/v2/cards?q=supertype:Trainer&pageSize=500`
+        );
+        finalTrainers.push(...allTrainer);
+      } else {
+        for (const cUrl of combos1) {
+          const partial = await fetchApi(cUrl);
+          finalTrainers.push(...partial);
+        }
+      }
+
+      if (combos2.length === 0) {
+        const allEnergy = await fetchApi(
+          `https://api.pokemontcg.io/v2/cards?q=supertype:energy&pageSize=500`
+        );
+        finalTrainers.push(...allEnergy);
+      } else {
+        for (const cUrl of combos2) {
+          const partial2 = await fetchApi(cUrl);
+          finalTrainers.push(...partial2);
+        }
+      }
+    } else {
+      // "energy" => supertype:energy
+      const catQuery = "supertype:energy";
+      const combos = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, catQuery);
+
+      if (combos.length === 0) {
+        const allUrl = `https://api.pokemontcg.io/v2/cards?q=${catQuery}&pageSize=500`;
+        const allData = await fetchApi(allUrl);
+        finalTrainers.push(...allData);
+      } else {
+        for (const cUrl of combos) {
+          const partial = await fetchApi(cUrl);
+          finalTrainers.push(...partial);
+        }
+      }
+    }
+    // Rarities
+    if (st.selectedRarities.length > 0) {
+      finalTrainers = finalTrainers.filter(
+        (card) => card.rarity && st.selectedRarities.includes(card.rarity)
+      );
+    }
+    finalArr = unifyResults(finalTrainers);
+  }
+
+  return finalArr;
+}
+
+function buildSetSeriesCombos(
+  sets: string[],
+  series: string[],
+  baseQuery?: string
+): string[] {
+  let result: string[] = [];
+  if (sets.length === 0 && series.length === 0) {
+    return [];
+  }
+
+  if (sets.length > 0 && series.length > 0) {
+    for (const stId of sets) {
+      for (const sr of series) {
+        let q = "";
+        if (baseQuery) {
+          q = `https://api.pokemontcg.io/v2/cards?q=${baseQuery} set.id:"${stId}" set.series:"${encodeURIComponent(
+            sr
+          )}"&pageSize=500`;
+        } else {
+          q = `https://api.pokemontcg.io/v2/cards?q=set.id:"${stId}" set.series:"${encodeURIComponent(
+            sr
+          )}"&pageSize=500`;
+        }
+        result.push(q);
+      }
+    }
+  } else if (sets.length > 0) {
+    for (const stId of sets) {
+      let q = "";
+      if (baseQuery) {
+        q = `https://api.pokemontcg.io/v2/cards?q=${baseQuery} set.id:"${stId}"&pageSize=500`;
+      } else {
+        q = `https://api.pokemontcg.io/v2/cards?q=set.id:"${stId}"&pageSize=500`;
+      }
+      result.push(q);
+    }
+  } else if (series.length > 0) {
+    for (const sr of series) {
+      let q = "";
+      if (baseQuery) {
+        q = `https://api.pokemontcg.io/v2/cards?q=${baseQuery} set.series:"${encodeURIComponent(
+          sr
+        )}"&pageSize=500`;
+      } else {
+        q = `https://api.pokemontcg.io/v2/cards?q=set.series:"${encodeURIComponent(
+          sr
+        )}"&pageSize=500`;
+      }
+      result.push(q);
+    }
+  }
+  return result;
+}
+
+async function fetchApi(url: string): Promise<MinimalCardData[]> {
+  console.log("(NOBRIDGE) LOG  Fetching => ", url);
+  const resp = await fetch(url);
+  const json = await resp.json();
+  if (json && json.data) {
+    const arr: MinimalCardData[] = json.data.map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      images: c.images,
+      rarity: c.rarity || "",
+      number: c.number,
+      releaseDate: c.set?.releaseDate,
+      setId: c.set?.id,
+      setSeries: c.set?.series,
+    }));
+    return arr;
+  }
+  return [];
+}
+
+function unifyResults(cards: MinimalCardData[]): MinimalCardData[] {
+  const seen = new Set<string>();
+  const result: MinimalCardData[] = [];
+  for (const c of cards) {
+    if (!seen.has(c.id)) {
+      seen.add(c.id);
+      result.push(c);
+    }
+  }
+  return result;
+}
+
+function labelForSort(opt: BinderSortOption) {
+  switch (opt) {
+    case "number":
+      return "Número (Padrão)";
+    case "name":
+      return "Nome";
+    case "rarity":
+      return "Raridade";
+    case "quantity":
+      return "Quantidade";
+    case "release":
+      return "Lançamento";
+    default:
+      return opt;
   }
 }
 
-/** ESTILOS */
+/** ====== ESTILOS ====== */
 const DARK = "#1E1E1E";
 const PRIMARY = "#E3350D";
 const GRAY = "#2A2A2A";
@@ -1020,8 +1314,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     alignItems: "center",
   },
-
-  /** HOME - GRID BINDERS */
+  /** HOME - Grid Binders */
   gridContainer: {
     paddingHorizontal: 8,
     paddingBottom: 60,
@@ -1057,226 +1350,250 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 4,
   },
-  binderProgress: {
-    color: "#66BB6A",
-    fontSize: 12,
+  binderProgress:{
+    color:"#66BB6A",
+    fontSize:12,
   },
-  deleteButton: {
+  deleteButton:{
+    position:"absolute",
+    top:6,
+    right:6,
+    backgroundColor:"#900",
+    borderRadius:4,
+    padding:4,
+  },
+
+  /** DETALHE BINDER */
+  binderDetailHeader:{
+    flexDirection:"row",
+    backgroundColor:"#000",
+    paddingHorizontal:10,
+    paddingVertical:10,
+    alignItems:"center",
+    justifyContent:"space-between",
+  },
+  binderDetailTitle:{
+    color:"#FFF",
+    fontWeight:"bold",
+    fontSize:16,
+  },
+  sortIconButton:{
+    padding:4,
+  },
+
+  /** FLATLIST 3 colunas */
+  columnWrapper:{
+    justifyContent:"flex-start",
+    marginHorizontal:4,
+    marginVertical:4,
+  },
+  cardItemContainer:{
+    backgroundColor:"#222",
+    borderRadius:8,
+    padding:4,
+    alignItems:"center",
+  },
+  cardImageWrapper:{
+    position:"relative",
+  },
+  grayOverlay:{
+    position:"absolute",
+    top:0,
+    left:0,
+    width:"100%",
+    height:"100%",
+    backgroundColor:"rgba(0,0,0,0.5)",
+    borderRadius:4,
+  },
+  cardNameGrid:{
+    color:"#FFF",
+    fontSize:13,
+    textAlign:"center",
+    marginTop:4,
+  },
+  cardRarityGrid:{
+    color:"#CCC",
+    fontSize:11,
+    textAlign:"center",
+  },
+  qtyRow:{
+    flexDirection:"row",
+    alignItems:"center",
+    marginTop:4,
+  },
+  qtyButton:{
+    backgroundColor:"#333",
+    borderRadius:6,
+    padding:4,
+  },
+  cardQuantityText:{
+    color:"#66BB6A",
+    fontSize:12,
+    fontWeight:"bold",
+    marginHorizontal:6,
+  },
+
+  /** MODAL CRIAÇÃO PASSO A PASSO */
+  modalStepContainer:{
+    padding:16,
+    alignItems:"center",
+  },
+  modalTitle:{
+    color:"#FFF",
+    fontSize:20,
+    fontWeight:"bold",
+    marginBottom:16,
+    textAlign:"center",
+  },
+  label:{
+    color:"#FFF",
+    fontSize:14,
+    marginBottom:6,
+    marginTop:8,
+    alignSelf:"flex-start",
+  },
+  modalInput:{
+    width:"100%",
+    backgroundColor:"#444",
+    borderRadius:6,
+    paddingHorizontal:8,
+    paddingVertical:6,
+    color:"#FFF",
+    marginBottom:6,
+  },
+  typeIconsRow:{
+    flexDirection:"row",
+    flexWrap:"wrap",
+    justifyContent:"space-around",
+    marginTop:12,
+  },
+  typeIconOption:{
+    width:80,
+    backgroundColor:"#444",
+    borderRadius:6,
+    padding:8,
+    margin:8,
+    alignItems:"center",
+  },
+  typeIconText:{
+    color:"#FFF",
+    fontSize:12,
+    textAlign:"center",
+    fontWeight:"bold",
+  },
+  selectCollectionButton:{
+    flexDirection:"row",
+    backgroundColor:"#555",
+    borderRadius:6,
+    paddingHorizontal:10,
+    paddingVertical:8,
+    alignItems:"center",
+    marginBottom:6,
+    width:"100%",
+  },
+  button:{
+    flexDirection:"row",
+    backgroundColor:PRIMARY,
+    borderRadius:6,
+    paddingHorizontal:12,
+    paddingVertical:8,
+    alignItems:"center",
+  },
+  buttonText:{
+    color:"#FFF",
+    fontWeight:"bold",
+  },
+  rarityButton:{
+    backgroundColor:"#444",
+    borderRadius:6,
+    paddingHorizontal:10,
+    paddingVertical:4,
+    marginRight:6,
+    marginBottom:6,
+  },
+  rarityButtonActive:{
+    backgroundColor:"#666",
+  },
+  trainerCatButton:{
+    flexDirection:"row",
+    backgroundColor:"#444",
+    borderRadius:6,
+    paddingHorizontal:10,
+    paddingVertical:8,
+    marginRight:6,
+    marginBottom:6,
+    alignItems:"center",
+  },
+  trainerCatButtonActive:{
+    backgroundColor:"#666",
+  },
+
+  /** Overlays */
+  overlay:{
+    flex:1,
+    backgroundColor:"rgba(0,0,0,0.7)",
+    justifyContent:"center",
+    alignItems:"center",
+  },
+  sortModalContainer:{
+    backgroundColor:DARK,
+    width:"80%",
+    borderRadius:8,
+    padding:16,
+    alignItems:"center",
+  },
+  removeCardButton: {
     position: "absolute",
     top: 6,
     right: 6,
     backgroundColor: "#900",
     borderRadius: 4,
     padding: 4,
+    zIndex: 10,
+  },  
+  sortOptionButton:{
+    paddingVertical:6,
+    width:"100%",
+    marginTop:8,
+  },
+  sortOptionText:{
+    color:"#FFF",
+    fontSize:14,
   },
 
-  /** DETALHE - BINDER */
-  binderDetailHeader: {
-    flexDirection: "row",
-    backgroundColor: "#000",
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    justifyContent: "space-between",
+  /** MultiCollectionsModal */
+  collectionModalContainer:{
+    backgroundColor:DARK,
+    width:"90%",
+    borderRadius:8,
+    padding:16,
   },
-  binderDetailTitle: {
-    color: "#FFF",
-    fontWeight: "bold",
-    fontSize: 16,
+  searchContainer:{
+    flexDirection:"row",
+    backgroundColor:GRAY,
+    borderRadius:8,
+    alignItems:"center",
+    paddingHorizontal:10,
   },
-  sortIconButton: {
-    padding: 4,
+  searchInput:{
+    flex:1,
+    color:"#FFF",
+    paddingVertical:6,
   },
-
-  /** FLATLIST 3 colunas */
-  columnWrapper: {
-    justifyContent: "flex-start",
-    marginHorizontal: 4,
-    marginVertical: 4,
+  collectionItem:{
+    paddingVertical:6,
+    borderBottomColor:"#444",
+    borderBottomWidth:1,
   },
-  cardItemContainer: {
-    backgroundColor: "#222",
-    borderRadius: 8,
-    padding: 4,
-    alignItems: "center",
-  },
-  cardImageWrapper: {
-    position: "relative",
-  },
-  grayOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    borderRadius: 4,
-  },
-  cardNameGrid: {
-    color: "#FFF",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  cardRarityGrid: {
-    color: "#CCC",
-    fontSize: 11,
-    textAlign: "center",
-  },
-  qtyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  qtyButton: {
-    backgroundColor: "#333",
-    borderRadius: 6,
-    padding: 4,
-  },
-  cardQuantityText: {
-    color: "#66BB6A",
-    fontSize: 12,
-    fontWeight: "bold",
-    marginHorizontal: 6,
-  },
-
-  /** MODAL CRIAÇÃO BONITA */
-  modalStepContainer: {
-    padding: 16,
-    alignItems: "center",
-  },
-  modalTitle: {
-    color: "#FFF",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  label: {
-    color: "#FFF",
-    fontSize: 14,
-    marginBottom: 6,
-    marginTop: 8,
-    alignSelf: "flex-start",
-  },
-  modalInput: {
-    width: "100%",
-    backgroundColor: "#444",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    color: "#FFF",
-    marginBottom: 6,
-  },
-  typeIconsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-around",
-    marginTop: 12,
-  },
-  typeIconOption: {
-    width: 80,
-    backgroundColor: "#444",
-    borderRadius: 6,
-    padding: 8,
-    margin: 8,
-    alignItems: "center",
-  },
-  typeIconText: {
-    color: "#FFF",
-    fontSize: 12,
-    textAlign: "center",
-    fontWeight: "bold",
-  },
-
-  /** Botão p/ Collection */
-  selectCollectionButton: {
-    flexDirection: "row",
-    backgroundColor: "#555",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    alignItems: "center",
-    marginBottom: 6,
-    width: "100%",
-  },
-  button: {
-    flexDirection: "row",
-    backgroundColor: PRIMARY,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignItems: "center",
-  },
-  buttonText: {
-    color: "#FFF",
-    fontWeight: "bold",
-  },
-
-  /** Trainer Category */
-  trainerCatButton: {
-    flexDirection: "row",
-    backgroundColor: "#444",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginRight: 6,
-    marginBottom: 6,
-    alignItems: "center",
-  },
-  trainerCatButtonActive: {
-    backgroundColor: "#666",
-  },
-
-  /** MODAL Overlay (Collections + Sort) */
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  collectionModalContainer: {
-    backgroundColor: DARK,
-    width: "80%",
-    borderRadius: 8,
-    padding: 16,
-    alignItems: "center",
-  },
-  sortModalContainer: {
-    backgroundColor: DARK,
-    width: "80%",
-    borderRadius: 8,
-    padding: 16,
-    alignItems: "center",
-  },
-  searchContainer: {
-    flexDirection: "row",
-    backgroundColor: GRAY,
-    borderRadius: 8,
-    alignItems: "center",
-    paddingHorizontal: 10,
-  },
-  searchInput: {
-    flex: 1,
-    color: "#FFF",
-    paddingVertical: 6,
-  },
-  collectionItem: {
-    paddingVertical: 6,
-    borderBottomColor: "#444",
-    borderBottomWidth: 1,
-  },
-  collectionItemText: {
-    color: "#FFF",
-    fontSize: 14,
-  },
-  sortOptionButton: {
-    paddingVertical: 6,
-    width: "100%",
-    marginTop: 8,
-  },
-  sortOptionText: {
-    color: "#FFF",
-    fontSize: 14,
+  collectionItemText:{
+    color:"#FFF",
+    fontSize:14,
   },
 });
+
+/** 
+ * FIM 
+ * Esse código evita duplicar logs/fetches e unifica localmente,
+ * permitindo multi-coleção, multi-série, multi-raridade e sem
+ * duplicar queries.
+ */
