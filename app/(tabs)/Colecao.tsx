@@ -18,6 +18,7 @@ import * as Animatable from "react-native-animatable";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import useBackupManager from "../../components/BackupManager";
 
 /** Tipos */
 type BinderType = "master" | "pokemon" | "trainer" | "general";
@@ -111,7 +112,11 @@ function getBinderColor(type: BinderType) {
 }
 
 export default function CollectionsScreen() {
-  const [binders, setBinders] = useState<Binder[]>([]);
+  const [binders, setBinders] = useState<Binder[]>([])
+  const { restoredData } = useBackupManager({
+    userId: "localUser",
+    binders,
+  });
   const [selectedBinder, setSelectedBinder] = useState<Binder | null>(null);
 
   const [collections, setCollections] = useState<CollectionData[]>([]);
@@ -166,11 +171,15 @@ export default function CollectionsScreen() {
       const raw = await AsyncStorage.getItem("@userBinders");
       if (raw) {
         setBinders(JSON.parse(raw));
+      } else if (restoredData?.binders?.length) {
+        setBinders(restoredData.binders);
+        await AsyncStorage.setItem("@userBinders", JSON.stringify(restoredData.binders));
+        console.log("Restaurado via backup local.");
       }
     } catch (err) {
       console.log("Erro loadBinders:", err);
     }
-  }
+  }  
 
   async function saveBindersToStorage(updated: Binder[]) {
     setBinders(updated);
@@ -587,7 +596,7 @@ export default function CollectionsScreen() {
           <View style={styles.gridWrapper}>
             {binders.map((binder) => {
               const total = binder.allCards.length;
-              const hasCount = Object.values(binder.quantityMap).reduce((a, b) => a + b, 0);
+              const hasCount = binder.allCards.filter(c => binder.quantityMap[c.id] > 0).length;
               const perc = total > 0 ? Math.round((hasCount / total) * 100) : 0;
 
               return (
