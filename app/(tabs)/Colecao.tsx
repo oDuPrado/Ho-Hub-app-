@@ -100,6 +100,16 @@ interface CreatingBinderState {
   fetchedCards: MinimalCardData[];
 }
 
+function getBinderColor(type: BinderType) {
+  switch (type) {
+    case "master": return "#3E3A1F";     // dourado escuro (Master)
+    case "pokemon": return "#1E3A5F";    // azul escuro (Pokémon)
+    case "trainer": return "#4A1C1C";    // vermelho escuro (Trainer)
+    case "general": return "#3B2945";    // roxo escuro (Geral)
+    default: return "#2A2A2A";           // fallback neutro escuro
+  }
+}
+
 export default function CollectionsScreen() {
   const [binders, setBinders] = useState<Binder[]>([]);
   const [selectedBinder, setSelectedBinder] = useState<Binder | null>(null);
@@ -107,6 +117,8 @@ export default function CollectionsScreen() {
   const [collections, setCollections] = useState<CollectionData[]>([]);
   const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [searchBinderQuery, setSearchBinderQuery] = useState("");
+  const [showSearchBar, setShowSearchBar] = useState(false);
 
   const [binderSort, setBinderSort] = useState<BinderSortOption>("number"); // default
   const [createBinderState, setCreateBinderState] = useState<CreatingBinderState>({
@@ -122,6 +134,18 @@ export default function CollectionsScreen() {
     loadingCards: false,
     fetchedCards: [],
   });
+
+  const [editBinderState, setEditBinderState] = useState<{
+    visible: boolean;
+    binder: Binder | null;
+    name: string;
+    type: BinderType;
+  }>({
+    visible: false,
+    binder: null,
+    name: "",
+    type: "general",
+  });  
 
   /**
    * Recarregar binders sempre que a tela estiver em foco.
@@ -220,6 +244,40 @@ export default function CollectionsScreen() {
       },
     ]);
   }
+
+  function openEditBinderModal(binder: Binder) {
+    setEditBinderState({
+      visible: true,
+      binder,
+      name: binder.name,
+      type: binder.binderType,
+    });
+  }
+  
+  function closeEditBinderModal() {
+    setEditBinderState({
+      visible: false,
+      binder: null,
+      name: "",
+      type: "general",
+    });
+  }
+  
+  async function handleSaveBinderEdits() {
+    if (!editBinderState.binder) return;
+  
+    const updated = binders.map((b) =>
+      b.id === editBinderState.binder!.id
+        ? { ...b, name: editBinderState.name.trim(), binderType: editBinderState.type }
+        : b
+    );
+  
+    await AsyncStorage.setItem("@userBinders", JSON.stringify(updated));
+    setBinders(updated);
+    closeEditBinderModal();
+    Alert.alert("Sucesso", "Binder atualizado com sucesso!");
+  }
+  
 
   // ========= CRIAÇÃO DE BINDER =========
   function selectBinderType(tp: BinderType) {
@@ -377,8 +435,31 @@ export default function CollectionsScreen() {
 
   const binderDisplayCards = useMemo(() => {
     if (!selectedBinder) return [];
-    const arr = [...selectedBinder.allCards];
+  
+    const query = searchBinderQuery.toLowerCase().trim();
+    let arr = [...selectedBinder.allCards];
+  
+    if (query) {
+      arr = arr.filter((card) => {
+        const name = card.name?.toLowerCase() || "";
+        const number = card.number?.toLowerCase() || "";
+        const set = card.setId?.toLowerCase() || "";
+        return (
+          name.includes(query) ||
+          number.includes(query) ||
+          set.includes(query)
+        );
+      });
+    }
 
+    function parseCardNumber(numStr?: string): number {
+      if (!numStr) return 9999;
+      const match = numStr.match(/^(\d+)/);
+      if (!match) return 9999;
+      return parseInt(match[1], 10);
+    }
+    
+  
     switch (binderSort) {
       case "number":
         arr.sort((a, b) => parseCardNumber(a.number) - parseCardNumber(b.number));
@@ -402,15 +483,10 @@ export default function CollectionsScreen() {
         );
         break;
     }
+  
     return arr;
-  }, [selectedBinder, binderSort]);
-
-  function parseCardNumber(numStr?: string): number {
-    if (!numStr) return 9999;
-    const match = numStr.match(/^(\d+)/);
-    if (!match) return 9999;
-    return parseInt(match[1], 10);
-  }
+  }, [selectedBinder, binderSort, searchBinderQuery]);
+  
 
   function renderCardItem({ item }: { item: MinimalCardData }) {
     if (!selectedBinder) return null;
@@ -516,13 +592,25 @@ export default function CollectionsScreen() {
 
               return (
                 <Animatable.View
-                  key={binder.id}
-                  style={styles.binderCard}
-                  animation="fadeInUp"
-                  duration={600}
-                >
+                    key={binder.id}
+                    style={[
+                      styles.binderCard,
+                      { backgroundColor: getBinderColor(binder.binderType) }
+                    ]}
+                    animation="fadeInUp"
+                    duration={600}
+                  >
                   <TouchableOpacity style={styles.binderInner} onPress={() => openBinderDetail(binder)}>
-                    <Ionicons name="albums" size={40} color="#FFF" style={{ marginBottom: 8 }} />
+                  {binder.allCards.length > 0 ? (
+                  <Image
+                    source={{ uri: binder.allCards[0].images?.small }}
+                    style={{ width: 60, height: 85, marginBottom: 8, borderRadius: 4 }}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <Ionicons name="albums" size={40} color="#FFF" style={{ marginBottom: 8 }} />
+                )}
+
                     <Text style={styles.binderName}>{binder.name}</Text>
                     <Text style={styles.binderType}>
                       Tipo: {binder.binderType.toUpperCase()}
@@ -543,6 +631,13 @@ export default function CollectionsScreen() {
                   >
                     <Ionicons name="trash" size={16} color="#FFF" />
                   </TouchableOpacity>
+
+                  <TouchableOpacity
+                  style={[styles.deleteButton, { top: 36, backgroundColor: "#2980b9" }]}
+                  onPress={() => openEditBinderModal(binder)}
+                >
+                  <Ionicons name="create" size={16} color="#FFF" />
+                </TouchableOpacity>
                 </Animatable.View>
               );
             })}
@@ -552,22 +647,51 @@ export default function CollectionsScreen() {
 
       {/* DETALHE DO BINDER */}
       {selectedBinder && (
-        <View style={{ flex: 1, backgroundColor: "#111" }}>
-          <View style={styles.binderDetailHeader}>
-            <TouchableOpacity
-              style={{ flexDirection: "row", alignItems: "center" }}
-              onPress={closeBinderDetail}
-            >
-              <Ionicons name="arrow-back" size={22} color="#FFF" />
-              <Text style={{ color: "#FFF", marginLeft: 6 }}>Voltar</Text>
-            </TouchableOpacity>
+      <View style={{ flex: 1, backgroundColor: "#111" }}>
+        {/* HEADER do detalhe */}
+        <View style={styles.binderDetailHeader}>
+          {/* Voltar */}
+          <TouchableOpacity
+            style={{ flexDirection: "row", alignItems: "center" }}
+            onPress={closeBinderDetail}
+          >
+            <Ionicons name="arrow-back" size={22} color="#FFF" />
+            <Text style={{ color: "#FFF", marginLeft: 6 }}>Voltar</Text>
+          </TouchableOpacity>
 
-            <Text style={styles.binderDetailTitle}>{selectedBinder.name}</Text>
+          {/* Nome do binder (centralizado) */}
+          <Text style={[styles.binderDetailTitle, { flex: 1, textAlign: "center" }]}>
+            {selectedBinder.name}
+          </Text>
+
+          {/* Botões do canto direito */}
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <TouchableOpacity
+              style={{ paddingHorizontal: 6 }}
+              onPress={() => setShowSearchBar((prev) => !prev)}
+            >
+              <Ionicons name="search" size={20} color="#FFF" />
+            </TouchableOpacity>
 
             <TouchableOpacity style={styles.sortIconButton} onPress={openSortModal}>
               <Ionicons name="settings" size={20} color="#FFF" />
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* BARRA DE BUSCA */}
+        {showSearchBar && (
+          <Animatable.View animation="fadeInDown" style={[styles.searchContainer, { marginHorizontal: 10, marginBottom: 6 }]}>
+            <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar pelo nome do Pokemon..."
+              placeholderTextColor="#999"
+              value={searchBinderQuery}
+              onChangeText={setSearchBinderQuery}
+            />
+          </Animatable.View>
+        )}
 
           <FlatList
             data={binderDisplayCards}
@@ -912,6 +1036,67 @@ export default function CollectionsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* MODAL de Edição de Binder */}
+      <Modal
+        visible={editBinderState.visible}
+        animationType="slide"
+        transparent
+        onRequestClose={closeEditBinderModal}
+      >
+        <View style={styles.overlay}>
+          <View style={styles.collectionModalContainer}>
+            <Text style={styles.modalTitle}>Editar Binder</Text>
+
+            <Text style={styles.label}>Nome</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editBinderState.name}
+              onChangeText={(txt) =>
+                setEditBinderState((prev) => ({ ...prev, name: txt }))
+              }
+            />
+
+            <Text style={styles.label}>Tipo</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+              {(["master", "pokemon", "trainer", "general"] as BinderType[]).map((tp) => {
+                const selected = editBinderState.type === tp;
+                return (
+                  <TouchableOpacity
+                    key={tp}
+                    onPress={() => setEditBinderState((prev) => ({ ...prev, type: tp }))}
+                    style={[
+                      styles.trainerCatButton,
+                      selected && styles.trainerCatButtonActive,
+                    ]}
+                  >
+                    <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                      {tp.toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 14 }]}
+              onPress={handleSaveBinderEdits}
+            >
+              <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+              <Text style={styles.buttonText}>Salvar Alterações</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: "#999", marginTop: 10 }]}
+              onPress={closeEditBinderModal}
+            >
+              <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+              <Text style={styles.buttonText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
 
       {/* MODAL multi-coleções e multi-séries */}
       {collectionsModalVisible && (

@@ -127,8 +127,12 @@ async function loadTradesForLeague(lId: string, isActive: boolean, cache: TradeP
         snap.forEach((docSnap) => {
             const data = docSnap.data();
             if (data.createdAt && now - data.createdAt > 3 * 86400000) {
-                return; // Remove posts com mais de 3 dias
-            }
+              // Excluir diretamente do Firestore
+              deleteDoc(doc(db, `leagues/${lId}/trades`, docSnap.id)).catch((err) =>
+                console.log("Erro ao excluir post antigo:", err)
+              );
+              return;
+            }            
             tempPosts.push({
                 id: docSnap.id,
                 cardName: data.cardName,

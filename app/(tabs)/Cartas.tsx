@@ -305,9 +305,9 @@ export default function CardsSearchScreen() {
       }
 
       /** Caso contrário, busca por nome */
-      const nameUrl = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(
-        text
-      )}"`;
+      const nameUrl = selectedCollectionId
+      ? `https://api.pokemontcg.io/v2/cards?q=set.id:"${selectedCollectionId}" name:"${encodeURIComponent(text)}"`
+      : `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
       const resp2 = await fetch(nameUrl);
       const data2 = await resp2.json();
       if (data2 && data2.data) setFilteredCards(data2.data);
@@ -752,7 +752,9 @@ export default function CardsSearchScreen() {
         <TouchableOpacity style={styles.filterButton} onPress={openCollectionModal}>
           <Ionicons name="albums" size={18} color="#FFF" style={{ marginRight: 6 }} />
           <Text style={styles.filterButtonText}>
-            {selectedCollectionId ? "Mudar Coleção" : "Filtrar Coleção"}
+            {selectedCollectionId
+              ? `Mudar Coleção: ${selectedCollectionInfo?.name || ""}`
+              : "Filtrar Coleção"}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1445,12 +1447,25 @@ export default function CardsSearchScreen() {
             <ScrollView style={{ maxHeight: 300, width: "100%", marginTop: 10 }}>
               {filteredCollectionList.map((col) => (
                 <TouchableOpacity
-                  key={col.id}
-                  style={styles.collectionItem}
-                  onPress={() => handleSelectCollection(col.id)}
-                >
+                key={col.id}
+                style={[
+                  styles.collectionItem,
+                  selectedCollectionId === col.id && { backgroundColor: "#444" },
+                ]}
+                onPress={() => handleSelectCollection(col.id)}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <Text style={styles.collectionItemText}>{col.name}</Text>
-                </TouchableOpacity>
+                  {selectedCollectionId === col.id && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color="#4CAF50"
+                      style={{ marginLeft: 8 }}
+                    />
+                  )}
+                </View>
+              </TouchableOpacity>              
               ))}
             </ScrollView>
 
@@ -1546,41 +1561,50 @@ const styles = StyleSheet.create({
   },
 
   collectionInfoContainer: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 10,
-    marginHorizontal: 6,
-    marginBottom: 6,
+    backgroundColor: "#252525",
+    borderRadius: 12,
+    padding: 14,
+    marginHorizontal: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#444",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   collectionInfoTitle: {
     color: "#FFD700",
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "bold",
-    marginBottom: 4,
-  },
+    marginBottom: 6,
+  },  
   collectionInfoText: {
-    color: "#EEE",
-    fontSize: 12,
+    color: "#DDD",
+    fontSize: 13,
+    marginBottom: 2,
   },
   collectionLogo: {
-    width: 80,
-    height: 40,
-    alignSelf: "flex-start",
+    width: 100,
+    height: 50,
+    alignSelf: "flex-end",
     marginTop: 4,
   },
   progressBar: {
-    height: 8,
-    backgroundColor: "#777",
-    borderRadius: 4,
-    marginTop: 4,
+    height: 10,
+    backgroundColor: "#333",
+    borderRadius: 6,
+    marginTop: 6,
     overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#666",
   },
   progressFill: {
-    height: 8,
+    height: 10,
     backgroundColor: "#4CAF50",
-    borderRadius: 4,
+    borderRadius: 6,
   },
-
   gridContainer: {
     paddingHorizontal: 8,
     paddingBottom: 60,
@@ -1648,20 +1672,30 @@ const styles = StyleSheet.create({
   modalScroll: {
     padding: 20,
     alignItems: "center",
+    backgroundColor: "#1A1A1A",
   },
   modalTitle: {
-    fontSize: 22,
-    color: SECONDARY,
+    fontSize: 24,
+    color: "#FFD700",
     fontWeight: "bold",
-    marginBottom: 16,
+    marginBottom: 12,
     textAlign: "center",
+    textTransform: "uppercase",
   },
+  
   modalImage: {
-    width: 160,
-    height: 220,
-    marginBottom: 20,
-    alignSelf: "center",
+    width: 180,
+    height: 250,
+    marginBottom: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#FFD700",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
+  
   modalText: {
     color: SECONDARY,
     fontSize: 14,
@@ -1673,23 +1707,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   rarityCard: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 10,
-    margin: 5,
-    width: 130,
+    backgroundColor: "#2E2E2E",
+    borderRadius: 10,
+    padding: 12,
+    margin: 6,
+    width: 150,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#555",
   },
   rarityCardTitle: {
     fontSize: 14,
-    color: PRIMARY,
+    color: "#FF9800",
     fontWeight: "bold",
-    marginBottom: 6,
+    marginBottom: 8,
+    textTransform: "capitalize",
   },
   rarityCardPrice: {
-    color: SECONDARY,
-    fontSize: 12,
-  },
+    color: "#DDD",
+    fontSize: 13,
+    marginBottom: 2,
+  },  
   linkButton: {
     flexDirection: "row",
     backgroundColor: PRIMARY,
@@ -1713,18 +1751,21 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flexDirection: "row",
-    backgroundColor: "#4A4A4A",
-    borderRadius: 6,
+    backgroundColor: "#303030",
+    borderRadius: 8,
     paddingVertical: 10,
     paddingHorizontal: 20,
     alignItems: "center",
-    marginHorizontal: 4,
+    marginHorizontal: 6,
+    borderWidth: 1,
+    borderColor: "#666",
   },
   actionButtonText: {
-    color: SECONDARY,
-    fontSize: 14,
+    color: "#FFF",
+    fontSize: 15,
     fontWeight: "bold",
-  },
+    marginLeft: 6,
+  },  
   closeButton: {
     flexDirection: "row",
     backgroundColor: PRIMARY,
@@ -1849,14 +1890,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   collectionItem: {
-    paddingVertical: 8,
+    paddingVertical: 12, // tava 8
+    paddingHorizontal: 10,
     borderBottomColor: "#444",
     borderBottomWidth: 1,
-  },
+  },  
   collectionItemText: {
     color: "#FFF",
-    fontSize: 14,
-  },
+    fontSize: 15,
+    fontWeight: "bold",
+  },  
   cardFlagWrapper: {
     position: "absolute",
     top: 6,
