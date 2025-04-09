@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import {
   View,
   Text,
@@ -13,19 +19,28 @@ import {
   ActivityIndicator,
   Dimensions,
   FlatList,
+  Animated,
+  Easing,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from "react-native";
 import * as Animatable from "react-native-animatable";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import useBackupManager from "../../components/BackupManager";
+import type { BackupData, BackupBinder } from "../../components/BackupManager";
+import DraggableFlatList, {
+  RenderItemParams,
+} from "react-native-draggable-flatlist";
 
 /** Tipos */
 type BinderType = "master" | "pokemon" | "trainer" | "general";
 type TrainerCategory = "energy" | "all"; // agora SÓ "energy" e "all"
 type BinderSortOption = "number" | "name" | "rarity" | "quantity" | "release";
 
-interface MinimalCardData {
+export interface MinimalCardData {
   id: string;
   name: string;
   images?: {
@@ -46,6 +61,8 @@ interface Binder {
   createdAt: number;
   allCards: MinimalCardData[];
   quantityMap: Record<string, number>;
+  lastUpdatedAt?: string;
+  coverCardId?: string;
 }
 
 /** Lista “oficial” de raridades (ficou, mas não será usada em Pokémon) */
@@ -103,21 +120,234 @@ interface CreatingBinderState {
 
 function getBinderColor(type: BinderType) {
   switch (type) {
-    case "master": return "#3E3A1F";     // dourado escuro (Master)
-    case "pokemon": return "#1E3A5F";    // azul escuro (Pokémon)
-    case "trainer": return "#4A1C1C";    // vermelho escuro (Trainer)
-    case "general": return "#3B2945";    // roxo escuro (Geral)
-    default: return "#2A2A2A";           // fallback neutro escuro
+    case "master":
+      return "#3E3A1F"; // dourado escuro (Master)
+    case "pokemon":
+      return "#1E3A5F"; // azul escuro (Pokémon)
+    case "trainer":
+      return "#4A1C1C"; // vermelho escuro (Trainer)
+    case "general":
+      return "#3B2945"; // roxo escuro (Geral)
+    default:
+      return "#2A2A2A"; // fallback neutro escuro
   }
 }
 
 export default function CollectionsScreen() {
-  const [binders, setBinders] = useState<Binder[]>([])
-  const { restoredData } = useBackupManager({
+  useEffect(() => {
+    if (
+      Platform.OS === "android" &&
+      UIManager.setLayoutAnimationEnabledExperimental
+    ) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+  const [binders, setBinders] = useState<Binder[]>([]);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [sortBindersOption, setSortBindersOption] = useState<
+    "default" | "name" | "type" | "progress"
+  >("default");
+
+  const {
+    restoredData,
+    importBackup,
+    exportBackup,
+    writeBackup,
+    generateBackupFile,
+    readBackupFromFile,
+    getBindersFromBackupFile,
+    syncBackup,
+  } = useBackupManager({
     userId: "localUser",
-    binders,
+    binders: binders.map((b) => ({
+      ...b,
+      lastUpdatedAt: b.lastUpdatedAt || new Date(b.createdAt).toISOString(),
+    })),
   });
+
+  // Botões
+  function handleImportBackup() {
+    importBackup().then(() => {
+      setBackupModalVisible(false);
+      loadBindersFromStorage();
+    });
+  }
+
+  function handleExportBackup() {
+    exportBackup().then(() => {
+      setBackupModalVisible(false);
+    });
+  }
+
+  async function handleForceSync() {
+    const updatedBackupBinders = await syncBackup();
+
+    if (updatedBackupBinders) {
+      const fullBinders: Binder[] = updatedBackupBinders.map((b) => ({
+        ...b,
+        binderType: (["master", "pokemon", "trainer", "general"].includes(
+          b.binderType
+        )
+          ? b.binderType
+          : "general") as BinderType,
+        createdAt: b.createdAt || Date.now(),
+        allCards: b.allCards || [],
+        quantityMap: b.quantityMap || {},
+        lastUpdatedAt: b.lastUpdatedAt || new Date().toISOString(), // garante que sempre tem
+      }));
+
+      setBinders(fullBinders);
+      await AsyncStorage.setItem("@userBinders", JSON.stringify(fullBinders));
+    }
+
+    await generateBackupFile();
+    setBackupModalVisible(false);
+    console.log("Sincronização completa.");
+  }
+
+  function renderReorderItem({
+    item,
+    drag,
+    isActive,
+  }: RenderItemParams<Binder>) {
+    return (
+      <TouchableOpacity
+        onLongPress={drag}
+        disabled={isActive}
+        style={[
+          styles.binderCard,
+          {
+            backgroundColor: getBinderColor(item.binderType),
+            opacity: isActive ? 0.8 : 1,
+            width: "100%",
+          },
+        ]}
+      >
+        <Text style={styles.binderName}>{item.name}</Text>
+        <Text style={styles.binderReference}>{item.reference}</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  function autoSortBinders(option: "name" | "type" | "progress") {
+    // Cria uma cópia para ordenar
+    const sorted = [...binders];
+
+    if (option === "name") {
+      sorted.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (option === "type") {
+      sorted.sort((a, b) => a.binderType.localeCompare(b.binderType));
+    } else if (option === "progress") {
+      sorted.sort((a, b) => {
+        // Calcula a porcentagem de progresso para cada binder
+        const pA =
+          a.allCards.length > 0
+            ? Object.values(a.quantityMap).filter((q) => q > 0).length /
+              a.allCards.length
+            : 0;
+        const pB =
+          b.allCards.length > 0
+            ? Object.values(b.quantityMap).filter((q) => q > 0).length /
+              b.allCards.length
+            : 0;
+        return pB - pA;
+      });
+    }
+
+    // Se a ordem já estiver igual, não faz nada
+    const isSame = sorted.every((b, i) => b.id === binders[i]?.id);
+    if (!isSame) {
+      // Configura a animação para as próximas alterações de layout
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setBinders(sorted);
+      AsyncStorage.setItem("@userBinders", JSON.stringify(sorted));
+    }
+  }
+
+  async function handleSaveToBackup() {
+    try {
+      const raw: unknown = await readBackupFromFile();
+      console.log("DEBUG :: Conteúdo bruto do backup:", raw);
+
+      if (
+        !raw ||
+        typeof raw !== "object" ||
+        Array.isArray(raw) ||
+        !("binders" in raw)
+      ) {
+        Alert.alert("Erro", "Nenhum backup válido encontrado.");
+        return;
+      }
+
+      const currentBackup = raw as BackupData;
+
+      // Filtro só os binders válidos
+      const validBinders = currentBackup.binders.filter(
+        (b) => b.id && b.name && b.lastUpdatedAt
+      );
+
+      const backupMap = new Map<string, BackupBinder>(
+        validBinders.map((b) => [b.id, b] as const)
+      );
+
+      for (const binder of binders) {
+        if (backupMap.has(binder.id)) {
+          const old = backupMap.get(binder.id);
+          if (old) {
+            backupMap.set(binder.id, {
+              ...old,
+              ...binder,
+              lastUpdatedAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
+      const updatedData: BackupData & { userId: string } = {
+        userId: "localUser",
+        binders: Array.from(backupMap.values()),
+      };
+
+      await writeBackup(updatedData);
+      //Alert.alert("Backup", "Binders salvos no backup com sucesso!");
+      console.log("Binders atualizados no backup.");
+    } catch (err) {
+      console.log("Erro ao salvar no backup:", err);
+      //Alert.alert("Erro", "Falha ao salvar no backup.");
+    }
+  }
+
   const [selectedBinder, setSelectedBinder] = useState<Binder | null>(null);
+
+  // === ANIMAÇÃO DE PROGRESSO DO BINDER ===
+  const progressAnim = useRef(new Animated.Value(0)).current;
+
+  const perc =
+    selectedBinder && selectedBinder.allCards.length > 0
+      ? Math.round(
+          (selectedBinder.allCards.filter(
+            (c) => selectedBinder.quantityMap[c.id] > 0
+          ).length /
+            selectedBinder.allCards.length) *
+            100
+        )
+      : 0;
+
+  useEffect(() => {
+    Animated.timing(progressAnim, {
+      toValue: perc,
+      duration: 600,
+      useNativeDriver: false,
+      easing: Easing.out(Easing.ease),
+    }).start();
+  }, [perc]);
+
+  function getPercColor(p: number) {
+    if (p < 40) return "#E53935";
+    if (p < 70) return "#FFB300";
+    if (p < 99) return "#FFA726";
+    return "#4CAF50";
+  }
 
   const [collections, setCollections] = useState<CollectionData[]>([]);
   const [collectionsModalVisible, setCollectionsModalVisible] = useState(false);
@@ -126,19 +356,20 @@ export default function CollectionsScreen() {
   const [showSearchBar, setShowSearchBar] = useState(false);
 
   const [binderSort, setBinderSort] = useState<BinderSortOption>("number"); // default
-  const [createBinderState, setCreateBinderState] = useState<CreatingBinderState>({
-    visible: false,
-    step: 1,
-    name: "",
-    binderType: null,
-    selectedSets: [],
-    selectedSeries: [],
-    pokemonName: "",
-    trainerCategory: "all", // só all e energy agora
-    selectedRarities: [],
-    loadingCards: false,
-    fetchedCards: [],
-  });
+  const [createBinderState, setCreateBinderState] =
+    useState<CreatingBinderState>({
+      visible: false,
+      step: 1,
+      name: "",
+      binderType: null,
+      selectedSets: [],
+      selectedSeries: [],
+      pokemonName: "",
+      trainerCategory: "all", // só all e energy agora
+      selectedRarities: [],
+      loadingCards: false,
+      fetchedCards: [],
+    });
 
   const [editBinderState, setEditBinderState] = useState<{
     visible: boolean;
@@ -150,7 +381,9 @@ export default function CollectionsScreen() {
     binder: null,
     name: "",
     type: "general",
-  });  
+  });
+
+  const [backupModalVisible, setBackupModalVisible] = useState(false);
 
   /**
    * Recarregar binders sempre que a tela estiver em foco.
@@ -169,17 +402,28 @@ export default function CollectionsScreen() {
   async function loadBindersFromStorage() {
     try {
       const raw = await AsyncStorage.getItem("@userBinders");
+
       if (raw) {
         setBinders(JSON.parse(raw));
       } else if (restoredData?.binders?.length) {
-        setBinders(restoredData.binders);
-        await AsyncStorage.setItem("@userBinders", JSON.stringify(restoredData.binders));
+        const restored: Binder[] = restoredData.binders.map((b) => ({
+          id: b.id,
+          name: b.name,
+          binderType: "general", // ou um valor padrão, se quiser detectar depois
+          reference: "",
+          createdAt: Date.now(), // usa timestamp atual, ou pode guardar isso no backup depois
+          allCards: [],
+          quantityMap: {},
+        }));
+
+        setBinders(restored);
+        await AsyncStorage.setItem("@userBinders", JSON.stringify(restored));
         console.log("Restaurado via backup local.");
       }
     } catch (err) {
       console.log("Erro loadBinders:", err);
     }
-  }  
+  }
 
   async function saveBindersToStorage(updated: Binder[]) {
     setBinders(updated);
@@ -189,6 +433,23 @@ export default function CollectionsScreen() {
       console.log("Erro saveBinders:", err);
     }
   }
+
+  useEffect(() => {
+    if (binders.length > 0) {
+      const autoBackup = async () => {
+        const backupData: BackupData = {
+          userId: "localUser",
+          binders: binders.map((b) => ({
+            ...b,
+            lastUpdatedAt: new Date().toISOString(),
+          })),
+        };
+        await writeBackup(backupData);
+        await generateBackupFile();
+      };
+      autoBackup();
+    }
+  }, [binders]);
 
   async function loadCollections() {
     try {
@@ -262,7 +523,7 @@ export default function CollectionsScreen() {
       type: binder.binderType,
     });
   }
-  
+
   function closeEditBinderModal() {
     setEditBinderState({
       visible: false,
@@ -271,22 +532,25 @@ export default function CollectionsScreen() {
       type: "general",
     });
   }
-  
+
   async function handleSaveBinderEdits() {
     if (!editBinderState.binder) return;
-  
+
     const updated = binders.map((b) =>
       b.id === editBinderState.binder!.id
-        ? { ...b, name: editBinderState.name.trim(), binderType: editBinderState.type }
+        ? {
+            ...b,
+            name: editBinderState.name.trim(),
+            binderType: editBinderState.type,
+          }
         : b
     );
-  
+
     await AsyncStorage.setItem("@userBinders", JSON.stringify(updated));
     setBinders(updated);
     closeEditBinderModal();
     Alert.alert("Sucesso", "Binder atualizado com sucesso!");
   }
-  
 
   // ========= CRIAÇÃO DE BINDER =========
   function selectBinderType(tp: BinderType) {
@@ -329,13 +593,28 @@ export default function CollectionsScreen() {
   }
 
   async function fetchCardsForBinder() {
-    setCreateBinderState((p) => ({ ...p, loadingCards: true, fetchedCards: [] }));
+    setCreateBinderState((p) => ({
+      ...p,
+      loadingCards: true,
+      fetchedCards: [],
+    }));
     try {
-      const data = await doFetchWithMultiOptions(createBinderState, collections);
-      setCreateBinderState((p) => ({ ...p, fetchedCards: data, loadingCards: false }));
+      const data = await doFetchWithMultiOptions(
+        createBinderState,
+        collections
+      );
+      setCreateBinderState((p) => ({
+        ...p,
+        fetchedCards: data,
+        loadingCards: false,
+      }));
     } catch (err) {
       console.log("fetchCardsForBinder erro:", err);
-      setCreateBinderState((p) => ({ ...p, loadingCards: false, fetchedCards: [] }));
+      setCreateBinderState((p) => ({
+        ...p,
+        loadingCards: false,
+        fetchedCards: [],
+      }));
     }
   }
 
@@ -371,9 +650,18 @@ export default function CollectionsScreen() {
     let ref = st.binderType || "Binder";
 
     if (st.binderType === "master") {
-      ref += ` S=${st.selectedSets.length} Se=${st.selectedSeries.length}`;
+      if (st.selectedSets.length === 1) {
+        const colId = st.selectedSets[0];
+        const col = collections.find((c: CollectionData) => c.id === colId);
+        if (col) ref = col.name;
+        else ref = "Master Set";
+      } else if (st.selectedSets.length > 1) {
+        ref = `${st.selectedSets.length} coleções selecionadas`;
+      } else {
+        ref = "Master Set";
+      }
     } else if (st.binderType === "pokemon") {
-      ref += `(${st.pokemonName}), S=${st.selectedSets.length}, Se=${st.selectedSeries.length}`;
+      ref = st.pokemonName.trim(); // só o nome do pokémon direto
     } else if (st.binderType === "trainer") {
       ref += `(${st.trainerCategory}), S=${st.selectedSets.length} Se=${st.selectedSeries.length}`;
     }
@@ -423,7 +711,9 @@ export default function CollectionsScreen() {
         text: "Remover",
         style: "destructive",
         onPress: () => {
-          const newAllCards = selectedBinder.allCards.filter((c) => c.id !== cardId);
+          const newAllCards = selectedBinder.allCards.filter(
+            (c) => c.id !== cardId
+          );
           const newMap = { ...selectedBinder.quantityMap };
           delete newMap[cardId];
 
@@ -432,7 +722,9 @@ export default function CollectionsScreen() {
             allCards: newAllCards,
             quantityMap: newMap,
           };
-          const newList = binders.map((b) => (b.id === newBinder.id ? newBinder : b));
+          const newList = binders.map((b) =>
+            b.id === newBinder.id ? newBinder : b
+          );
           saveBindersToStorage(newList);
           setSelectedBinder(newBinder);
 
@@ -442,21 +734,36 @@ export default function CollectionsScreen() {
     ]);
   }
 
+  function setCoverForBinder(cardId: string) {
+    if (!selectedBinder) return;
+
+    const updatedBinder: Binder = {
+      ...selectedBinder,
+      coverCardId: cardId,
+    };
+
+    const updatedList = binders.map((b) =>
+      b.id === updatedBinder.id ? updatedBinder : b
+    );
+
+    saveBindersToStorage(updatedList);
+    setSelectedBinder(updatedBinder);
+    Alert.alert("Sucesso", "Carta definida como capa do binder!");
+  }
+
   const binderDisplayCards = useMemo(() => {
     if (!selectedBinder) return [];
-  
+
     const query = searchBinderQuery.toLowerCase().trim();
     let arr = [...selectedBinder.allCards];
-  
+
     if (query) {
       arr = arr.filter((card) => {
         const name = card.name?.toLowerCase() || "";
         const number = card.number?.toLowerCase() || "";
         const set = card.setId?.toLowerCase() || "";
         return (
-          name.includes(query) ||
-          number.includes(query) ||
-          set.includes(query)
+          name.includes(query) || number.includes(query) || set.includes(query)
         );
       });
     }
@@ -467,11 +774,12 @@ export default function CollectionsScreen() {
       if (!match) return 9999;
       return parseInt(match[1], 10);
     }
-    
-  
+
     switch (binderSort) {
       case "number":
-        arr.sort((a, b) => parseCardNumber(a.number) - parseCardNumber(b.number));
+        arr.sort(
+          (a, b) => parseCardNumber(a.number) - parseCardNumber(b.number)
+        );
         break;
       case "name":
         arr.sort((a, b) => a.name.localeCompare(b.name));
@@ -488,20 +796,21 @@ export default function CollectionsScreen() {
         break;
       case "release":
         arr.sort((a, b) =>
-          (a.releaseDate || "9999/99/99").localeCompare(b.releaseDate || "9999/99/99")
+          (a.releaseDate || "9999/99/99").localeCompare(
+            b.releaseDate || "9999/99/99"
+          )
         );
         break;
     }
-  
+
     return arr;
   }, [selectedBinder, binderSort, searchBinderQuery]);
-  
 
   function renderCardItem({ item }: { item: MinimalCardData }) {
     if (!selectedBinder) return null;
     const q = selectedBinder.quantityMap[item.id] || 0;
     const hasIt = q > 0;
-    const cardWidth = (Dimensions.get("window").width - 42) / 3;
+    const cardWidth = (Dimensions.get("window").width - 8) / 3;
 
     return (
       <Animatable.View
@@ -509,18 +818,23 @@ export default function CollectionsScreen() {
         animation="fadeIn"
         duration={500}
       >
-        <View style={styles.cardImageWrapper}>
-          {item.images?.small ? (
-            <Image
-              source={{ uri: item.images.small }}
-              style={{ width: cardWidth * 0.85, height: cardWidth * 1.1 }}
-              resizeMode="contain"
-            />
-          ) : (
-            <Ionicons name="image" size={48} color="#999" />
-          )}
-          {!hasIt && <View style={styles.grayOverlay} />}
-        </View>
+        <TouchableOpacity
+          onLongPress={() => setCoverForBinder(item.id)}
+          delayLongPress={600}
+        >
+          <View style={styles.cardImageWrapper}>
+            {item.images?.small ? (
+              <Image
+                source={{ uri: item.images.small }}
+                style={{ width: cardWidth * 0.85, height: cardWidth * 1.1 }}
+                resizeMode="contain"
+              />
+            ) : (
+              <Ionicons name="image" size={48} color="#999" />
+            )}
+            {!hasIt && <View style={styles.grayOverlay} />}
+          </View>
+        </TouchableOpacity>
 
         <Text style={styles.cardNameGrid} numberOfLines={1}>
           {item.name}
@@ -530,8 +844,11 @@ export default function CollectionsScreen() {
         </Text>
 
         <View style={styles.qtyRow}>
-          <TouchableOpacity style={styles.qtyButton} onPress={() => incrementCardQuantity(item.id)}>
-            <Ionicons name="add-circle" size={20} color="#FFF" />
+          <TouchableOpacity
+            style={styles.qtyButton}
+            onPress={() => decrementCardQuantity(item.id)}
+          >
+            <Ionicons name="remove-circle" size={20} color="#FFF" />
           </TouchableOpacity>
 
           {q > 0 ? (
@@ -544,9 +861,9 @@ export default function CollectionsScreen() {
 
           <TouchableOpacity
             style={styles.qtyButton}
-            onPress={() => decrementCardQuantity(item.id)}
+            onPress={() => incrementCardQuantity(item.id)}
           >
-            <Ionicons name="remove-circle" size={20} color="#FFF" />
+            <Ionicons name="add-circle" size={20} color="#FFF" />
           </TouchableOpacity>
         </View>
 
@@ -578,15 +895,85 @@ export default function CollectionsScreen() {
       {!selectedBinder && (
         <View style={styles.headerRow}>
           <Text style={styles.title}>Minhas Coleções (Blinders)</Text>
-          <TouchableOpacity style={styles.createButton} onPress={openCreateBinderModal}>
-            <Ionicons name="add-circle" size={20} color="#FFF" style={{ marginRight: 6 }} />
-            <Text style={{ color: "#FFF", fontWeight: "bold" }}>Criar Blinder</Text>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={openCreateBinderModal}
+          >
+            <Ionicons
+              name="add-circle"
+              size={20}
+              color="#FFF"
+              style={{ marginRight: 6 }}
+            />
+            <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+              Criar Blinder
+            </Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* GRID DE BINDERS */}
-      {!selectedBinder && (
+      <TouchableOpacity
+        style={[styles.createButton, { display: "none" }]}
+        onPress={handleSaveToBackup}
+      >
+        <Ionicons
+          name="save"
+          size={20}
+          color="#FFF"
+          style={{ marginRight: 6 }}
+        />
+        <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+          Salvar no Backup
+        </Text>
+      </TouchableOpacity>
+
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "center",
+          marginTop: 8,
+          gap: 8,
+        }}
+      >
+        {/* Botão Cloud */}
+        <TouchableOpacity
+          style={[
+            styles.headerButton,
+            reorderMode && { opacity: 0.5 }, // visualmente mais claro
+          ]}
+          onPress={() => {
+            if (!reorderMode) setBackupModalVisible(true);
+          }}
+          disabled={reorderMode}
+        >
+          <Ionicons
+            name="cloud-outline"
+            size={20}
+            color="#FFF"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.headerButtonText}>Cloud</Text>
+        </TouchableOpacity>
+
+        {/* Botão Organizar */}
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={() => setReorderMode((prev) => !prev)}
+        >
+          <Ionicons
+            name="reorder-three"
+            size={20}
+            color="#FFF"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.headerButtonText}>
+            {reorderMode ? "Fechar" : "Organizar"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* GRID DE BINDERS - MODO NORMAL */}
+      {!selectedBinder && !reorderMode && (
         <ScrollView contentContainerStyle={styles.gridContainer}>
           {binders.length === 0 && (
             <Text style={{ color: "#999", marginTop: 20 }}>
@@ -596,39 +983,89 @@ export default function CollectionsScreen() {
           <View style={styles.gridWrapper}>
             {binders.map((binder) => {
               const total = binder.allCards.length;
-              const hasCount = binder.allCards.filter(c => binder.quantityMap[c.id] > 0).length;
+              const hasCount = binder.allCards.filter(
+                (c) => binder.quantityMap[c.id] > 0
+              ).length;
               const perc = total > 0 ? Math.round((hasCount / total) * 100) : 0;
+              const coverCard = binder.allCards.find(
+                (c) => c.id === binder.coverCardId
+              );
+              const imageUri =
+                coverCard?.images?.small || binder.allCards[0]?.images?.small;
 
               return (
                 <Animatable.View
-                    key={binder.id}
-                    style={[
-                      styles.binderCard,
-                      { backgroundColor: getBinderColor(binder.binderType) }
-                    ]}
-                    animation="fadeInUp"
-                    duration={600}
+                  key={binder.id}
+                  style={[
+                    styles.binderCard,
+                    { backgroundColor: getBinderColor(binder.binderType) },
+                  ]}
+                  animation="fadeInUp"
+                  duration={600}
+                >
+                  <TouchableOpacity
+                    style={styles.binderInner}
+                    onPress={() => openBinderDetail(binder)}
                   >
-                  <TouchableOpacity style={styles.binderInner} onPress={() => openBinderDetail(binder)}>
-                  {binder.allCards.length > 0 ? (
-                  <Image
-                    source={{ uri: binder.allCards[0].images?.small }}
-                    style={{ width: 60, height: 85, marginBottom: 8, borderRadius: 4 }}
-                    resizeMode="contain"
-                  />
-                ) : (
-                  <Ionicons name="albums" size={40} color="#FFF" style={{ marginBottom: 8 }} />
-                )}
+                    {binder.binderType === "master" &&
+                    binder.reference &&
+                    collections.length > 0 ? (
+                      (() => {
+                        const colMatch = collections.find(
+                          (col) => binder.reference === col.name
+                        );
+                        if (colMatch?.images?.logo) {
+                          return (
+                            <Image
+                              source={{ uri: colMatch.images.logo }}
+                              style={{
+                                width: 120,
+                                height: 70,
+                                marginBottom: 12,
+                                resizeMode: "contain",
+                              }}
+                            />
+                          );
+                        } else {
+                          return (
+                            <Ionicons
+                              name="albums"
+                              size={60}
+                              color="#FFF"
+                              style={{ marginBottom: 10 }}
+                            />
+                          );
+                        }
+                      })()
+                    ) : binder.allCards.length > 0 ? (
+                      <Image
+                        source={{ uri: imageUri }}
+                        style={{
+                          width: binder.binderType === "pokemon" ? 90 : 60,
+                          height: binder.binderType === "pokemon" ? 120 : 85,
+                          marginBottom: 8,
+                          borderRadius: 4,
+                        }}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <Ionicons
+                        name="albums"
+                        size={60}
+                        color="#FFF"
+                        style={{ marginBottom: 10 }}
+                      />
+                    )}
 
                     <Text style={styles.binderName}>{binder.name}</Text>
                     <Text style={styles.binderType}>
                       Tipo: {binder.binderType.toUpperCase()}
                     </Text>
-
                     {binder.reference && (
-                      <Text style={styles.binderReference}>{binder.reference}</Text>
+                      <Text style={styles.binderReference}>
+                        {binder.reference}
+                      </Text>
                     )}
-
                     <Text style={styles.binderProgress}>
                       {hasCount}/{total} ({perc}%)
                     </Text>
@@ -642,11 +1079,14 @@ export default function CollectionsScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                  style={[styles.deleteButton, { top: 36, backgroundColor: "#2980b9" }]}
-                  onPress={() => openEditBinderModal(binder)}
-                >
-                  <Ionicons name="create" size={16} color="#FFF" />
-                </TouchableOpacity>
+                    style={[
+                      styles.deleteButton,
+                      { top: 36, backgroundColor: "#2980b9" },
+                    ]}
+                    onPress={() => openEditBinderModal(binder)}
+                  >
+                    <Ionicons name="create" size={16} color="#FFF" />
+                  </TouchableOpacity>
                 </Animatable.View>
               );
             })}
@@ -654,53 +1094,220 @@ export default function CollectionsScreen() {
         </ScrollView>
       )}
 
+      <View
+        style={{
+          flexDirection: "row",
+          justifyContent: "center",
+          gap: 8,
+          marginBottom: 10,
+          marginTop: 4,
+        }}
+      >
+        {[
+          { key: "name", label: "Nome" },
+          { key: "type", label: "Tipo" },
+          { key: "perc", label: "%" },
+        ].map((opt) => (
+          <TouchableOpacity
+            key={opt.key}
+            style={{
+              paddingVertical: 6, // ↑ aumentei um pouco
+              paddingHorizontal: 14, // ↑ aumentei largura
+              borderRadius: 100,
+              backgroundColor:
+                sortBindersOption === opt.key ? "#66BB6A" : "#333",
+            }}
+            onPress={() => {
+              setSortBindersOption(opt.key as any);
+              autoSortBinders(opt.key as any);
+            }}
+          >
+            <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 12 }}>
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* MODO ORGANIZAÇÃO (ARRASTAR LISTA) */}
+      {!selectedBinder && reorderMode && (
+        <View style={{ flex: 1, padding: 12 }}>
+          <DraggableFlatList
+            data={binders}
+            keyExtractor={(item) => item.id}
+            onDragEnd={({ data }) => {
+              setBinders(data);
+              AsyncStorage.setItem("@userBinders", JSON.stringify(data));
+            }}
+            renderItem={({ item, drag, isActive }) => (
+              <TouchableOpacity
+                onLongPress={drag}
+                disabled={isActive}
+                style={[
+                  styles.binderCard,
+                  {
+                    backgroundColor: getBinderColor(item.binderType),
+                    opacity: isActive ? 0.8 : 1,
+                    width: "100%",
+                    marginVertical: 6,
+                  },
+                ]}
+              >
+                <Text style={styles.binderName}>{item.name}</Text>
+                <Text style={styles.binderReference}>{item.reference}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
+
       {/* DETALHE DO BINDER */}
       {selectedBinder && (
-      <View style={{ flex: 1, backgroundColor: "#111" }}>
-        {/* HEADER do detalhe */}
-        <View style={styles.binderDetailHeader}>
-          {/* Voltar */}
-          <TouchableOpacity
-            style={{ flexDirection: "row", alignItems: "center" }}
-            onPress={closeBinderDetail}
-          >
-            <Ionicons name="arrow-back" size={22} color="#FFF" />
-            <Text style={{ color: "#FFF", marginLeft: 6 }}>Voltar</Text>
-          </TouchableOpacity>
-
-          {/* Nome do binder (centralizado) */}
-          <Text style={[styles.binderDetailTitle, { flex: 1, textAlign: "center" }]}>
-            {selectedBinder.name}
-          </Text>
-
-          {/* Botões do canto direito */}
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View style={{ flex: 1, backgroundColor: "#111" }}>
+          {/* HEADER do detalhe */}
+          <View style={styles.binderDetailHeader}>
+            {/* Voltar */}
             <TouchableOpacity
-              style={{ paddingHorizontal: 6 }}
-              onPress={() => setShowSearchBar((prev) => !prev)}
+              style={{ flexDirection: "row", alignItems: "center" }}
+              onPress={closeBinderDetail}
             >
-              <Ionicons name="search" size={20} color="#FFF" />
+              <Ionicons name="arrow-back" size={22} color="#FFF" />
+              <Text style={{ color: "#FFF", marginLeft: 6 }}>Voltar</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.sortIconButton} onPress={openSortModal}>
-              <Ionicons name="settings" size={20} color="#FFF" />
-            </TouchableOpacity>
+            {/* Nome do binder (centralizado) */}
+            <Text
+              style={[
+                styles.binderDetailTitle,
+                { flex: 1, textAlign: "center" },
+              ]}
+            >
+              {selectedBinder.name}
+            </Text>
+
+            {/* Botões do canto direito */}
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <TouchableOpacity
+                style={{ paddingHorizontal: 6 }}
+                onPress={() => setShowSearchBar((prev) => !prev)}
+              >
+                <Ionicons name="search" size={20} color="#FFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.sortIconButton}
+                onPress={openSortModal}
+              >
+                <Ionicons name="settings" size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
 
-        {/* BARRA DE BUSCA */}
-        {showSearchBar && (
-          <Animatable.View animation="fadeInDown" style={[styles.searchContainer, { marginHorizontal: 10, marginBottom: 6 }]}>
-            <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Buscar pelo nome do Pokemon..."
-              placeholderTextColor="#999"
-              value={searchBinderQuery}
-              onChangeText={setSearchBinderQuery}
-            />
-          </Animatable.View>
-        )}
+          {/* BARRA DE BUSCA */}
+          {showSearchBar && (
+            <Animatable.View
+              animation="fadeInDown"
+              style={[
+                styles.searchContainer,
+                { marginHorizontal: 10, marginBottom: 6 },
+              ]}
+            >
+              <Ionicons
+                name="search"
+                size={20}
+                color="#999"
+                style={{ marginRight: 6 }}
+              />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar pelo nome do Pokemon..."
+                placeholderTextColor="#999"
+                value={searchBinderQuery}
+                onChangeText={setSearchBinderQuery}
+              />
+            </Animatable.View>
+          )}
+
+          {/* RESUMO DO BINDER */}
+          <View style={{ paddingHorizontal: 12, paddingTop: 10 }}>
+            <Text style={{ color: "#66BB6A", fontSize: 14 }}>
+              Capturadas:{" "}
+              {
+                Object.values(selectedBinder.quantityMap).filter((q) => q > 0)
+                  .length
+              }
+            </Text>
+            <Text style={{ color: "#FFF", fontSize: 14 }}>
+              Total: {selectedBinder.allCards.length}
+            </Text>
+
+            <Animated.View
+              style={{
+                height: 22,
+                backgroundColor: "#333",
+                borderRadius: 4,
+                marginTop: 6,
+                justifyContent: "center",
+                overflow: "hidden",
+                transform:
+                  perc === 100
+                    ? [
+                        {
+                          scale: progressAnim.interpolate({
+                            inputRange: [99, 100],
+                            outputRange: [1, 1.06], // leve "pulsar"
+                          }),
+                        },
+                      ]
+                    : [],
+              }}
+            >
+              <Animated.View
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: progressAnim.interpolate({
+                    inputRange: [0, 100],
+                    outputRange: ["0%", "100%"],
+                  }),
+                  backgroundColor:
+                    perc === 100 ? "#4CAF50" : getPercColor(perc), // Dourado no 100%
+                  borderRadius: 4,
+                }}
+              />
+
+              <Text
+                style={{
+                  color: "#FFF",
+                  textAlign: "center",
+                  fontSize: 12,
+                  fontWeight: "bold",
+                  zIndex: 2,
+                }}
+              >
+                {perc}%
+              </Text>
+            </Animated.View>
+
+            {/* Texto especial quando completo */}
+            {perc === 100 && (
+              <Animatable.Text
+                animation="fadeInUp"
+                duration={600}
+                style={{
+                  color: "#FFD700",
+                  fontSize: 14,
+                  fontWeight: "bold",
+                  textAlign: "center",
+                  marginTop: 4,
+                }}
+              >
+                🎉 Completo!
+              </Animatable.Text>
+            )}
+          </View>
 
           <FlatList
             data={binderDisplayCards}
@@ -738,15 +1345,26 @@ export default function CollectionsScreen() {
 
                 <View style={styles.typeIconsRow}>
                   <TouchableOpacity
-                    style={[styles.typeIconOption, { borderColor: "#FDD835", borderWidth: 1 }]}
+                    style={[
+                      styles.typeIconOption,
+                      { borderColor: "#FDD835", borderWidth: 1 },
+                    ]}
                     onPress={() => selectBinderType("master")}
                   >
-                    <Ionicons name="ribbon" size={40} color="#FDD835" style={{ marginBottom: 6 }} />
+                    <Ionicons
+                      name="ribbon"
+                      size={40}
+                      color="#FDD835"
+                      style={{ marginBottom: 6 }}
+                    />
                     <Text style={styles.typeIconText}>Master Set</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.typeIconOption, { borderColor: "#42A5F5", borderWidth: 1 }]}
+                    style={[
+                      styles.typeIconOption,
+                      { borderColor: "#42A5F5", borderWidth: 1 },
+                    ]}
                     onPress={() => selectBinderType("pokemon")}
                   >
                     <Ionicons
@@ -759,31 +1377,61 @@ export default function CollectionsScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.typeIconOption, { borderColor: "#EF5350", borderWidth: 1 }]}
+                    style={[
+                      styles.typeIconOption,
+                      { borderColor: "#EF5350", borderWidth: 1 },
+                    ]}
                     onPress={() => selectBinderType("trainer")}
                   >
-                    <Ionicons name="school" size={40} color="#EF5350" style={{ marginBottom: 6 }} />
+                    <Ionicons
+                      name="school"
+                      size={40}
+                      color="#EF5350"
+                      style={{ marginBottom: 6 }}
+                    />
                     <Text style={styles.typeIconText}>Trainer</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.typeIconOption, { borderColor: "#AB47BC", borderWidth: 1 }]}
+                    style={[
+                      styles.typeIconOption,
+                      { borderColor: "#AB47BC", borderWidth: 1 },
+                    ]}
                     onPress={() => selectBinderType("general")}
                   >
-                    <Ionicons name="globe" size={40} color="#AB47BC" style={{ marginBottom: 6 }} />
+                    <Ionicons
+                      name="globe"
+                      size={40}
+                      color="#AB47BC"
+                      style={{ marginBottom: 6 }}
+                    />
                     <Text style={styles.typeIconText}>Geral</Text>
                   </TouchableOpacity>
                 </View>
 
-                <Text style={{ color: "#CCC", marginTop: 20, textAlign: "center" }}>
+                <Text
+                  style={{ color: "#CCC", marginTop: 20, textAlign: "center" }}
+                >
                   Escolha o tipo que deseja criar.
                 </Text>
 
                 <TouchableOpacity
-                  style={[styles.button, { backgroundColor: "#999", marginTop: 30, alignSelf: "center" }]}
+                  style={[
+                    styles.button,
+                    {
+                      backgroundColor: "#999",
+                      marginTop: 30,
+                      alignSelf: "center",
+                    },
+                  ]}
                   onPress={closeCreateBinderModal}
                 >
-                  <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+                  <Ionicons
+                    name="close-circle"
+                    size={16}
+                    color="#FFF"
+                    style={{ marginRight: 4 }}
+                  />
                   <Text style={styles.buttonText}>Cancelar</Text>
                 </TouchableOpacity>
               </ScrollView>
@@ -804,14 +1452,26 @@ export default function CollectionsScreen() {
                 <TextInput
                   style={styles.modalInput}
                   value={createBinderState.name}
-                  onChangeText={(val) => setCreateBinderState((p) => ({ ...p, name: val }))}
+                  onChangeText={(val) =>
+                    setCreateBinderState((p) => ({ ...p, name: val }))
+                  }
                   placeholder="Ex: 'Meu Master Set SWSH9'"
                   placeholderTextColor="#999"
                 />
 
-                <Text style={[styles.label, { marginTop: 12 }]}>Coleções / Séries</Text>
-                <TouchableOpacity style={styles.selectCollectionButton} onPress={() => setCollectionsModalVisible(true)}>
-                  <Ionicons name="albums" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                <Text style={[styles.label, { marginTop: 12 }]}>
+                  Coleções / Séries
+                </Text>
+                <TouchableOpacity
+                  style={styles.selectCollectionButton}
+                  onPress={() => setCollectionsModalVisible(true)}
+                >
+                  <Ionicons
+                    name="albums"
+                    size={16}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
                   <Text style={{ color: "#FFF", fontWeight: "bold" }}>
                     {createBinderState.selectedSets.length === 0 &&
                     createBinderState.selectedSeries.length === 0
@@ -827,7 +1487,12 @@ export default function CollectionsScreen() {
                     <TextInput
                       style={styles.modalInput}
                       value={createBinderState.pokemonName}
-                      onChangeText={(val) => setCreateBinderState((p) => ({ ...p, pokemonName: val }))}
+                      onChangeText={(val) =>
+                        setCreateBinderState((p) => ({
+                          ...p,
+                          pokemonName: val,
+                        }))
+                      }
                       placeholder="Ex: 'Charizard'"
                       placeholderTextColor="#999"
                     />
@@ -842,14 +1507,24 @@ export default function CollectionsScreen() {
                     </Text>
                     <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
                       {ALL_RARITIES.map((r) => {
-                        const isSel = createBinderState.selectedRarities.includes(r);
+                        const isSel =
+                          createBinderState.selectedRarities.includes(r);
                         return (
                           <TouchableOpacity
                             key={r}
-                            style={[styles.rarityButton, isSel && styles.rarityButtonActive]}
+                            style={[
+                              styles.rarityButton,
+                              isSel && styles.rarityButtonActive,
+                            ]}
                             onPress={() => toggleRarity(r)}
                           >
-                            <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 10 }}>
+                            <Text
+                              style={{
+                                color: "#FFF",
+                                fontWeight: "bold",
+                                fontSize: 10,
+                              }}
+                            >
                               {r}
                             </Text>
                           </TouchableOpacity>
@@ -865,13 +1540,22 @@ export default function CollectionsScreen() {
                     style={[styles.button, { marginTop: 12 }]}
                     onPress={fetchCardsForBinder}
                   >
-                    <Ionicons name="cloud-download" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                    <Ionicons
+                      name="cloud-download"
+                      size={16}
+                      color="#FFF"
+                      style={{ marginRight: 6 }}
+                    />
                     <Text style={styles.buttonText}>Buscar Cartas</Text>
                   </TouchableOpacity>
                 )}
 
                 {createBinderState.loadingCards && (
-                  <ActivityIndicator size="large" color="#E3350D" style={{ marginTop: 10 }} />
+                  <ActivityIndicator
+                    size="large"
+                    color="#E3350D"
+                    style={{ marginTop: 10 }}
+                  />
                 )}
                 {!!createBinderState.fetchedCards.length && (
                   <Text style={{ color: "#FFF", marginTop: 10 }}>
@@ -879,17 +1563,36 @@ export default function CollectionsScreen() {
                   </Text>
                 )}
 
-                <View style={{ flexDirection: "row", justifyContent: "space-evenly", marginTop: 20 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-evenly",
+                    marginTop: 20,
+                  }}
+                >
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: "#999" }]}
                     onPress={() => goToStep(1)}
                   >
-                    <Ionicons name="arrow-back" size={16} color="#FFF" style={{ marginRight: 4 }} />
+                    <Ionicons
+                      name="arrow-back"
+                      size={16}
+                      color="#FFF"
+                      style={{ marginRight: 4 }}
+                    />
                     <Text style={styles.buttonText}>Voltar</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={[styles.button]} onPress={handleCreateBinder}>
-                    <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <TouchableOpacity
+                    style={[styles.button]}
+                    onPress={handleCreateBinder}
+                  >
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color="#FFF"
+                      style={{ marginRight: 6 }}
+                    />
                     <Text style={styles.buttonText}>Criar</Text>
                   </TouchableOpacity>
                 </View>
@@ -899,7 +1602,11 @@ export default function CollectionsScreen() {
             {/* Step 3: Trainer => multi sets, multi series, mas SÓ “all” e “energy” */}
             {createBinderState.step === 3 && (
               <ScrollView contentContainerStyle={styles.modalStepContainer}>
-                <Animatable.Text style={styles.modalTitle} animation="fadeInRight" duration={1500}>
+                <Animatable.Text
+                  style={styles.modalTitle}
+                  animation="fadeInRight"
+                  duration={1500}
+                >
                   Treinadores
                 </Animatable.Text>
 
@@ -907,7 +1614,9 @@ export default function CollectionsScreen() {
                 <TextInput
                   style={styles.modalInput}
                   value={createBinderState.name}
-                  onChangeText={(val) => setCreateBinderState((p) => ({ ...p, name: val }))}
+                  onChangeText={(val) =>
+                    setCreateBinderState((p) => ({ ...p, name: val }))
+                  }
                   placeholder="Ex: 'Treinadores SWSH9'"
                   placeholderTextColor="#999"
                 />
@@ -924,7 +1633,12 @@ export default function CollectionsScreen() {
                           styles.trainerCatButton,
                           isActive && styles.trainerCatButtonActive,
                         ]}
-                        onPress={() => setCreateBinderState((p) => ({ ...p, trainerCategory: cat }))}
+                        onPress={() =>
+                          setCreateBinderState((p) => ({
+                            ...p,
+                            trainerCategory: cat,
+                          }))
+                        }
                       >
                         <Ionicons
                           name={cat === "energy" ? "flash" : "apps"}
@@ -940,12 +1654,19 @@ export default function CollectionsScreen() {
                   })}
                 </View>
 
-                <Text style={[styles.label, { marginTop: 12 }]}>Coleções / Séries</Text>
+                <Text style={[styles.label, { marginTop: 12 }]}>
+                  Coleções / Séries
+                </Text>
                 <TouchableOpacity
                   style={styles.selectCollectionButton}
                   onPress={() => setCollectionsModalVisible(true)}
                 >
-                  <Ionicons name="albums" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <Ionicons
+                    name="albums"
+                    size={16}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
                   <Text style={{ color: "#FFF", fontWeight: "bold" }}>
                     {createBinderState.selectedSets.length === 0 &&
                     createBinderState.selectedSeries.length === 0
@@ -956,17 +1677,31 @@ export default function CollectionsScreen() {
 
                 {/* Se quiser remover a parte de raridades, mas no trainer poderia deixar OPCIONAL. Vou manter se quiser! 
                     Se você quer remover, é só ocultar o chunk abaixo. */}
-                <Text style={[styles.label, { marginTop: 12 }]}>Filtrar Raridades (opcional)</Text>
+                <Text style={[styles.label, { marginTop: 12 }]}>
+                  Filtrar Raridades (opcional)
+                </Text>
                 <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
                   {ALL_RARITIES.map((r) => {
-                    const isSel = createBinderState.selectedRarities.includes(r);
+                    const isSel =
+                      createBinderState.selectedRarities.includes(r);
                     return (
                       <TouchableOpacity
                         key={r}
-                        style={[styles.rarityButton, isSel && styles.rarityButtonActive]}
+                        style={[
+                          styles.rarityButton,
+                          isSel && styles.rarityButtonActive,
+                        ]}
                         onPress={() => toggleRarity(r)}
                       >
-                        <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 10 }}>{r}</Text>
+                        <Text
+                          style={{
+                            color: "#FFF",
+                            fontWeight: "bold",
+                            fontSize: 10,
+                          }}
+                        >
+                          {r}
+                        </Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -976,12 +1711,21 @@ export default function CollectionsScreen() {
                   style={[styles.button, { marginTop: 12 }]}
                   onPress={fetchCardsForBinder}
                 >
-                  <Ionicons name="cloud-download" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <Ionicons
+                    name="cloud-download"
+                    size={16}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
                   <Text style={styles.buttonText}>Buscar Cartas</Text>
                 </TouchableOpacity>
 
                 {createBinderState.loadingCards && (
-                  <ActivityIndicator size="large" color="#E3350D" style={{ marginTop: 10 }} />
+                  <ActivityIndicator
+                    size="large"
+                    color="#E3350D"
+                    style={{ marginTop: 10 }}
+                  />
                 )}
                 {!!createBinderState.fetchedCards.length && (
                   <Text style={{ color: "#FFF", marginTop: 10 }}>
@@ -989,17 +1733,36 @@ export default function CollectionsScreen() {
                   </Text>
                 )}
 
-                <View style={{ flexDirection: "row", justifyContent: "space-evenly", marginTop: 20 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-evenly",
+                    marginTop: 20,
+                  }}
+                >
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: "#999" }]}
                     onPress={() => goToStep(1)}
                   >
-                    <Ionicons name="arrow-back" size={16} color="#FFF" style={{ marginRight: 4 }} />
+                    <Ionicons
+                      name="arrow-back"
+                      size={16}
+                      color="#FFF"
+                      style={{ marginRight: 4 }}
+                    />
                     <Text style={styles.buttonText}>Voltar</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={[styles.button]} onPress={handleCreateBinder}>
-                    <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <TouchableOpacity
+                    style={[styles.button]}
+                    onPress={handleCreateBinder}
+                  >
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color="#FFF"
+                      style={{ marginRight: 6 }}
+                    />
                     <Text style={styles.buttonText}>Criar</Text>
                   </TouchableOpacity>
                 </View>
@@ -1020,26 +1783,109 @@ export default function CollectionsScreen() {
           <View style={styles.sortModalContainer}>
             <Text style={styles.modalTitle}>Ordenar por</Text>
 
-            {(["number", "name", "rarity", "quantity", "release"] as BinderSortOption[]).map(
-              (opt) => (
-                <TouchableOpacity
-                  key={opt}
-                  style={styles.sortOptionButton}
-                  onPress={() => selectSortOption(opt)}
-                >
-                  <Text style={styles.sortOptionText}>
-                    {binderSort === opt ? "✓ " : ""}
-                    {labelForSort(opt)}
-                  </Text>
-                </TouchableOpacity>
-              )
-            )}
+            {(
+              [
+                "number",
+                "name",
+                "rarity",
+                "quantity",
+                "release",
+              ] as BinderSortOption[]
+            ).map((opt) => (
+              <TouchableOpacity
+                key={opt}
+                style={styles.sortOptionButton}
+                onPress={() => selectSortOption(opt)}
+              >
+                <Text style={styles.sortOptionText}>
+                  {binderSort === opt ? "✓ " : ""}
+                  {labelForSort(opt)}
+                </Text>
+              </TouchableOpacity>
+            ))}
 
             <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
+              style={[
+                styles.button,
+                { backgroundColor: "#999", marginTop: 20 },
+              ]}
               onPress={() => setSortModalVisible(false)}
             >
-              <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+              <Ionicons
+                name="close-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL de Backup / Sincronização */}
+      <Modal
+        visible={backupModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setBackupModalVisible(false)}
+      >
+        <View style={styles.overlay}>
+          <View style={styles.sortModalContainer}>
+            <Text style={styles.modalTitle}>Backup / Sincronização</Text>
+
+            <TouchableOpacity
+              style={[styles.button, { marginVertical: 8 }]}
+              onPress={handleImportBackup}
+            >
+              <Ionicons
+                name="download"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.buttonText}>Importar Backup</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { marginVertical: 8 }]}
+              onPress={handleExportBackup}
+            >
+              <Ionicons
+                name="download"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.buttonText}>Exportar Backup</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { marginVertical: 8 }]}
+              onPress={handleForceSync}
+            >
+              <Ionicons
+                name="sync"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.buttonText}>Sincronizar Agora</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.button,
+                { backgroundColor: "#999", marginTop: 14 },
+              ]}
+              onPress={() => setBackupModalVisible(false)}
+            >
+              <Ionicons
+                name="close-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
               <Text style={styles.buttonText}>Fechar</Text>
             </TouchableOpacity>
           </View>
@@ -1068,12 +1914,16 @@ export default function CollectionsScreen() {
 
             <Text style={styles.label}>Tipo</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-              {(["master", "pokemon", "trainer", "general"] as BinderType[]).map((tp) => {
+              {(
+                ["master", "pokemon", "trainer", "general"] as BinderType[]
+              ).map((tp) => {
                 const selected = editBinderState.type === tp;
                 return (
                   <TouchableOpacity
                     key={tp}
-                    onPress={() => setEditBinderState((prev) => ({ ...prev, type: tp }))}
+                    onPress={() =>
+                      setEditBinderState((prev) => ({ ...prev, type: tp }))
+                    }
                     style={[
                       styles.trainerCatButton,
                       selected && styles.trainerCatButtonActive,
@@ -1091,21 +1941,33 @@ export default function CollectionsScreen() {
               style={[styles.button, { marginTop: 14 }]}
               onPress={handleSaveBinderEdits}
             >
-              <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+              <Ionicons
+                name="checkmark-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
               <Text style={styles.buttonText}>Salvar Alterações</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 10 }]}
+              style={[
+                styles.button,
+                { backgroundColor: "#999", marginTop: 10 },
+              ]}
               onPress={closeEditBinderModal}
             >
-              <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+              <Ionicons
+                name="close-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
               <Text style={styles.buttonText}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-
 
       {/* MODAL multi-coleções e multi-séries */}
       {collectionsModalVisible && (
@@ -1133,7 +1995,9 @@ function MultiCollectionsModal({
   onClose: () => void;
   collections: CollectionData[];
   createBinderState: CreatingBinderState;
-  setCreateBinderState: React.Dispatch<React.SetStateAction<CreatingBinderState>>;
+  setCreateBinderState: React.Dispatch<
+    React.SetStateAction<CreatingBinderState>
+  >;
 }) {
   const [searchTxt, setSearchTxt] = useState("");
 
@@ -1190,15 +2054,27 @@ function MultiCollectionsModal({
   }
 
   return (
-    <Modal visible={visible} transparent onRequestClose={onClose} animationType="slide">
+    <Modal
+      visible={visible}
+      transparent
+      onRequestClose={onClose}
+      animationType="slide"
+    >
       <View style={styles.overlay}>
         <View style={styles.collectionModalContainer}>
           <Text style={styles.modalTitle}>Coleções / Séries</Text>
 
-          <Text style={[styles.label, { alignSelf: "center" }]}>Filtrar Coleções</Text>
+          <Text style={[styles.label, { alignSelf: "center" }]}>
+            Filtrar Coleções
+          </Text>
 
           <View style={styles.searchContainer}>
-            <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
+            <Ionicons
+              name="search"
+              size={20}
+              color="#999"
+              style={{ marginRight: 6 }}
+            />
             <TextInput
               style={styles.searchInput}
               placeholder="Buscar coleção..."
@@ -1208,7 +2084,9 @@ function MultiCollectionsModal({
             />
           </View>
 
-          <ScrollView style={{ maxHeight: 160, width: "100%", marginVertical: 8 }}>
+          <ScrollView
+            style={{ maxHeight: 160, width: "100%", marginVertical: 8 }}
+          >
             {filteredCollections.map((col) => {
               const isSel = createBinderState.selectedSets.includes(col.id);
               return (
@@ -1217,12 +2095,22 @@ function MultiCollectionsModal({
                   style={styles.collectionItem}
                   onPress={() => toggleSet(col.id)}
                 >
-                  <Text style={[styles.collectionItemText, isSel && { color: "#66BB6A" }]}>
+                  <Text
+                    style={[
+                      styles.collectionItemText,
+                      isSel && { color: "#66BB6A" },
+                    ]}
+                  >
                     {col.name}
                   </Text>
 
                   {col.series && (
-                    <Text style={[{ color: "#ccc", fontSize: 10 }, isSel && { color: "#66BB6A" }]}>
+                    <Text
+                      style={[
+                        { color: "#ccc", fontSize: 10 },
+                        isSel && { color: "#66BB6A" },
+                      ]}
+                    >
                       {col.series}
                     </Text>
                   )}
@@ -1231,9 +2119,13 @@ function MultiCollectionsModal({
             })}
           </ScrollView>
 
-          <Text style={[styles.label, { alignSelf: "center", marginTop: 6 }]}>Séries</Text>
+          <Text style={[styles.label, { alignSelf: "center", marginTop: 6 }]}>
+            Séries
+          </Text>
 
-          <ScrollView style={{ maxHeight: 130, width: "100%", marginVertical: 6 }}>
+          <ScrollView
+            style={{ maxHeight: 130, width: "100%", marginVertical: 6 }}
+          >
             {allSeries.map((sr) => {
               const isSel = createBinderState.selectedSeries.includes(sr);
               return (
@@ -1242,7 +2134,12 @@ function MultiCollectionsModal({
                   style={styles.collectionItem}
                   onPress={() => toggleSeries(sr)}
                 >
-                  <Text style={[styles.collectionItemText, isSel && { color: "#66BB6A" }]}>
+                  <Text
+                    style={[
+                      styles.collectionItemText,
+                      isSel && { color: "#66BB6A" },
+                    ]}
+                  >
                     {sr}
                   </Text>
                 </TouchableOpacity>
@@ -1251,10 +2148,18 @@ function MultiCollectionsModal({
           </ScrollView>
 
           <TouchableOpacity
-            style={[styles.button, { backgroundColor: "#999", marginTop: 14, alignSelf: "center" }]}
+            style={[
+              styles.button,
+              { backgroundColor: "#999", marginTop: 14, alignSelf: "center" },
+            ]}
             onPress={onClose}
           >
-            <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+            <Ionicons
+              name="close-circle"
+              size={16}
+              color="#FFF"
+              style={{ marginRight: 4 }}
+            />
             <Text style={styles.buttonText}>Fechar</Text>
           </TouchableOpacity>
         </View>
@@ -1301,8 +2206,14 @@ async function doFetchWithMultiOptions(
     if (!st.pokemonName.trim()) {
       throw new Error("Digite o nome do Pokémon.");
     }
-    const baseQ = encodeURIComponent(`name:"${st.pokemonName}" supertype:pokemon`);
-    const combos = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, baseQ);
+    const baseQ = encodeURIComponent(
+      `name:"${st.pokemonName}" supertype:pokemon`
+    );
+    const combos = buildSetSeriesCombos(
+      st.selectedSets,
+      st.selectedSeries,
+      baseQ
+    );
 
     let combined: MinimalCardData[] = [];
     if (combos.length === 0) {
@@ -1320,8 +2231,16 @@ async function doFetchWithMultiOptions(
     let finalTrainers: MinimalCardData[] = [];
     if (st.trainerCategory === "all") {
       // combos p/ supertype:trainer e combos p/ supertype:energy
-      const combos1 = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, "supertype:Trainer");
-      const combos2 = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, "supertype:energy");
+      const combos1 = buildSetSeriesCombos(
+        st.selectedSets,
+        st.selectedSeries,
+        "supertype:Trainer"
+      );
+      const combos2 = buildSetSeriesCombos(
+        st.selectedSets,
+        st.selectedSeries,
+        "supertype:energy"
+      );
 
       if (combos1.length === 0) {
         const allTrainer = await fetchApi(
@@ -1349,7 +2268,11 @@ async function doFetchWithMultiOptions(
     } else {
       // "energy" => supertype:energy
       const catQuery = "supertype:energy";
-      const combos = buildSetSeriesCombos(st.selectedSets, st.selectedSeries, catQuery);
+      const combos = buildSetSeriesCombos(
+        st.selectedSets,
+        st.selectedSeries,
+        catQuery
+      );
 
       if (combos.length === 0) {
         const allUrl = `https://api.pokemontcg.io/v2/cards?q=${catQuery}&pageSize=500`;
@@ -1512,18 +2435,23 @@ const styles = StyleSheet.create({
   gridContainer: {
     paddingHorizontal: 8,
     paddingBottom: 60,
+    justifyContent: "flex-start",
     alignItems: "center",
   },
+
   gridWrapper: {
     flexDirection: "row",
     flexWrap: "wrap",
+    justifyContent: "space-between",
   },
+
   binderCard: {
-    backgroundColor: "#333",
-    borderRadius: 8,
+    width: (Dimensions.get("window").width - 48) / 2, // 3 colunas com margem
     margin: 6,
+    borderRadius: 8,
+    backgroundColor: "#333",
     padding: 10,
-    width: (Dimensions.get("window").width - 48) / 3,
+    alignItems: "center",
     position: "relative",
   },
   binderInner: {
@@ -1533,208 +2461,213 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontWeight: "bold",
     textAlign: "center",
+    fontSize: 14, // ← antes era menor
+    marginBottom: 2,
   },
   binderType: {
     color: "#BBB",
     fontSize: 12,
     marginVertical: 2,
+    fontWeight: "500",
   },
   binderReference: {
     color: "#CCC",
     fontSize: 12,
+    fontStyle: "italic",
     marginBottom: 4,
   },
-  binderProgress:{
-    color:"#66BB6A",
-    fontSize:12,
+  binderProgress: {
+    color: "#66BB6A",
+    fontSize: 12,
+    fontWeight: "bold",
   },
-  deleteButton:{
-    position:"absolute",
-    top:6,
-    right:6,
-    backgroundColor:"#900",
-    borderRadius:4,
-    padding:4,
+  deleteButton: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    backgroundColor: "#900",
+    borderRadius: 4,
+    padding: 4,
   },
 
   /** DETALHE BINDER */
-  binderDetailHeader:{
-    flexDirection:"row",
-    backgroundColor:"#000",
-    paddingHorizontal:10,
-    paddingVertical:10,
-    alignItems:"center",
-    justifyContent:"space-between",
+  binderDetailHeader: {
+    flexDirection: "row",
+    backgroundColor: "#000",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-  binderDetailTitle:{
-    color:"#FFF",
-    fontWeight:"bold",
-    fontSize:16,
+  binderDetailTitle: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 16,
   },
-  sortIconButton:{
-    padding:4,
+  sortIconButton: {
+    padding: 4,
   },
 
   /** FLATLIST 3 colunas */
-  columnWrapper:{
-    justifyContent:"flex-start",
-    marginHorizontal:4,
-    marginVertical:4,
+  columnWrapper: {
+    justifyContent: "flex-start",
+    marginHorizontal: 4,
+    marginVertical: 4,
   },
-  cardItemContainer:{
-    backgroundColor:"#222",
-    borderRadius:8,
-    padding:4,
-    alignItems:"center",
+  cardItemContainer: {
+    backgroundColor: "#222",
+    borderRadius: 8,
+    padding: 4,
+    alignItems: "center",
   },
-  cardImageWrapper:{
-    position:"relative",
+  cardImageWrapper: {
+    position: "relative",
   },
-  grayOverlay:{
-    position:"absolute",
-    top:0,
-    left:0,
-    width:"100%",
-    height:"100%",
-    backgroundColor:"rgba(0,0,0,0.5)",
-    borderRadius:4,
+  grayOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 4,
   },
-  cardNameGrid:{
-    color:"#FFF",
-    fontSize:13,
-    textAlign:"center",
-    marginTop:4,
+  cardNameGrid: {
+    color: "#FFF",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 4,
   },
-  cardRarityGrid:{
-    color:"#CCC",
-    fontSize:11,
-    textAlign:"center",
+  cardRarityGrid: {
+    color: "#CCC",
+    fontSize: 11,
+    textAlign: "center",
   },
-  qtyRow:{
-    flexDirection:"row",
-    alignItems:"center",
-    marginTop:4,
+  qtyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
   },
-  qtyButton:{
-    backgroundColor:"#333",
-    borderRadius:6,
-    padding:4,
+  qtyButton: {
+    backgroundColor: "#333",
+    borderRadius: 6,
+    padding: 4,
   },
-  cardQuantityText:{
-    color:"#66BB6A",
-    fontSize:12,
-    fontWeight:"bold",
-    marginHorizontal:6,
+  cardQuantityText: {
+    color: "#66BB6A",
+    fontSize: 12,
+    fontWeight: "bold",
+    marginHorizontal: 6,
   },
 
   /** MODAL CRIAÇÃO PASSO A PASSO */
-  modalStepContainer:{
-    padding:16,
-    alignItems:"center",
+  modalStepContainer: {
+    padding: 16,
+    alignItems: "center",
   },
-  modalTitle:{
-    color:"#FFF",
-    fontSize:20,
-    fontWeight:"bold",
-    marginBottom:16,
-    textAlign:"center",
+  modalTitle: {
+    color: "#FFF",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 16,
+    textAlign: "center",
   },
-  label:{
-    color:"#FFF",
-    fontSize:14,
-    marginBottom:6,
-    marginTop:8,
-    alignSelf:"flex-start",
+  label: {
+    color: "#FFF",
+    fontSize: 14,
+    marginBottom: 6,
+    marginTop: 8,
+    alignSelf: "flex-start",
   },
-  modalInput:{
-    width:"100%",
-    backgroundColor:"#444",
-    borderRadius:6,
-    paddingHorizontal:8,
-    paddingVertical:6,
-    color:"#FFF",
-    marginBottom:6,
+  modalInput: {
+    width: "100%",
+    backgroundColor: "#444",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    color: "#FFF",
+    marginBottom: 6,
   },
-  typeIconsRow:{
-    flexDirection:"row",
-    flexWrap:"wrap",
-    justifyContent:"space-around",
-    marginTop:12,
+  typeIconsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-around",
+    marginTop: 12,
   },
-  typeIconOption:{
-    width:80,
-    backgroundColor:"#444",
-    borderRadius:6,
-    padding:8,
-    margin:8,
-    alignItems:"center",
+  typeIconOption: {
+    width: 80,
+    backgroundColor: "#444",
+    borderRadius: 6,
+    padding: 8,
+    margin: 8,
+    alignItems: "center",
   },
-  typeIconText:{
-    color:"#FFF",
-    fontSize:12,
-    textAlign:"center",
-    fontWeight:"bold",
+  typeIconText: {
+    color: "#FFF",
+    fontSize: 12,
+    textAlign: "center",
+    fontWeight: "bold",
   },
-  selectCollectionButton:{
-    flexDirection:"row",
-    backgroundColor:"#555",
-    borderRadius:6,
-    paddingHorizontal:10,
-    paddingVertical:8,
-    alignItems:"center",
-    marginBottom:6,
-    width:"100%",
+  selectCollectionButton: {
+    flexDirection: "row",
+    backgroundColor: "#555",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: "center",
+    marginBottom: 6,
+    width: "100%",
   },
-  button:{
-    flexDirection:"row",
-    backgroundColor:PRIMARY,
-    borderRadius:6,
-    paddingHorizontal:12,
-    paddingVertical:8,
-    alignItems:"center",
+  button: {
+    flexDirection: "row",
+    backgroundColor: PRIMARY,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: "center",
   },
-  buttonText:{
-    color:"#FFF",
-    fontWeight:"bold",
+  buttonText: {
+    color: "#FFF",
+    fontWeight: "bold",
   },
-  rarityButton:{
-    backgroundColor:"#444",
-    borderRadius:6,
-    paddingHorizontal:10,
-    paddingVertical:4,
-    marginRight:6,
-    marginBottom:6,
+  rarityButton: {
+    backgroundColor: "#444",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginRight: 6,
+    marginBottom: 6,
   },
-  rarityButtonActive:{
-    backgroundColor:"#666",
+  rarityButtonActive: {
+    backgroundColor: "#666",
   },
-  trainerCatButton:{
-    flexDirection:"row",
-    backgroundColor:"#444",
-    borderRadius:6,
-    paddingHorizontal:10,
-    paddingVertical:8,
-    marginRight:6,
-    marginBottom:6,
-    alignItems:"center",
+  trainerCatButton: {
+    flexDirection: "row",
+    backgroundColor: "#444",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginRight: 6,
+    marginBottom: 6,
+    alignItems: "center",
   },
-  trainerCatButtonActive:{
-    backgroundColor:"#666",
+  trainerCatButtonActive: {
+    backgroundColor: "#666",
   },
 
   /** Overlays */
-  overlay:{
-    flex:1,
-    backgroundColor:"rgba(0,0,0,0.7)",
-    justifyContent:"center",
-    alignItems:"center",
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  sortModalContainer:{
-    backgroundColor:DARK,
-    width:"80%",
-    borderRadius:8,
-    padding:16,
-    alignItems:"center",
+  sortModalContainer: {
+    backgroundColor: DARK,
+    width: "80%",
+    borderRadius: 8,
+    padding: 16,
+    alignItems: "center",
   },
   removeCardButton: {
     position: "absolute",
@@ -1744,49 +2677,65 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     padding: 4,
     zIndex: 10,
-  },  
-  sortOptionButton:{
-    paddingVertical:6,
-    width:"100%",
-    marginTop:8,
   },
-  sortOptionText:{
-    color:"#FFF",
-    fontSize:14,
+  sortOptionButton: {
+    paddingVertical: 6,
+    width: "100%",
+    marginTop: 8,
+  },
+  sortOptionText: {
+    color: "#FFF",
+    fontSize: 14,
   },
 
   /** MultiCollectionsModal */
-  collectionModalContainer:{
-    backgroundColor:DARK,
-    width:"90%",
-    borderRadius:8,
-    padding:16,
+  collectionModalContainer: {
+    backgroundColor: DARK,
+    width: "90%",
+    borderRadius: 8,
+    padding: 16,
   },
-  searchContainer:{
-    flexDirection:"row",
-    backgroundColor:GRAY,
-    borderRadius:8,
-    alignItems:"center",
-    paddingHorizontal:10,
+  searchContainer: {
+    flexDirection: "row",
+    backgroundColor: GRAY,
+    borderRadius: 8,
+    alignItems: "center",
+    paddingHorizontal: 10,
   },
-  searchInput:{
-    flex:1,
-    color:"#FFF",
-    paddingVertical:6,
+  searchInput: {
+    flex: 1,
+    color: "#FFF",
+    paddingVertical: 6,
   },
-  collectionItem:{
-    paddingVertical:6,
-    borderBottomColor:"#444",
-    borderBottomWidth:1,
+  collectionItem: {
+    paddingVertical: 6,
+    borderBottomColor: "#444",
+    borderBottomWidth: 1,
   },
-  collectionItemText:{
-    color:"#FFF",
-    fontSize:14,
+  collectionItemText: {
+    color: "#FFF",
+    fontSize: 14,
+  },
+  headerButton: {
+    flexDirection: "row",
+    backgroundColor: "#444",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+  },
+
+  headerButtonText: {
+    color: "#FFF",
+    fontWeight: "bold",
+    fontSize: 14,
   },
 });
 
-/** 
- * FIM 
+/**
+ * FIM
  * Esse código evita duplicar logs/fetches e unifica localmente,
  * permitindo multi-coleção, multi-série, multi-raridade e sem
  * duplicar queries.
