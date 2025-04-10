@@ -36,7 +36,7 @@ import DraggableFlatList, {
 } from "react-native-draggable-flatlist";
 
 /** Tipos */
-type BinderType = "master" | "pokemon" | "trainer" | "general";
+type BinderType = "master" | "pokemon" | "trainer" | "artist" | "general";
 type TrainerCategory = "energy" | "all"; // agora SÓ "energy" e "all"
 type BinderSortOption = "number" | "name" | "rarity" | "quantity" | "release";
 
@@ -112,6 +112,9 @@ interface CreatingBinderState {
 
   // raridades
   selectedRarities: string[];
+
+  // artista(s)
+  selectedArtists: string[];
 
   // Loading
   loadingCards: boolean;
@@ -369,8 +372,9 @@ export default function CollectionsScreen() {
       selectedRarities: [],
       loadingCards: false,
       fetchedCards: [],
+      selectedArtists: [],
     });
-
+    const [artistModalVisible, setArtistModalVisible] = useState(false);
   const [editBinderState, setEditBinderState] = useState<{
     visible: boolean;
     binder: Binder | null;
@@ -486,6 +490,7 @@ export default function CollectionsScreen() {
       selectedRarities: [],
       loadingCards: false,
       fetchedCards: [],
+      selectedArtists: [],
     });
   }
   function closeCreateBinderModal() {
@@ -559,6 +564,10 @@ export default function CollectionsScreen() {
       setCreateBinderState((p) => ({ ...p, binderType: "trainer", step: 3 }));
     } else {
       setCreateBinderState((p) => ({ ...p, binderType: tp, step: 2 }));
+    }
+    if (tp === "artist") {
+      setCreateBinderState((p) => ({ ...p, binderType: "artist", step: 2 }));
+      return;
     }
   }
 
@@ -664,13 +673,15 @@ export default function CollectionsScreen() {
       ref = st.pokemonName.trim(); // só o nome do pokémon direto
     } else if (st.binderType === "trainer") {
       ref += `(${st.trainerCategory}), S=${st.selectedSets.length} Se=${st.selectedSeries.length}`;
+    } else if (st.binderType === "artist") {
+      ref = st.selectedArtists.join(", ");
     }
 
     // Se binderType for "pokemon", não mostramos raridades
-    // mas se for outro, ainda podemos exibir se existirem
     if (st.binderType !== "pokemon" && st.selectedRarities.length > 0) {
       ref += ` R:${st.selectedRarities.join(",")}`;
     }
+
     return ref;
   }
 
@@ -796,8 +807,8 @@ export default function CollectionsScreen() {
         break;
       case "release":
         arr.sort((a, b) =>
-          (a.releaseDate || "9999/99/99").localeCompare(
-            b.releaseDate || "9999/99/99"
+          (b.releaseDate || "0000/00/00").localeCompare(
+            a.releaseDate || "0000/00/00"
           )
         );
         break;
@@ -1395,6 +1406,22 @@ export default function CollectionsScreen() {
                   <TouchableOpacity
                     style={[
                       styles.typeIconOption,
+                      { borderColor: "#FF9800", borderWidth: 1 },
+                    ]}
+                    onPress={() => selectBinderType("artist")}
+                  >
+                    <Ionicons
+                      name="color-palette"
+                      size={40}
+                      color="#FF9800"
+                      style={{ marginBottom: 6 }}
+                    />
+                    <Text style={styles.typeIconText}>Artista</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.typeIconOption,
                       { borderColor: "#AB47BC", borderWidth: 1 },
                     ]}
                     onPress={() => selectBinderType("general")}
@@ -1503,7 +1530,7 @@ export default function CollectionsScreen() {
                 {createBinderState.binderType !== "pokemon" && (
                   <>
                     <Text style={[styles.label, { marginTop: 12 }]}>
-                      Filtrar Raridades (opcional)
+                      Filtrar Raridades (Em breve)
                     </Text>
                     <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
                       {ALL_RARITIES.map((r) => {
@@ -1531,6 +1558,47 @@ export default function CollectionsScreen() {
                         );
                       })}
                     </View>
+                  </>
+                )}
+
+                {createBinderState.binderType === "artist" && (
+                  <>
+                    {/* Remover input duplicado do nome */}
+
+                    {/* Botão de seleção de artista */}
+                    <Text style={[styles.label, { marginTop: 12 }]}>
+                      Artistas Selecionados
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.selectCollectionButton}
+                      onPress={() => setArtistModalVisible(true)}
+                    >
+                      <Ionicons
+                        name="brush"
+                        size={16}
+                        color="#FFF"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                        {createBinderState.selectedArtists.length === 0
+                          ? "Nenhum Artista Selecionado"
+                          : `${createBinderState.selectedArtists.length} artista(s)`}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Botão de buscar cartas */}
+                    <TouchableOpacity
+                      style={[styles.button, { marginTop: 12 }]}
+                      onPress={fetchCardsForBinder}
+                    >
+                      <Ionicons
+                        name="cloud-download"
+                        size={16}
+                        color="#FFF"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text style={styles.buttonText}>Buscar Cartas</Text>
+                    </TouchableOpacity>
                   </>
                 )}
 
@@ -1678,7 +1746,7 @@ export default function CollectionsScreen() {
                 {/* Se quiser remover a parte de raridades, mas no trainer poderia deixar OPCIONAL. Vou manter se quiser! 
                     Se você quer remover, é só ocultar o chunk abaixo. */}
                 <Text style={[styles.label, { marginTop: 12 }]}>
-                  Filtrar Raridades (opcional)
+                  Filtrar Raridades (Em breve)
                 </Text>
                 <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
                   {ALL_RARITIES.map((r) => {
@@ -1977,6 +2045,16 @@ export default function CollectionsScreen() {
           collections={collections}
           createBinderState={createBinderState}
           setCreateBinderState={setCreateBinderState}
+        />
+      )}
+      {artistModalVisible && (
+        <ArtistModal
+          visible={artistModalVisible}
+          onClose={() => setArtistModalVisible(false)}
+          selected={createBinderState.selectedArtists}
+          setSelected={(artists) =>
+            setCreateBinderState((p) => ({ ...p, selectedArtists: artists }))
+          }
         />
       )}
     </SafeAreaView>
@@ -2292,6 +2370,21 @@ async function doFetchWithMultiOptions(
       );
     }
     finalArr = unifyResults(finalTrainers);
+  } else if (st.binderType === "artist") {
+    if (!st.selectedArtists.length) {
+      throw new Error("Selecione pelo menos um artista.");
+    }
+
+    const all: MinimalCardData[] = [];
+
+    for (const artist of st.selectedArtists) {
+      const encoded = encodeURIComponent(`artist:"${artist}"`);
+      const url = `https://api.pokemontcg.io/v2/cards?q=${encoded}&pageSize=250`;
+      const resp = await fetchApi(url);
+      all.push(...resp);
+    }
+
+    finalArr = unifyResults(all);
   }
 
   return finalArr;
@@ -2398,6 +2491,142 @@ function labelForSort(opt: BinderSortOption) {
     default:
       return opt;
   }
+}
+
+function ArtistModal({
+  visible,
+  onClose,
+  selected,
+  setSelected,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  selected: string[];
+  setSelected: (a: string[]) => void;
+}) {
+  const [search, setSearch] = useState("");
+const [allArtists, setAllArtists] = useState<string[]>([]);
+const [loadingArtists, setLoadingArtists] = useState(false);
+
+const handleFetchArtists = async () => {
+  setLoadingArtists(true);
+  try {
+    const res = await fetch("https://api.pokemontcg.io/v2/cards?pageSize=250");
+    const data = await res.json();
+    const artistSet = new Set<string>();
+    for (const card of data.data) {
+      if (card.artist) artistSet.add(card.artist);
+    }
+    setAllArtists(Array.from(artistSet).sort());
+  } catch (err) {
+    console.log("Erro ao buscar artistas:", err);
+  } finally {
+    setLoadingArtists(false);
+  }
+};
+  
+  const filtered = useMemo(() => {
+    if (!search.trim()) return allArtists;
+    return allArtists.filter((a) =>
+      a.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [search, allArtists]);
+
+  function toggleArtist(artist: string) {
+    const already = selected.includes(artist);
+    if (already) {
+      setSelected(selected.filter((a) => a !== artist));
+    } else {
+      setSelected([...selected, artist]);
+    }
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={styles.overlay}>
+        <View style={styles.collectionModalContainer}>
+          <Text style={styles.modalTitle}>Selecionar Artistas</Text>
+
+          <View style={styles.searchContainer}>
+            <Ionicons
+              name="search"
+              size={20}
+              color="#999"
+              style={{ marginRight: 6 }}
+            />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar artista..."
+              placeholderTextColor="#999"
+              value={search}
+              onChangeText={setSearch}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.button, { marginTop: 10 }]}
+            onPress={handleFetchArtists}
+          >
+            <Ionicons
+              name="search"
+              size={16}
+              color="#FFF"
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.buttonText}>Buscar Artistas</Text>
+          </TouchableOpacity>
+
+          {loadingArtists && (
+            <ActivityIndicator
+              size="small"
+              color="#E3350D"
+              style={{ marginTop: 10, marginBottom: 10 }}
+            />
+          )}
+          {!loadingArtists && allArtists.length === 0 && (
+            <Text style={{ color: "#AAA", marginTop: 10 }}>
+              Nenhum artista encontrado.
+            </Text>
+          )}
+
+          <ScrollView style={{ maxHeight: 300, width: "100%" }}>
+            {filtered.map((artist) => {
+              const isSel = selected.includes(artist);
+              return (
+                <TouchableOpacity
+                  key={artist}
+                  style={styles.collectionItem}
+                  onPress={() => toggleArtist(artist)}
+                >
+                  <Text
+                    style={[
+                      styles.collectionItemText,
+                      isSel && { color: "#66BB6A" },
+                    ]}
+                  >
+                    {artist}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: "#999", marginTop: 14 }]}
+            onPress={onClose}
+          >
+            <Ionicons
+              name="close-circle"
+              size={16}
+              color="#FFF"
+              style={{ marginRight: 4 }}
+            />
+            <Text style={styles.buttonText}>Fechar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 /** ====== ESTILOS ====== */

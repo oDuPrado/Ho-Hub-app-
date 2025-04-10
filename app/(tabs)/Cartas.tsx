@@ -33,6 +33,7 @@ interface CardData {
     small: string;
     large?: string;
   };
+  artist?: string;
   tcgplayer?: {
     url: string;
     updatedAt: string;
@@ -56,8 +57,33 @@ interface CardData {
       symbol: string;
       logo: string;
     };
+    legalities?: {
+      standard?: string;
+    };
   };
   number?: string;
+  subtypes?: string[];
+  hp?: string;
+  types?: string[];
+  evolvesFrom?: string;
+  abilities?: {
+    type: string;
+    name: string;
+    text: string;
+  }[];
+  attacks?: {
+    cost?: string[];
+    name: string;
+    damage?: string;
+    text?: string;
+    convertedEnergyCost?: number;
+  }[];
+  weaknesses?: {
+    type: string;
+    value: string;
+  }[];
+  retreatCost?: string[];
+  convertedRetreatCost?: number;
 
   // Campos que podem existir na API
   supertype?: string; // "Pokémon", "Trainer", "Energy"
@@ -110,7 +136,6 @@ interface Binder {
   quantityMap: Record<string, number>;
 }
 
-
 /** Modal para adicionar à Coleção (Tenho/Quero) */
 interface AddToCollectionModalState {
   visible: boolean;
@@ -126,7 +151,8 @@ type SortOption =
   | "type"
   | "rarity"
   | "priceLow"
-  | "priceHigh";
+  | "priceHigh"
+  | "releaseDate";
 
 export default function CardsSearchScreen() {
   const { t } = useTranslation();
@@ -148,6 +174,9 @@ export default function CardsSearchScreen() {
   /** Modal de detalhes */
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [binders, setBinders] = useState<Binder[]>([]);
+
+  //* Modal de filtro de coleção Validos */
+  const [showOnlyLegal, setShowOnlyLegal] = useState(false);
 
   /** Modal de criação/edição (Tenho/Quero) */
   const [createState, setCreateState] = useState<CreatingState>({
@@ -171,16 +200,14 @@ export default function CardsSearchScreen() {
   /** 3) Modal para ordenação (engrenagem) */
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>("none");
-  
+
   //Modal para renomear binder
   const [nameBinderModalVisible, setNameBinderModalVisible] = useState(false);
   const [newBinderName, setNewBinderName] = useState("");
   const [pendingCard, setPendingCard] = useState<CardData | null>(null);
 
-  
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMoreCards, setHasMoreCards] = useState(true);
-
 
   /** 4) Modal para "Tenho" e "Quero" do grid */
   const [addToCollectionModal, setAddToCollectionModal] =
@@ -204,7 +231,8 @@ export default function CardsSearchScreen() {
     (async () => {
       try {
         const storedId = await AsyncStorage.getItem("@userId");
-        const storedName = (await AsyncStorage.getItem("@userName")) || "Jogador";
+        const storedName =
+          (await AsyncStorage.getItem("@userName")) || "Jogador";
         const storedFilterType = await AsyncStorage.getItem("@filterType");
         const storedLeagueId = await AsyncStorage.getItem("@leagueId");
         // NOVO: Carregar os binders do AsyncStorage
@@ -212,7 +240,6 @@ export default function CardsSearchScreen() {
         if (storedBinders) {
           setBinders(JSON.parse(storedBinders));
         }
-
 
         setPlayerId(storedId);
         setPlayerName(storedName);
@@ -247,6 +274,22 @@ export default function CardsSearchScreen() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    // Atualiza a lista de "tenho" e "quero" baseado nos binders
+    const owned = new Set<string>();
+    const wish = new Set<string>();
+
+    binders.forEach((binder) => {
+      Object.entries(binder.quantityMap).forEach(([cardId, qty]) => {
+        if (qty === 0) wish.add(cardId);
+        if (qty > 0) owned.add(cardId);
+      });
+    });
+
+    setUserOwnedCards(Array.from(owned));
+    setUserWishlist(Array.from(wish));
+  }, [binders]);
 
   /** Busca cartas pelo query (nome, setCode, etc.) [original] */
   async function searchCard(query: string) {
@@ -306,12 +349,20 @@ export default function CardsSearchScreen() {
 
       /** Caso contrário, busca por nome */
       const nameUrl = selectedCollectionId
-      ? `https://api.pokemontcg.io/v2/cards?q=set.id:"${selectedCollectionId}" name:"${encodeURIComponent(text)}"`
-      : `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
+        ? `https://api.pokemontcg.io/v2/cards?q=set.id:"${selectedCollectionId}" name:"${encodeURIComponent(text)}"`
+        : `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
       const resp2 = await fetch(nameUrl);
       const data2 = await resp2.json();
-      if (data2 && data2.data) setFilteredCards(data2.data);
-      else setFilteredCards([]);
+      if (data2 && data2.data) {
+        const onlyValid = showOnlyLegal
+          ? data2.data.filter(
+              (c: any) => c.set?.legalities?.standard === "Legal"
+            )
+          : data2.data;
+        setFilteredCards(onlyValid);
+      } else {
+        setFilteredCards([]);
+      }
     } catch (error) {
       console.error("Erro ao buscar cartas:", error);
       setFilteredCards([]);
@@ -326,21 +377,31 @@ export default function CardsSearchScreen() {
   }
 
   /** Busca cartas pela coleção */
-  async function fetchCardsByCollection(colId: string, page = 1, append = false) {
+  async function fetchCardsByCollection(
+    colId: string,
+    page = 1,
+    append = false
+  ) {
     if (!colId) return;
     setLoading(true);
     try {
       const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${colId}"&page=${page}&pageSize=50`;
       const resp = await fetch(url);
       const data = await resp.json();
-  
+
       if (data && data.data) {
+        const onlyValid = showOnlyLegal
+          ? data.data.filter(
+              (c: any) => c.set?.legalities?.standard === "Legal"
+            )
+          : data.data;
+
         if (append) {
-          setFilteredCards((prev) => [...prev, ...data.data]);
+          setFilteredCards((prev) => [...prev, ...onlyValid]);
         } else {
-          setFilteredCards(data.data);
+          setFilteredCards(onlyValid);
         }
-  
+
         // Se o retorno for menor que o limite, acabou as cartas
         setHasMoreCards(data.data.length === 50);
       } else {
@@ -353,7 +414,7 @@ export default function CardsSearchScreen() {
     } finally {
       setLoading(false);
     }
-  }  
+  }
 
   async function addCardToBinder(binderId: string, card: CardData) {
     try {
@@ -364,25 +425,25 @@ export default function CardsSearchScreen() {
         rarity: card.rarity,
         number: card.number,
       };
-  
+
       const raw = await AsyncStorage.getItem("@userBinders");
       const allBinders: Binder[] = raw ? JSON.parse(raw) : [];
-  
+
       const updated = allBinders.map((binder) => {
         if (binder.id !== binderId) return binder;
-  
+
         const alreadyHas = binder.allCards.some((c) => c.id === card.id);
         if (!alreadyHas) {
           binder.allCards.push(minimalCard);
         }
-  
+
         const isWishlist = addToCollectionModal.mode === "wish";
         const currentQty = binder.quantityMap[card.id] || 0;
-  
+
         binder.quantityMap[card.id] = isWishlist ? 0 : currentQty + 1;
         return binder;
       });
-  
+
       await AsyncStorage.setItem("@userBinders", JSON.stringify(updated));
       setBinders(updated);
       Alert.alert("Sucesso", `Carta adicionada ao binder com sucesso!`);
@@ -390,17 +451,17 @@ export default function CardsSearchScreen() {
     } catch (err) {
       console.log("Erro ao adicionar carta ao binder:", err);
     }
-  }  
+  }
 
   function askBinderName(card: CardData) {
     setPendingCard(card);
     setNewBinderName("Meu Binder");
     setNameBinderModalVisible(true);
   }
-  
+
   async function confirmCreateBinder() {
     if (!pendingCard) return;
-  
+
     const newBinder: Binder = {
       id: `binder_${Date.now()}`,
       name: newBinderName.trim() || "Binder sem Nome",
@@ -419,17 +480,16 @@ export default function CardsSearchScreen() {
         [pendingCard.id]: 1,
       },
     };
-  
+
     const updated = [...binders, newBinder];
     await AsyncStorage.setItem("@userBinders", JSON.stringify(updated));
     setBinders(updated);
-  
+
     setNameBinderModalVisible(false);
     setPendingCard(null);
     setAddToCollectionModal({ visible: false, card: null, mode: "have" });
     Alert.alert("Sucesso", "Binder criado com a carta!");
   }
-  
 
   /** Abrir / fechar modal de coleção */
   function openCollectionModal() {
@@ -447,11 +507,11 @@ export default function CardsSearchScreen() {
     setCurrentPage(1); // <- Reinicia paginação
     closeCollectionModal();
     await fetchCardsByCollection(colId);
-     // Atualiza os binders ao trocar de coleção
-  const storedBinders = await AsyncStorage.getItem("@userBinders");
-  if (storedBinders) {
-    setBinders(JSON.parse(storedBinders));
-  }
+    // Atualiza os binders ao trocar de coleção
+    const storedBinders = await AsyncStorage.getItem("@userBinders");
+    if (storedBinders) {
+      setBinders(JSON.parse(storedBinders));
+    }
   }
 
   /** Botão "Limpar filtro" => remove coleção selecionada */
@@ -466,7 +526,7 @@ export default function CardsSearchScreen() {
     const nextPage = currentPage + 1;
     setCurrentPage(nextPage);
     fetchCardsByCollection(selectedCollectionId, nextPage, true);
-  }  
+  }
 
   /** Filtro de coleções dentro do modal (por nome) */
   const filteredCollectionList = useMemo(() => {
@@ -511,6 +571,14 @@ export default function CardsSearchScreen() {
           return typeA.localeCompare(typeB);
         });
         break;
+      case "releaseDate":
+        sorted.sort((a, b) => {
+          const dA = a.set?.releaseDate || "";
+          const dB = b.set?.releaseDate || "";
+          return dB.localeCompare(dA); // mais antigo primeiro
+        });
+        break;
+
       case "rarity":
         sorted.sort((a, b) => {
           const rA = a.rarity || "zzz";
@@ -698,22 +766,22 @@ export default function CardsSearchScreen() {
   /** Quantas cartas tenho dessa coleção */
   const totalInCollection = useMemo(() => {
     if (!selectedCollectionId) return 0;
-  
+
     let count = 0;
-  
+
     binders.forEach((binder) => {
       binder.allCards.forEach((card) => {
         const original = filteredCards.find((c) => c.id === card.id);
         const qty = binder.quantityMap[card.id] || 0;
-  
+
         if (original?.set?.id === selectedCollectionId && qty >= 1) {
           count += 1;
         }
       });
     });
-  
+
     return count;
-  }, [binders, selectedCollectionId, filteredCards]);   
+  }, [binders, selectedCollectionId, filteredCards]);
 
   const totalCardsInSet = selectedCollectionInfo?.printedTotal || 0;
   const completionPercentage =
@@ -723,6 +791,17 @@ export default function CardsSearchScreen() {
 
   const SCREEN_WIDTH = Dimensions.get("window").width;
   const CARD_GRID_WIDTH = (SCREEN_WIDTH - 48) / 3;
+
+  function getFormattedCost(costArray: string[]): string {
+    const countMap: Record<string, number> = {};
+    costArray.forEach((type) => {
+      countMap[type] = (countMap[type] || 0) + 1;
+    });
+
+    return Object.entries(countMap)
+      .map(([type, count]) => `${type} x${count}`)
+      .join(", ");
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -739,7 +818,12 @@ export default function CardsSearchScreen() {
       {/* Barra de busca + Botão de filtrar coleção */}
       <View style={{ paddingHorizontal: 6 }}>
         <Animatable.View animation="fadeInDown" style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
+          <Ionicons
+            name="search"
+            size={20}
+            color="#999"
+            style={{ marginRight: 6 }}
+          />
           <TextInput
             style={styles.searchInput}
             placeholder='Buscar carta (Ex: "PGO 68")'
@@ -749,8 +833,46 @@ export default function CardsSearchScreen() {
           />
         </Animatable.View>
 
-        <TouchableOpacity style={styles.filterButton} onPress={openCollectionModal}>
-          <Ionicons name="albums" size={18} color="#FFF" style={{ marginRight: 6 }} />
+        <TouchableOpacity
+          onPress={() => {
+            const nextValue = !showOnlyLegal;
+            setShowOnlyLegal(nextValue);
+
+            if (selectedCollectionId) {
+              fetchCardsByCollection(selectedCollectionId); // Vai usar o novo valor direto do estado atualizado
+            } else if (searchQuery.trim()) {
+              searchCard(searchQuery);
+            }
+          }}
+          style={[
+            styles.filterButton,
+            {
+              marginTop: 6,
+              backgroundColor: showOnlyLegal ? "#4CAF50" : "#444",
+              flexDirection: "row",
+              alignItems: "center",
+            },
+          ]}
+        >
+          <Ionicons
+            name={showOnlyLegal ? "checkbox-outline" : "square-outline"}
+            size={18}
+            color="#FFF"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.filterButtonText}>Mostrar Todas as Cartas</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={openCollectionModal}
+        >
+          <Ionicons
+            name="albums"
+            size={18}
+            color="#FFF"
+            style={{ marginRight: 6 }}
+          />
           <Text style={styles.filterButtonText}>
             {selectedCollectionId
               ? `Mudar Coleção: ${selectedCollectionInfo?.name || ""}`
@@ -761,10 +883,17 @@ export default function CardsSearchScreen() {
 
       {/** Se houver coleção selecionada, mostra info */}
       {selectedCollectionInfo && (
-        <Animatable.View animation="fadeIn" style={styles.collectionInfoContainer}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Animatable.View
+          animation="fadeIn"
+          style={styles.collectionInfoContainer}
+        >
+          <View
+            style={{ flexDirection: "row", justifyContent: "space-between" }}
+          >
             <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.collectionInfoTitle}>{selectedCollectionInfo.name}</Text>
+              <Text style={styles.collectionInfoTitle}>
+                {selectedCollectionInfo.name}
+              </Text>
               <Text style={styles.collectionInfoText}>
                 Série: {selectedCollectionInfo.series}
               </Text>
@@ -789,7 +918,8 @@ export default function CardsSearchScreen() {
           {totalCardsInSet > 0 && (
             <View style={{ marginTop: 8 }}>
               <Text style={styles.collectionInfoText}>
-                Você tem {totalInCollection}/{totalCardsInSet} ({completionPercentage}%)
+                Você tem {totalInCollection}/{totalCardsInSet} (
+                {completionPercentage}%)
               </Text>
               <View style={styles.progressBar}>
                 <View
@@ -812,94 +942,109 @@ export default function CardsSearchScreen() {
 
       {/* GRID */}
       <FlatList
-  data={displayedCards}
-  keyExtractor={(item) => item.id}
-  numColumns={3}
-  contentContainerStyle={styles.gridContainer}
-  onEndReached={handleLoadMore}
-  onEndReachedThreshold={0.5}
-  ListEmptyComponent={() =>
-    !loading && searchQuery.length > 0 ? (
-      <Animatable.Text
-        style={styles.noResultsText}
-        animation="fadeIn"
-        duration={500}
-      >
-        Nenhuma carta encontrada.
-      </Animatable.Text>
-    ) : null
-  }
-  renderItem={({ item: card }) => {
-    const iHaveIt = userOwnedCards.includes(card.id);
-    const iWantIt = userWishlist.includes(card.id);
+        data={displayedCards}
+        keyExtractor={(item) => item.id}
+        numColumns={3}
+        contentContainerStyle={styles.gridContainer}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        ListEmptyComponent={() =>
+          !loading && searchQuery.length > 0 ? (
+            <Animatable.Text
+              style={styles.noResultsText}
+              animation="fadeIn"
+              duration={500}
+            >
+              Nenhuma carta encontrada.
+            </Animatable.Text>
+          ) : null
+        }
+        renderItem={({ item: card }) => {
+          const iHaveIt = userOwnedCards.includes(card.id);
+          const iWantIt = userWishlist.includes(card.id);
 
-    return (
-      <Animatable.View
-        key={card.id}
-        style={[
-          styles.gridItem,
-          { width: CARD_GRID_WIDTH, marginHorizontal: 4 },
-        ]}
-        animation="fadeInUp"
-        duration={600}
-      >
-        <TouchableOpacity
-          style={styles.cardInner}
-          onPress={() => openCardModal(card)}
-          activeOpacity={0.9}
-        >
+          return (
+            <Animatable.View
+              key={card.id}
+              style={[
+                styles.gridItem,
+                { width: CARD_GRID_WIDTH, marginHorizontal: 4 },
+              ]}
+              animation="fadeInUp"
+              duration={600}
+            >
+              <TouchableOpacity
+                style={styles.cardInner}
+                onPress={() => openCardModal(card)}
+                activeOpacity={0.9}
+              >
+                {/* FLAG VISUAL */}
+                <View style={styles.cardFlagWrapper}>
+                  {iHaveIt && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color="#4CAF50"
+                    />
+                  )}
+                  {!iHaveIt && iWantIt && (
+                    <Ionicons name="heart" size={18} color="#EC407A" />
+                  )}
+                </View>
 
-          {/* FLAG VISUAL */}
-        <View style={styles.cardFlagWrapper}>
-          {iHaveIt && (
-            <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
-          )}
-          {!iHaveIt && iWantIt && (
-            <Ionicons name="heart" size={18} color="#EC407A" />
-          )}
-        </View>
-          <Image
-            source={{ uri: card.images.small }}
-            style={{
-              width: CARD_GRID_WIDTH * 0.9,
-              height: CARD_GRID_WIDTH * 1.2,
-              marginBottom: 4,
-            }}
-            resizeMode="contain"
-          />
-          <Text style={styles.cardNameGrid} numberOfLines={1}>
-            {card.name}
-          </Text>
-          <Text style={styles.cardSetInfoGrid} numberOfLines={1}>
-            {card.set?.name} - {card.number}
-          </Text>
-          
-        </TouchableOpacity>
+                {/* IMAGEM DA CARTA */}
+                <Image
+                  source={{ uri: card.images.small }}
+                  style={{
+                    width: CARD_GRID_WIDTH * 0.95,
+                    height: CARD_GRID_WIDTH * 1.3,
+                    marginBottom: 6,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: "#666",
+                    backgroundColor: "#111",
+                  }}
+                  resizeMode="contain"
+                />
 
-        <View style={styles.gridButtonsRow}>
-          <TouchableOpacity
-            style={[
-              styles.haveButton,
-              iHaveIt && { backgroundColor: "#66BB6A" },
-            ]}
-            onPress={() => onPressHaveInGrid(card)}
-          >
-            <Ionicons name="checkmark-done" size={18} color="#FFF" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.wantButton,
-              iWantIt && { backgroundColor: "#EC407A" },
-            ]}
-            onPress={() => onPressWantInGrid(card)}
-          >
-            <Ionicons name="heart" size={18} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-      </Animatable.View>
-    );
-  }}
-/>
+                <Text style={styles.cardNameGrid} numberOfLines={1}>
+                  {card.name}
+                </Text>
+
+                {/* Badge de válida */}
+                {card.set?.legalities?.standard === "Legal" && (
+                  <Text style={styles.validTag}>✓ Válida</Text>
+                )}
+
+                <Text style={styles.cardSetInfoGrid} numberOfLines={1}>
+                  {card.set?.name} - {card.number}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.gridButtonsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.haveButton,
+                    iHaveIt && { backgroundColor: "#66BB6A" },
+                  ]}
+                  onPress={() => onPressHaveInGrid(card)}
+                >
+                  <Ionicons name="checkmark-done" size={18} color="#FFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.wantButton,
+                    iWantIt && { backgroundColor: "#EC407A" },
+                  ]}
+                  onPress={() => onPressWantInGrid(card)}
+                >
+                  <Ionicons name="heart" size={18} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+            </Animatable.View>
+          );
+        }}
+      />
 
       {/** MODAL de Detalhes */}
       <Modal
@@ -912,8 +1057,16 @@ export default function CardsSearchScreen() {
           <ScrollView contentContainerStyle={styles.modalScroll}>
             {selectedCard && (
               <>
+                {/* Título (Nome da carta) */}
                 <Text style={styles.modalTitle}>{selectedCard.name}</Text>
 
+                {selectedCard.set?.name && (
+                  <Text style={styles.modalSubTitle}>
+                    {selectedCard.set.name} - {selectedCard.number}
+                  </Text>
+                )}
+
+                {/* Imagem grande da carta */}
                 <Animatable.Image
                   animation="pulse"
                   iterationCount="infinite"
@@ -923,56 +1076,200 @@ export default function CardsSearchScreen() {
                   resizeMode="contain"
                 />
 
-                {selectedCard.tcgplayer ? (
-                  <>
-                    <Text style={styles.modalText}>
-                      Preço atualizado em: {selectedCard.tcgplayer.updatedAt}
-                    </Text>
-
-                    <View style={styles.rarityRow}>
-                      {Object.keys(selectedCard.tcgplayer.prices).map((rarity) => {
-                        const priceData = selectedCard.tcgplayer!.prices[rarity];
-                        return (
-                          <View key={rarity} style={styles.rarityCard}>
-                            <Text style={styles.rarityCardTitle}>{rarity}</Text>
-                            <Text style={styles.rarityCardPrice}>
-                              Low: ${priceData.low?.toFixed(2) ?? "--"}
-                            </Text>
-                            <Text style={styles.rarityCardPrice}>
-                              Mid: ${priceData.mid?.toFixed(2) ?? "--"}
-                            </Text>
-                            <Text style={styles.rarityCardPrice}>
-                              Market: ${priceData.market?.toFixed(2) ?? "--"}
-                            </Text>
-                            <Text style={styles.rarityCardPrice}>
-                              High: ${priceData.high?.toFixed(2) ?? "--"}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-
-                    <TouchableOpacity
-                      style={styles.linkButton}
-                      onPress={() =>
-                        selectedCard.tcgplayer?.url &&
-                        Linking.openURL(selectedCard.tcgplayer.url)
-                      }
-                    >
-                      <Ionicons
-                        name="open-outline"
-                        size={18}
-                        color="#FFF"
-                        style={{ marginRight: 6 }}
-                      />
-                      <Text style={styles.linkButtonText}>Abrir TCGPlayer</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <Text style={styles.modalText}>(Sem info de preço)</Text>
+                {selectedCard.artist && (
+                  <Text style={styles.cardInfoText}>
+                    <Text style={styles.cardInfoLabel}>Ilustrador: </Text>
+                    {selectedCard.artist}
+                  </Text>
                 )}
 
-                <View style={styles.actionButtonsContainer}>
+                {/* Seções de informações do Pokémon */}
+                {selectedCard.supertype === "Pokémon" && (
+                  <View style={styles.cardInfoSection}>
+                    {/* Mostramos subtypes, HP, evolvesFrom */}
+                    <Text style={styles.cardInfoText}>
+                      <Text style={styles.cardInfoLabel}>Tipo: </Text>
+                      {selectedCard.supertype}
+                      {selectedCard.subtypes && selectedCard.subtypes.length > 0
+                        ? ` (${selectedCard.subtypes.join(", ")})`
+                        : ""}
+                    </Text>
+
+                    {/* HP */}
+                    {selectedCard.hp && (
+                      <Text style={styles.cardInfoText}>
+                        <Text style={styles.cardInfoLabel}>HP: </Text>
+                        {selectedCard.hp}
+                      </Text>
+                    )}
+
+                    {/* Evolui de */}
+                    {selectedCard.evolvesFrom && (
+                      <Text style={styles.cardInfoText}>
+                        <Text style={styles.cardInfoLabel}>Evolui de: </Text>
+                        {selectedCard.evolvesFrom}
+                      </Text>
+                    )}
+
+                    {/* Abilities */}
+                    {selectedCard.abilities &&
+                      selectedCard.abilities.length > 0 && (
+                        <View style={styles.cardInfoBlock}>
+                          <Text style={styles.cardInfoSubtitle}>
+                            Habilidades:
+                          </Text>
+                          {selectedCard.abilities.map((ab, idx) => (
+                            <View key={idx} style={styles.abilityBox}>
+                              <Text style={styles.abilityTitle}>
+                                {ab.name}{" "}
+                                {ab.type ? (
+                                  <Text
+                                    style={{
+                                      color: "#FFA726",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    ({ab.type})
+                                  </Text>
+                                ) : null}
+                              </Text>
+                              <Text style={styles.abilityText}>{ab.text}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                    {/* Ataques */}
+                    {selectedCard.attacks &&
+                      selectedCard.attacks.length > 0 && (
+                        <View style={styles.cardInfoBlock}>
+                          <Text style={styles.cardInfoSubtitle}>Ataques:</Text>
+                          {selectedCard.attacks.map((atk, idx) => (
+                            <View key={idx} style={styles.attackBox}>
+                              <Text style={styles.attackName}>
+                                {atk.name}{" "}
+                                {atk.damage ? (
+                                  <Text
+                                    style={{
+                                      color: "#EF5350",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    ({atk.damage} de dano)
+                                  </Text>
+                                ) : null}
+                              </Text>
+                              {/* Se tiver "cost", mostra ícones ou só lista */}
+                              {atk.cost && atk.cost.length > 0 && (
+                                <Text style={styles.attackCost}>
+                                  Custo: {atk.cost.join(", ")}
+                                </Text>
+                              )}
+                              {atk.text ? (
+                                <Text style={styles.abilityText}>
+                                  {atk.text}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                    {/* Fraquezas */}
+                    {selectedCard.weaknesses &&
+                      selectedCard.weaknesses.length > 0 && (
+                        <View style={styles.cardInfoBlock}>
+                          <Text style={styles.cardInfoSubtitle}>
+                            Fraquezas:
+                          </Text>
+                          {selectedCard.weaknesses.map((w, idx) => (
+                            <Text key={idx} style={styles.cardInfoText}>
+                              {w.type} {w.value}
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+
+                    {/* Custo de recuo */}
+                    {selectedCard.retreatCost &&
+                      selectedCard.retreatCost.length > 0 && (
+                        <Text style={styles.cardInfoText}>
+                          <Text style={styles.cardInfoLabel}>
+                            Custo de Recuo:{" "}
+                          </Text>
+                          {selectedCard.retreatCost.join(", ")}
+                        </Text>
+                      )}
+                  </View>
+                )}
+
+                {/* Seções de informação de preço (TCGPlayer) */}
+                <View style={[styles.cardInfoSection, { marginTop: 12 }]}>
+                  {selectedCard.tcgplayer ? (
+                    <>
+                      <Text style={styles.cardInfoSubtitle}>
+                        Informações de Preço
+                      </Text>
+                      <Text style={styles.modalText}>
+                        Última atualização: {selectedCard.tcgplayer.updatedAt}
+                      </Text>
+
+                      <View style={styles.rarityRow}>
+                        {Object.keys(selectedCard.tcgplayer.prices).map(
+                          (rarity) => {
+                            const priceData =
+                              selectedCard.tcgplayer!.prices[rarity];
+                            return (
+                              <View key={rarity} style={styles.rarityCard}>
+                                <Text style={styles.rarityCardTitle}>
+                                  {rarity}
+                                </Text>
+                                <Text style={styles.rarityCardPrice}>
+                                  Low: ${priceData.low?.toFixed(2) ?? "--"}
+                                </Text>
+                                <Text style={styles.rarityCardPrice}>
+                                  Mid: ${priceData.mid?.toFixed(2) ?? "--"}
+                                </Text>
+                                <Text style={styles.rarityCardPrice}>
+                                  Market: $
+                                  {priceData.market?.toFixed(2) ?? "--"}
+                                </Text>
+                                <Text style={styles.rarityCardPrice}>
+                                  High: ${priceData.high?.toFixed(2) ?? "--"}
+                                </Text>
+                              </View>
+                            );
+                          }
+                        )}
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.linkButton}
+                        onPress={() =>
+                          selectedCard.tcgplayer?.url &&
+                          Linking.openURL(selectedCard.tcgplayer.url)
+                        }
+                      >
+                        <Ionicons
+                          name="open-outline"
+                          size={18}
+                          color="#FFF"
+                          style={{ marginRight: 6 }}
+                        />
+                        <Text style={styles.linkButtonText}>
+                          Abrir TCGPlayer
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <Text style={styles.modalText}>(Sem info de preço)</Text>
+                  )}
+                </View>
+
+                {/* Botões "Tenho" e "Quero" - reorganizados */}
+                <View
+                  style={[styles.actionButtonsContainer, { marginTop: 20 }]}
+                >
                   <Animatable.View animation="bounceIn" delay={200}>
                     <TouchableOpacity
                       style={styles.actionButton}
@@ -1004,8 +1301,17 @@ export default function CardsSearchScreen() {
                   </Animatable.View>
                 </View>
 
-                <TouchableOpacity style={styles.closeButton} onPress={closeCardModal}>
-                  <Ionicons name="close" size={20} color="#FFF" style={{ marginRight: 6 }} />
+                {/* Botão fechar no final */}
+                <TouchableOpacity
+                  style={styles.closeButton}
+                  onPress={closeCardModal}
+                >
+                  <Ionicons
+                    name="close"
+                    size={20}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
                   <Text style={styles.closeButtonText}>Fechar</Text>
                 </TouchableOpacity>
               </>
@@ -1045,7 +1351,8 @@ export default function CardsSearchScreen() {
                       <TouchableOpacity
                         style={[
                           styles.switchTypeButton,
-                          createState.type === "sale" && styles.switchTypeButtonActive,
+                          createState.type === "sale" &&
+                            styles.switchTypeButtonActive,
                         ]}
                         onPress={() =>
                           setCreateState((prev) => ({ ...prev, type: "sale" }))
@@ -1063,7 +1370,8 @@ export default function CardsSearchScreen() {
                       <TouchableOpacity
                         style={[
                           styles.switchTypeButton,
-                          createState.type === "trade" && styles.switchTypeButtonActive,
+                          createState.type === "trade" &&
+                            styles.switchTypeButtonActive,
                         ]}
                         onPress={() =>
                           setCreateState((prev) => ({ ...prev, type: "trade" }))
@@ -1082,7 +1390,9 @@ export default function CardsSearchScreen() {
                     {createState.type === "sale" && (
                       <>
                         <Text style={styles.modalLabel}>Preço</Text>
-                        <View style={{ flexDirection: "row", marginBottom: 12 }}>
+                        <View
+                          style={{ flexDirection: "row", marginBottom: 12 }}
+                        >
                           <TouchableOpacity
                             style={[
                               styles.switchTypeButton,
@@ -1133,7 +1443,10 @@ export default function CardsSearchScreen() {
                             style={styles.modalInput}
                             value={createState.priceValue}
                             onChangeText={(val) =>
-                              setCreateState((prev) => ({ ...prev, priceValue: val }))
+                              setCreateState((prev) => ({
+                                ...prev,
+                                priceValue: val,
+                              }))
                             }
                             placeholder='Ex: "R$ 15,00"'
                             placeholderTextColor="#888"
@@ -1218,112 +1531,136 @@ export default function CardsSearchScreen() {
 
       {/** Modal "Tenho / Quero" do grid */}
       <Modal
-  visible={addToCollectionModal.visible}
-  animationType="slide"
-  transparent={true}
-  onRequestClose={handleCloseAddCollectionModal}
->
-  <View style={styles.addCollectionOverlay}>
-    <View style={styles.addCollectionContainer}>
-      <Text style={styles.modalTitle}>Escolher Binder</Text>
+        visible={addToCollectionModal.visible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleCloseAddCollectionModal}
+      >
+        <View style={styles.addCollectionOverlay}>
+          <View style={styles.addCollectionContainer}>
+            <Text style={styles.modalTitle}>Escolher Binder</Text>
 
-      {addToCollectionModal.card && (
-        <>
-          <Image
-            source={{ uri: addToCollectionModal.card.images.small }}
-            style={styles.modalImage}
-            resizeMode="contain"
-          />
-          <Text style={styles.modalText}>{addToCollectionModal.card.name}</Text>
-        </>
-      )}
+            {addToCollectionModal.card && (
+              <>
+                <Image
+                  source={{ uri: addToCollectionModal.card.images.small }}
+                  style={styles.modalImage}
+                  resizeMode="contain"
+                />
+                <Text style={styles.modalText}>
+                  {addToCollectionModal.card.name}
+                </Text>
+              </>
+            )}
 
-      <ScrollView style={{ maxHeight: 200, marginTop: 10, width: "100%" }}>
-        {binders.map((binder) => (
-          <TouchableOpacity
-            key={binder.id}
-            style={[styles.switchTypeButton, { marginBottom: 6 }]}
-            onPress={() => addCardToBinder(binder.id, addToCollectionModal.card!)}
-          >
-            <Ionicons
-              name="albums"
-              size={16}
-              color="#FFF"
-              style={{ marginRight: 6 }}
+            <ScrollView
+              style={{ maxHeight: 200, marginTop: 10, width: "100%" }}
+            >
+              {binders.map((binder) => (
+                <TouchableOpacity
+                  key={binder.id}
+                  style={[styles.switchTypeButton, { marginBottom: 6 }]}
+                  onPress={() =>
+                    addCardToBinder(binder.id, addToCollectionModal.card!)
+                  }
+                >
+                  <Ionicons
+                    name="albums"
+                    size={16}
+                    color="#FFF"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.switchTypeText}>{binder.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[
+                styles.switchTypeButton,
+                { backgroundColor: "#555", marginTop: 10 },
+              ]}
+              onPress={() => askBinderName(addToCollectionModal.card!)}
+            >
+              <Ionicons
+                name="add-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.switchTypeText}>
+                Criar Novo Binder com essa Carta
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.button,
+                { backgroundColor: "#999", marginTop: 20 },
+              ]}
+              onPress={handleCloseAddCollectionModal}
+            >
+              <Ionicons
+                name="close-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.buttonText}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={nameBinderModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setNameBinderModalVisible(false)}
+      >
+        <View style={styles.addCollectionOverlay}>
+          <View style={styles.addCollectionContainer}>
+            <Text style={styles.modalTitle}>Nome do Novo Binder</Text>
+
+            <TextInput
+              style={styles.modalInput}
+              value={newBinderName}
+              onChangeText={setNewBinderName}
+              placeholder="Digite um nome..."
+              placeholderTextColor="#999"
             />
-            <Text style={styles.switchTypeText}>{binder.name}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
 
-      <TouchableOpacity
-        style={[
-          styles.switchTypeButton,
-          { backgroundColor: "#555", marginTop: 10 },
-        ]}
-        onPress={() => askBinderName(addToCollectionModal.card!)}
-      >
-        <Ionicons
-          name="add-circle"
-          size={16}
-          color="#FFF"
-          style={{ marginRight: 4 }}
-        />
-        <Text style={styles.switchTypeText}>Criar Novo Binder com essa Carta</Text>
-      </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, { marginTop: 12 }]}
+              onPress={confirmCreateBinder}
+            >
+              <Ionicons
+                name="checkmark-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.buttonText}>Criar</Text>
+            </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
-        onPress={handleCloseAddCollectionModal}
-      >
-        <Ionicons
-          name="close-circle"
-          size={16}
-          color="#FFF"
-          style={{ marginRight: 4 }}
-        />
-        <Text style={styles.buttonText}>Fechar</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-</Modal>
-
-<Modal
-  visible={nameBinderModalVisible}
-  animationType="fade"
-  transparent
-  onRequestClose={() => setNameBinderModalVisible(false)}
->
-  <View style={styles.addCollectionOverlay}>
-    <View style={styles.addCollectionContainer}>
-      <Text style={styles.modalTitle}>Nome do Novo Binder</Text>
-
-      <TextInput
-        style={styles.modalInput}
-        value={newBinderName}
-        onChangeText={setNewBinderName}
-        placeholder="Digite um nome..."
-        placeholderTextColor="#999"
-      />
-
-      <TouchableOpacity
-        style={[styles.button, { marginTop: 12 }]}
-        onPress={confirmCreateBinder}
-      >
-        <Ionicons name="checkmark-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
-        <Text style={styles.buttonText}>Criar</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.button, { backgroundColor: "#999", marginTop: 10 }]}
-        onPress={() => setNameBinderModalVisible(false)}
-      >
-        <Ionicons name="close-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
-        <Text style={styles.buttonText}>Cancelar</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-</Modal>
+            <TouchableOpacity
+              style={[
+                styles.button,
+                { backgroundColor: "#999", marginTop: 10 },
+              ]}
+              onPress={() => setNameBinderModalVisible(false)}
+            >
+              <Ionicons
+                name="close-circle"
+                size={16}
+                color="#FFF"
+                style={{ marginRight: 4 }}
+              />
+              <Text style={styles.buttonText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/** MODAL Ordenação */}
       <Modal
@@ -1368,6 +1705,16 @@ export default function CardsSearchScreen() {
 
             <TouchableOpacity
               style={styles.sortOptionButton}
+              onPress={() => selectSortOption("releaseDate")}
+            >
+              <Text style={styles.sortOptionText}>
+                {sortOption === "releaseDate" ? "✓ " : ""}
+                Lançamento (Novo → Antigo)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.sortOptionButton}
               onPress={() => selectSortOption("type")}
             >
               <Text style={styles.sortOptionText}>
@@ -1407,7 +1754,10 @@ export default function CardsSearchScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 20 }]}
+              style={[
+                styles.button,
+                { backgroundColor: "#999", marginTop: 20 },
+              ]}
               onPress={closeSortModal}
             >
               <Ionicons
@@ -1434,7 +1784,12 @@ export default function CardsSearchScreen() {
             <Text style={styles.modalTitle}>Selecionar Coleção</Text>
 
             <View style={styles.searchContainerSmall}>
-              <Ionicons name="search" size={20} color="#999" style={{ marginRight: 6 }} />
+              <Ionicons
+                name="search"
+                size={20}
+                color="#999"
+                style={{ marginRight: 6 }}
+              />
               <TextInput
                 style={styles.searchInputSmall}
                 placeholder="Buscar coleção..."
@@ -1444,33 +1799,40 @@ export default function CardsSearchScreen() {
               />
             </View>
 
-            <ScrollView style={{ maxHeight: 300, width: "100%", marginTop: 10 }}>
+            <ScrollView
+              style={{ maxHeight: 300, width: "100%", marginTop: 10 }}
+            >
               {filteredCollectionList.map((col) => (
                 <TouchableOpacity
-                key={col.id}
-                style={[
-                  styles.collectionItem,
-                  selectedCollectionId === col.id && { backgroundColor: "#444" },
-                ]}
-                onPress={() => handleSelectCollection(col.id)}
-              >
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <Text style={styles.collectionItemText}>{col.name}</Text>
-                  {selectedCollectionId === col.id && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={18}
-                      color="#4CAF50"
-                      style={{ marginLeft: 8 }}
-                    />
-                  )}
-                </View>
-              </TouchableOpacity>              
+                  key={col.id}
+                  style={[
+                    styles.collectionItem,
+                    selectedCollectionId === col.id && {
+                      backgroundColor: "#444",
+                    },
+                  ]}
+                  onPress={() => handleSelectCollection(col.id)}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <Text style={styles.collectionItemText}>{col.name}</Text>
+                    {selectedCollectionId === col.id && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color="#4CAF50"
+                        style={{ marginLeft: 8 }}
+                      />
+                    )}
+                  </View>
+                </TouchableOpacity>
               ))}
             </ScrollView>
 
             <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#999", marginTop: 10 }]}
+              style={[
+                styles.button,
+                { backgroundColor: "#999", marginTop: 10 },
+              ]}
               onPress={clearCollectionFilter}
             >
               <Ionicons
@@ -1483,7 +1845,10 @@ export default function CardsSearchScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.button, { backgroundColor: "#444", marginTop: 10 }]}
+              style={[
+                styles.button,
+                { backgroundColor: "#444", marginTop: 10 },
+              ]}
               onPress={closeCollectionModal}
             >
               <Ionicons
@@ -1579,7 +1944,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 6,
-  },  
+  },
   collectionInfoText: {
     color: "#DDD",
     fontSize: 13,
@@ -1617,24 +1982,40 @@ const styles = StyleSheet.create({
   gridItem: {
     marginBottom: 12,
     backgroundColor: "#292929",
-    borderRadius: 8,
-    padding: 6,
+    borderRadius: 12,
+    padding: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "#444",
   },
+
   cardInner: {
     alignItems: "center",
-    position: "relative", // <- necessário pra o flag funcionar direito
+    position: "relative",
   },
+
   cardNameGrid: {
-    color: SECONDARY,
-    fontSize: 14,
+    color: "#FFD700",
+    fontSize: 15,
     textAlign: "center",
-    fontWeight: "600",
+    fontWeight: "bold",
+    marginTop: 4,
+    textShadowColor: "#000",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
+
   cardSetInfoGrid: {
-    color: "#CCC",
+    color: "#AAA",
     fontSize: 12,
     marginTop: 2,
+    textAlign: "center",
   },
+
   gridButtonsRow: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -1682,7 +2063,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     textTransform: "uppercase",
   },
-  
+
   modalImage: {
     width: 180,
     height: 250,
@@ -1695,7 +2076,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
   },
-  
+
   modalText: {
     color: SECONDARY,
     fontSize: 14,
@@ -1727,7 +2108,7 @@ const styles = StyleSheet.create({
     color: "#DDD",
     fontSize: 13,
     marginBottom: 2,
-  },  
+  },
   linkButton: {
     flexDirection: "row",
     backgroundColor: PRIMARY,
@@ -1765,7 +2146,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "bold",
     marginLeft: 6,
-  },  
+  },
   closeButton: {
     flexDirection: "row",
     backgroundColor: PRIMARY,
@@ -1817,7 +2198,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 4,
     height: 40, // 👈 altura fixa aqui
-  },  
+  },
   modalButtons: {
     flexDirection: "row",
     marginTop: 16,
@@ -1894,17 +2275,107 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderBottomColor: "#444",
     borderBottomWidth: 1,
-  },  
+  },
   collectionItemText: {
     color: "#FFF",
     fontSize: 15,
     fontWeight: "bold",
-  },  
+  },
   cardFlagWrapper: {
     position: "absolute",
     top: 6,
     right: 6,
     zIndex: 10,
   },
-  
+  validTag: {
+    color: "#4CAF50",
+    fontSize: 11,
+    fontWeight: "bold",
+    marginTop: 2,
+    textAlign: "center",
+    backgroundColor: "#1B5E20",
+    paddingHorizontal: 6,
+    borderRadius: 8,
+  },
+
+  haveBadge: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    backgroundColor: "#4CAF50",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    zIndex: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+
+  haveBadgeText: {
+    color: "#FFF",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  cardInfoSection: {
+    backgroundColor: "#333",
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  cardInfoText: {
+    color: "#FFF",
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  cardInfoLabel: {
+    fontWeight: "bold",
+    color: "#FFD700",
+  },
+  cardInfoSubtitle: {
+    color: "#FFD700",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 8,
+    textAlign: "left",
+    textTransform: "uppercase",
+  },
+  cardInfoBlock: {
+    marginTop: 6,
+    backgroundColor: "#444",
+    borderRadius: 6,
+    padding: 8,
+  },
+  abilityBox: {
+    marginBottom: 10,
+  },
+  abilityTitle: {
+    color: "#4FC3F7",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  abilityText: {
+    color: "#FFF",
+    fontSize: 13,
+  },
+  attackBox: {
+    marginBottom: 10,
+  },
+  attackName: {
+    color: "#FB8C00",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
+  attackCost: {
+    color: "#FFCC80",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  modalSubTitle: {
+    fontSize: 14,
+    color: "#DDD",
+    marginBottom: 10,
+    textAlign: "center",
+  },
 });
