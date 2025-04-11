@@ -153,8 +153,15 @@ export default function LoginScreen() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
 
+  // >>> ESTADO PARA GUARDAR O TIPO DE USUÁRIO <<<
+  const [selectedTypeUser, setSelectedTypeUser] = useState<
+    "tournament" | "collection" | "both"
+  >("both");
+
   // >>> Guardamos uma ação extra para executar quando o modal fechar
-  const [onModalCloseAction, setOnModalCloseAction] = useState<() => void>(() => {});
+  const [onModalCloseAction, setOnModalCloseAction] = useState<() => void>(
+    () => {}
+  );
 
   // Mostra o modal e define uma ação a ser executada quando clicar em "OK"
   function showModal(title: string, message: string, onCloseCb?: () => void) {
@@ -280,13 +287,9 @@ export default function LoginScreen() {
           // Checar se está banido
           const banned = await isUserBanned(data.playerId);
           if (banned) {
-            showModal(
-              "Banido!",
-              t("login.alerts.ban_message"),
-              () => {
-                // Ao fechar, não navega, apenas fica aqui
-              }
-            );
+            showModal("Banido!", t("login.alerts.ban_message"), () => {
+              // Ao fechar, não navega, apenas fica aqui
+            });
             await signOut(auth);
             setLoading(false);
             return;
@@ -298,6 +301,7 @@ export default function LoginScreen() {
           await AsyncStorage.setItem("@userName", data.name || "Jogador");
           await AsyncStorage.setItem("@firebaseUID", user.uid);
           await AsyncStorage.setItem("@firebaseToken", firebaseToken);
+          await AsyncStorage.setItem("@userType", data.type_user || "both");
 
           if (stayLogged) {
             await AsyncStorage.setItem("@stayLogged", "true");
@@ -306,13 +310,9 @@ export default function LoginScreen() {
           }
 
           // Exibir modal de Bem-vindo e, ao fechar, navegar para Home
-          showModal(
-            "Bem-vindo!",
-            `Olá, ${data.name || "Jogador"}!`,
-            () => {
-              router.push("/(tabs)/home");
-            }
-          );
+          showModal("Bem-vindo!", `Olá, ${data.name || "Jogador"}!`, () => {
+            router.push("/(tabs)/home");
+          });
         } catch (e) {
           console.log("Erro no onAuthStateChanged:", e);
           showModal("Erro", "Falha ao carregar dados.");
@@ -332,18 +332,21 @@ export default function LoginScreen() {
 
   // >>> Renovar token (foreground)
   useEffect(() => {
-    const interval = setInterval(async () => {
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        try {
-          const newToken = await currentUser.getIdToken(true);
-          await AsyncStorage.setItem("@firebaseToken", newToken);
-          console.log("Token renovado (foreground).");
-        } catch (err) {
-          console.log("Erro ao renovar token em foreground:", err);
+    const interval = setInterval(
+      async () => {
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          try {
+            const newToken = await currentUser.getIdToken(true);
+            await AsyncStorage.setItem("@firebaseToken", newToken);
+            console.log("Token renovado (foreground).");
+          } catch (err) {
+            console.log("Erro ao renovar token em foreground:", err);
+          }
         }
-      }
-    }, 55 * 60 * 1000);
+      },
+      55 * 60 * 1000
+    );
     return () => clearInterval(interval);
   }, []);
 
@@ -362,11 +365,14 @@ export default function LoginScreen() {
       }
     };
 
-    const appStateListener = AppState.addEventListener("change", (nextAppState) => {
-      if (nextAppState === "active") {
-        renewToken();
+    const appStateListener = AppState.addEventListener(
+      "change",
+      (nextAppState) => {
+        if (nextAppState === "active") {
+          renewToken();
+        }
       }
-    });
+    );
 
     return () => appStateListener.remove();
   }, []);
@@ -391,7 +397,13 @@ export default function LoginScreen() {
   // FUNÇÕES DE SIGNUP, LOGIN, RESET
   //////////////////////////////////////
   async function handleSignUp() {
-    if (!email || !password || !userId || !pin || !playerName) {
+    if (
+      !email ||
+      !password ||
+      !userId ||
+      (!pin && selectedTypeUser !== "collection") ||
+      !playerName
+    ) {
       showModal("", t("login.alerts.empty_fields"));
       return;
     }
@@ -403,22 +415,42 @@ export default function LoginScreen() {
       showModal("", t("login.alerts.weak_password"));
       return;
     }
+    if (selectedTypeUser !== "collection" && (!/^\d{4}$/.test(pin))) {
+      showModal("", "PIN inválido. Deve conter 4 dígitos numéricos.");
+      return;
+    }    
+
     setLoading(true);
     try {
+      // Se for só coleção, gera um PIN aleatório
+      let finalPin = pin;
+      if (selectedTypeUser === "collection") {
+        finalPin = Math.floor(1000 + Math.random() * 9000).toString();
+      }
+
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       const docRef = doc(db, "login", cred.user.uid);
+
       await setDoc(docRef, {
         email,
         playerId: userId,
-        pin,
+        pin: finalPin,
         name: playerName,
+        type_user: selectedTypeUser,
         createdAt: new Date().toISOString(),
       });
+
       await saveLoginData(email, password);
 
-      showModal("", t("login.alerts.signup_success", { playerId: userId, pin }));
+      showModal(
+        "",
+        t("login.alerts.signup_success", { playerId: userId, pin: finalPin })
+      );
     } catch (err: any) {
-      showModal("", t("login.alerts.signup_error", { error: err.message || "" }));
+      showModal(
+        "",
+        t("login.alerts.signup_error", { error: err.message || "" })
+      );
     } finally {
       setLoading(false);
     }
@@ -441,7 +473,9 @@ export default function LoginScreen() {
       } else if (err.code === "auth/user-not-found") {
         msg = t("login.alerts.user_not_found");
       }
-      showModal(t("login.alerts.login_error", { error: "" }), msg);
+      showModal(t("login.alerts.login_error", { error: "" }), msg, () => {
+        setLoading(false); // <- isso aqui destrava a tela depois do erro
+      });      
     } finally {
       setLoading(false);
     }
@@ -629,7 +663,10 @@ export default function LoginScreen() {
 
             {/* ESQUECI A SENHA */}
             {mode === "login" && (
-              <TouchableOpacity style={s.forgotButton} onPress={handleResetPassword}>
+              <TouchableOpacity
+                style={s.forgotButton}
+                onPress={handleResetPassword}
+              >
                 <Text style={s.forgotText}>{t("login.forgot_password")}</Text>
               </TouchableOpacity>
             )}
@@ -686,35 +723,71 @@ export default function LoginScreen() {
                   />
                 </View>
 
-                {/* PIN */}
-                <Text style={s.label}>{t("login.pin_label")}</Text>
-                <View style={s.inputContainer}>
-                  <Ionicons
-                    name="key-outline"
-                    size={20}
-                    color="#999"
-                    style={{ marginLeft: 10, marginRight: 6 }}
-                  />
-                  <TextInput
-                    style={[s.input, { flex: 1 }]}
-                    placeholder={t("login.pin_placeholder") || ""}
-                    placeholderTextColor={COLORS.INPUT_BORDER}
-                    secureTextEntry={!showPin}
-                    value={pin}
-                    onChangeText={setPin}
-                    keyboardType="numeric"
-                  />
-                  <TouchableOpacity
-                    style={{ marginRight: 10 }}
-                    onPress={() => setShowPin(!showPin)}
-                  >
-                    <Ionicons
-                      name={showPin ? "eye-off-outline" : "eye-outline"}
-                      size={20}
-                      color={COLORS.SECONDARY}
-                    />
-                  </TouchableOpacity>
+                <Text style={s.label}>Tipo de Usuário</Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                >
+                  {[
+                    { label: "Coleção", value: "collection" },
+                    { label: "Torneio", value: "tournament" },
+                    { label: "Ambos", value: "both" },
+                  ].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.value}
+                      onPress={() => setSelectedTypeUser(opt.value as any)}
+                      style={{
+                        backgroundColor:
+                          selectedTypeUser === opt.value ? "#66BB6A" : "#444",
+                        borderRadius: 20,
+                        paddingVertical: 6,
+                        paddingHorizontal: 14,
+                      }}
+                    >
+                      <Text style={{ color: "#FFF", fontWeight: "bold" }}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
+
+                {/* PIN */}
+                {selectedTypeUser !== "collection" && (
+                  <>
+                    <Text style={s.label}>{t("login.pin_label")}</Text>
+                    <View style={s.inputContainer}>
+                      <Ionicons
+                        name="key-outline"
+                        size={20}
+                        color="#999"
+                        style={{ marginLeft: 10, marginRight: 6 }}
+                      />
+                      <TextInput
+                        style={[s.input, { flex: 1 }]}
+                        placeholder={t("login.pin_placeholder") || ""}
+                        placeholderTextColor={COLORS.INPUT_BORDER}
+                        secureTextEntry={!showPin}
+                        value={pin}
+                        onChangeText={setPin}
+                        keyboardType="numeric"
+                      />
+                      <TouchableOpacity
+                        style={{ marginRight: 10 }}
+                        onPress={() => setShowPin(!showPin)}
+                      >
+                        <Ionicons
+                          name={showPin ? "eye-off-outline" : "eye-outline"}
+                          size={20}
+                          color={COLORS.SECONDARY}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
               </>
             )}
 
@@ -765,7 +838,10 @@ export default function LoginScreen() {
                 <Text style={{ color: COLORS.SECONDARY, marginBottom: 8 }}>
                   Você tem um login salvo:
                 </Text>
-                <TouchableOpacity style={s.autoLoginButton} onPress={handleAutoLogin}>
+                <TouchableOpacity
+                  style={s.autoLoginButton}
+                  onPress={handleAutoLogin}
+                >
                   <Ionicons
                     name="play-circle-outline"
                     size={16}
