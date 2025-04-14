@@ -10,6 +10,7 @@ import {
   StyleSheet,
   TextInput,
   ActivityIndicator,
+  Keyboard,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -29,6 +30,8 @@ interface HostVoteModalProps {
 /**
  * Modal para Hosts escolherem qualquer mesa e enviarem voto
  * usando o PIN do jogador que teve problema.
+ * Agora busca também os nomes dos jogadores da mesa
+ * e mostra esses nomes nos botões de voto.
  */
 export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) {
   const [mesas, setMesas] = useState<string[]>([]);
@@ -37,13 +40,20 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
   const [loading, setLoading] = useState(false);
   const [fetchingTables, setFetchingTables] = useState(false);
 
-  // Carregar lista real de mesas sempre que o modal abrir
+  // States para nomes dos jogadores
+  const [player1Name, setPlayer1Name] = useState("Jogador 1");
+  const [player2Name, setPlayer2Name] = useState("Jogador 2");
+
+  // Carrega os estados quando o modal abre
   useEffect(() => {
     if (visible) {
-      // Reseta estado ao abrir o modal
       setSelectedMesa("");
       setPin("");
       setLoading(false);
+
+      // Reseta os nomes para os defaults
+      setPlayer1Name("Jogador 1");
+      setPlayer2Name("Jogador 2");
 
       // Busca as mesas reais na API
       fetchTables();
@@ -87,23 +97,21 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
         return;
       }
 
-      // Pega a maior round (round atual)
+      // Pega a maior round (a round atual)
       const allRounds = jsonTorneio.round;
       const roundKeys = Object.keys(allRounds).map((rk) => parseInt(rk, 10));
       const maxRound = Math.max(...roundKeys);
       const divisions = allRounds[maxRound];
-      // Pega a primeira chave de divisão (caso tenha mais de uma)
+      // Seleciona a primeira divisão (pode ser ajustado se houver mais de uma)
       const divKeys = Object.keys(divisions);
       const currentDiv = divKeys[0];
       const tables = divisions[currentDiv].table;
 
-      // Pega as chaves de mesa do objeto
+      // Pega as chaves de mesa
       const tableKeys = Object.keys(tables);
       if (tableKeys.length === 0) {
         Alert.alert("Atenção", "Nenhuma mesa encontrada nesta rodada.");
       }
-
-      // Salva no estado
       setMesas(tableKeys);
     } catch (error) {
       console.log("Erro ao buscar mesas:", error);
@@ -112,6 +120,52 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
       setFetchingTables(false);
     }
   }
+
+  /**
+   * Quando o host escolher uma mesa, buscamos os nomes dos jogadores
+   * no mesmo JSON da API, usando a `selectedMesa`.
+   */
+  async function fetchPlayersForMesa(mesaId: string) {
+    try {
+      const storedLeagueId = await AsyncStorage.getItem("@leagueId");
+      const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
+  
+      if (!storedLeagueId || !firebaseToken) return;
+  
+      const url = `https://doprado.pythonanywhere.com/get-data/${storedLeagueId}`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${firebaseToken}`,
+        },
+      });
+  
+      if (!res.ok) {
+        throw new Error(`Falha ao obter dados do torneio: ${res.status}`);
+      }
+  
+      const jsonTorneio = await res.json();
+      const allRounds = jsonTorneio.round;
+      const roundKeys = Object.keys(allRounds).map((rk) => parseInt(rk, 10));
+      const maxRound = Math.max(...roundKeys);
+      const divisions = allRounds[maxRound];
+  
+      const divKey = Object.keys(divisions)[0];
+      const tables = divisions[divKey].table;
+  
+      const tableData = tables[mesaId.toString()]; // 🔁 força string
+  
+      console.log("🎮 Dados da mesa selecionada:", tableData);
+  
+      setPlayer1Name(tableData?.player1 || "Jogador 1");
+      setPlayer2Name(tableData?.player2 || "Jogador 2");
+
+    } catch (error) {
+      console.log("Erro ao buscar nomes dos jogadores:", error);
+      setPlayer1Name("Jogador 1");
+      setPlayer2Name("Jogador 2");
+    }
+  }  
 
   /**
    * Função que envia o reporte de voto:
@@ -144,8 +198,8 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
       const body = {
         league_id: storedLeagueId,
         mesa_id: selectedMesa,
-        resultado: result, // "Vitória Jogador 1", "Empate", "Vitória Jogador 2"
-        pin: pin.trim(),   // PIN do jogador
+        resultado: result, // Ex: "Vitória Jogador 1", "Empate", "Vitória Jogador 2"
+        pin: pin.trim(),
       };
 
       console.log("[HOST] Enviando voto: ", body);
@@ -164,7 +218,6 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
         Alert.alert("Erro ao votar", json.message || "Não foi possível registrar o voto.");
       } else {
         Alert.alert("Sucesso", "Voto registrado com sucesso!");
-        // Fecha o modal após votar
         onClose();
       }
     } catch (error) {
@@ -175,24 +228,28 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
     }
   }
 
-  // Montamos o conteúdo do modal usando seu <CustomModal>
   return (
     <CustomModal
       visible={visible}
       onClose={onClose}
       title="Votar como Host"
+      // Conteúdo principal agora envolvido num container estilizado
       message={
-        <View style={styles.content}>
+        <View style={styles.modalContent}>
           {fetchingTables ? (
             <ActivityIndicator size="large" color={RED} style={{ marginVertical: 20 }} />
           ) : (
             <>
-              {/* PICKER de Mesas */}
               <Text style={styles.label}>Selecione a Mesa:</Text>
               <View style={styles.pickerContainer}>
                 <Picker
                   selectedValue={selectedMesa}
-                  onValueChange={(itemValue) => setSelectedMesa(itemValue)}
+                  onValueChange={(itemValue) => {
+                    setSelectedMesa(itemValue);
+                    if (itemValue) {
+                      fetchPlayersForMesa(itemValue);
+                    }
+                  }}
                   style={styles.picker}
                 >
                   <Picker.Item label="Escolher mesa..." value="" />
@@ -202,7 +259,6 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
                 </Picker>
               </View>
 
-              {/* PIN do jogador */}
               <Text style={styles.label}>PIN do jogador:</Text>
               <TextInput
                 style={styles.input}
@@ -214,19 +270,30 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
                 secureTextEntry
               />
 
-              {/* Botões de voto */}
+              {/* Botões de voto com os nomes dos jogadores */}
               <View style={styles.voteContainer}>
-                <TouchableOpacity style={styles.voteButton} onPress={() => handleVote("Vitória Jogador 1")}>
+                <TouchableOpacity
+                  style={styles.voteButton}
+                  onPress={() => handleVote(`Vitória ${player1Name}`)}
+                >
                   <MaterialCommunityIcons name="trophy" size={22} color="#4CAF50" />
-                  <Text style={styles.voteText}>P1</Text>
+                  <Text style={styles.voteText}>Vitória {player1Name}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.voteButton} onPress={() => handleVote("Empate")}>
+
+                <TouchableOpacity
+                  style={styles.voteButton}
+                  onPress={() => handleVote("Empate")}
+                >
                   <Ionicons name="hand-left" size={22} color="#FFC107" />
                   <Text style={styles.voteText}>Empate</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.voteButton} onPress={() => handleVote("Vitória Jogador 2")}>
+
+                <TouchableOpacity
+                  style={styles.voteButton}
+                  onPress={() => handleVote(`Vitória ${player2Name}`)}
+                >
                   <MaterialCommunityIcons name="trophy" size={22} color="#F44336" />
-                  <Text style={styles.voteText}>P2</Text>
+                  <Text style={styles.voteText}>Vitória {player2Name}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -251,52 +318,76 @@ export default function HostVoteModal({ visible, onClose }: HostVoteModalProps) 
 
 // ====================== ESTILOS ======================
 const styles = StyleSheet.create({
-  content: {
-    width: "100%",
+  modalContent: {
+    width: "95%",
+    backgroundColor: "#1E1E1E", // mais escuro = mais destaque
+    borderRadius: 16,
+    padding: 24,
     alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 15,
+    marginTop: 40, // solta da parte superior
+    marginBottom: 40, // solta da parte inferior
   },
+  
   label: {
     color: WHITE,
     fontSize: 16,
-    marginVertical: 8,
+    marginVertical: 10,
     textAlign: "center",
   },
   pickerContainer: {
-    width: "80%",
-    backgroundColor: "#444",
-    borderRadius: 8,
-    marginBottom: 10,
+    width: "100%",
+    backgroundColor: "#292929",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#555",
+    marginBottom: 16,
+  },
+  input: {
+    width: "100%",
+    backgroundColor: "#292929",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#555",
+    color: WHITE,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+    textAlign: "center",
+    fontSize: 16,
   },
   picker: {
     color: WHITE,
-  },
-  input: {
-    width: "80%",
-    backgroundColor: "#444",
-    borderRadius: 8,
-    color: WHITE,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 12,
-    textAlign: "center",
-  },
+    fontSize: 16,
+  },  
   voteContainer: {
     flexDirection: "row",
-    marginTop: 8,
-    justifyContent: "space-evenly",
-    width: "80%",
+    justifyContent: "space-between",
+    width: "100%",
+    marginVertical: 12,
   },
   voteButton: {
-    flexDirection: "column",
+    flex: 1,
+    marginHorizontal: 6,
     alignItems: "center",
-    backgroundColor: "#333",
-    borderRadius: 8,
-    padding: 10,
-    marginHorizontal: 4,
+    backgroundColor: "#222",
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#555",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   voteText: {
     color: WHITE,
-    marginTop: 4,
-    fontWeight: "700",
-  },
+    marginTop: 6,
+    fontWeight: "bold",
+    fontSize: 14,
+    textAlign: "center",
+  },  
 });
