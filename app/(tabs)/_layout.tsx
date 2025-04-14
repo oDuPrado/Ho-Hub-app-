@@ -25,6 +25,7 @@ import SugestaoScreen from "./Sugestao";
 import PlayerScreen from "./Cadastros";
 import ClassicosScreen from "./classicos";
 import ColecaoScreen from "./Colecao";
+import VitrineScreen from "./Vitrine";
 
 // Cores
 const DARK_BG = "#1E1E1E";
@@ -213,6 +214,14 @@ function DrawerLayout() {
         options={{
           title: t("drawer.noticias"),
           drawerIcon: ({ color, size }) => <Ionicons name="newspaper-outline" size={size} color={color} />,
+        }}
+      />
+      <Drawer.Screen
+        name="Vitrine"
+        component={VitrineScreen}
+        options={{
+          title: t("drawer.vitrine"),
+          drawerIcon: ({ color, size }) => <Ionicons name="star-outline" size={size} color={color} />,
         }}
       />
       <Drawer.Screen

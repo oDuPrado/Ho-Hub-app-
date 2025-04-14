@@ -49,23 +49,24 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
         setError("Liga não encontrada.");
         return;
       }
-
-      // Verifica se já temos cache e se a league é a mesma
+  
       if (cachedLeague === leagueStored && cachedHistory.length > 0) {
-        // Usa cache
         console.log("Usando histórico em cache...");
         setHistoryData(cachedHistory);
         setLoading(false);
         return;
       }
-
-      // Se não temos cache, buscamos no Firestore
+  
       console.log("Buscando histórico no Firestore...");
       const data = await fetchPlayerHistory(leagueStored, userId);
+  
+  +   // Ordena do mais recente para o mais antigo
+  +   data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  
       setHistoryData(data);
       setCachedLeague(leagueStored);
       setCachedHistory(data);
-
+  
       if (data.length === 0) {
         setError("Nenhum torneio encontrado.");
       } else {
@@ -77,7 +78,7 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
     } finally {
       setLoading(false);
     }
-  }
+  }  
 
   return (
     <Modal
