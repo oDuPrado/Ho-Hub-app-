@@ -105,7 +105,7 @@ interface CreatingBinderState {
   selectedSeries: string[];
 
   // para Pokémon
-  pokemonName: string;
+  pokemonNames: string[]; // agora é um array
 
   // trainer
   trainerCategory: TrainerCategory;
@@ -367,7 +367,7 @@ export default function CollectionsScreen() {
       binderType: null,
       selectedSets: [],
       selectedSeries: [],
-      pokemonName: "",
+      pokemonNames: [],
       trainerCategory: "all", // só all e energy agora
       selectedRarities: [],
       loadingCards: false,
@@ -406,28 +406,51 @@ export default function CollectionsScreen() {
   async function loadBindersFromStorage() {
     try {
       const raw = await AsyncStorage.getItem("@userBinders");
-
+  
       if (raw) {
         setBinders(JSON.parse(raw));
-      } else if (restoredData?.binders?.length) {
-        const restored: Binder[] = restoredData.binders.map((b) => ({
-          id: b.id,
-          name: b.name,
-          binderType: "general", // ou um valor padrão, se quiser detectar depois
-          reference: "",
-          createdAt: Date.now(), // usa timestamp atual, ou pode guardar isso no backup depois
-          allCards: [],
-          quantityMap: {},
-        }));
-
-        setBinders(restored);
-        await AsyncStorage.setItem("@userBinders", JSON.stringify(restored));
-        console.log("Restaurado via backup local.");
+      } else {
+        // Tenta restaurar do arquivo físico
+        const backupFromFile = await getBindersFromBackupFile();
+        if (backupFromFile?.length) {
+          const restored: Binder[] = backupFromFile.map((b) => ({
+            id: b.id,
+            name: b.name,
+            binderType: (["master", "pokemon", "trainer", "general"].includes(
+              b.binderType
+            )
+              ? b.binderType
+              : "general") as BinderType,
+            reference: b.reference,
+            createdAt: b.createdAt || Date.now(),
+            allCards: b.allCards || [],
+            quantityMap: b.quantityMap || {},
+            lastUpdatedAt: b.lastUpdatedAt || new Date().toISOString(),
+          }));
+  
+          setBinders(restored);
+          await AsyncStorage.setItem("@userBinders", JSON.stringify(restored));
+          console.log("Restaurado via backup físico.");
+        } else if (restoredData?.binders?.length) {
+          const restored: Binder[] = restoredData.binders.map((b) => ({
+            id: b.id,
+            name: b.name,
+            binderType: "general",
+            reference: "",
+            createdAt: Date.now(),
+            allCards: [],
+            quantityMap: {},
+          }));
+  
+          setBinders(restored);
+          await AsyncStorage.setItem("@userBinders", JSON.stringify(restored));
+          console.log("Restaurado via backup local.");
+        }
       }
     } catch (err) {
       console.log("Erro loadBinders:", err);
     }
-  }
+  }  
 
   async function saveBindersToStorage(updated: Binder[]) {
     setBinders(updated);
@@ -485,7 +508,7 @@ export default function CollectionsScreen() {
       binderType: null,
       selectedSets: [],
       selectedSeries: [],
-      pokemonName: "",
+      pokemonNames: [],
       trainerCategory: "all",
       selectedRarities: [],
       loadingCards: false,
@@ -506,18 +529,27 @@ export default function CollectionsScreen() {
   }
 
   function handleDeleteBinder(binder: Binder) {
-    Alert.alert("Excluir Binder", `Deseja excluir "${binder.name}"?`, [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Excluir",
-        style: "destructive",
-        onPress: () => {
-          const updated = binders.filter((b) => b.id !== binder.id);
-          saveBindersToStorage(updated);
-          if (selectedBinder?.id === binder.id) setSelectedBinder(null);
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(`Deseja excluir o binder "${binder.name}"?`);
+      if (confirmed) {
+        const updated = binders.filter((b) => b.id !== binder.id);
+        saveBindersToStorage(updated);
+        if (selectedBinder?.id === binder.id) setSelectedBinder(null);
+      }
+    } else {
+      Alert.alert("Excluir Binder", `Deseja excluir "${binder.name}"?`, [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: () => {
+            const updated = binders.filter((b) => b.id !== binder.id);
+            saveBindersToStorage(updated);
+            if (selectedBinder?.id === binder.id) setSelectedBinder(null);
+          },
         },
-      },
-    ]);
+      ]);
+    }
   }
 
   function openEditBinderModal(binder: Binder) {
@@ -670,7 +702,7 @@ export default function CollectionsScreen() {
         ref = "Master Set";
       }
     } else if (st.binderType === "pokemon") {
-      ref = st.pokemonName.trim(); // só o nome do pokémon direto
+      ref = st.pokemonNames.join(", "); // só o nome do pokémon direto
     } else if (st.binderType === "trainer") {
       ref += `(${st.trainerCategory}), S=${st.selectedSets.length} Se=${st.selectedSeries.length}`;
     } else if (st.binderType === "artist") {
@@ -1507,25 +1539,27 @@ export default function CollectionsScreen() {
                   </Text>
                 </TouchableOpacity>
 
-                {/* Se for Pokémon => nome do Pokémon */}
+                {/* Se for Pokémon => nomes dos Pokémons (agora múltiplos) */}
                 {createBinderState.binderType === "pokemon" && (
                   <>
-                    <Text style={styles.label}>Nome do Pokémon</Text>
+                    <Text style={styles.label}>Nomes dos Pokémons</Text>
                     <TextInput
                       style={styles.modalInput}
-                      value={createBinderState.pokemonName}
+                      value={createBinderState.pokemonNames.join(", ")}
                       onChangeText={(val) =>
                         setCreateBinderState((p) => ({
                           ...p,
-                          pokemonName: val,
+                          pokemonNames: val.split(",").map((s) => s.trim()),
                         }))
                       }
-                      placeholder="Ex: 'Charizard'"
+                      placeholder="Ex: Charizard, Pikachu, Eevee"
                       placeholderTextColor="#999"
                     />
+                    <Text style={{ color: "#AAA", fontSize: 12, marginTop: 4 }}>
+                      Separe os nomes por vírgula
+                    </Text>
                   </>
                 )}
-
                 {/* Filtrar Raridades (não exibe se for pokemon) */}
                 {createBinderState.binderType !== "pokemon" && (
                   <>
@@ -2280,32 +2314,36 @@ async function doFetchWithMultiOptions(
     }
     finalArr = unifyResults(combined);
   } else if (st.binderType === "pokemon") {
-    // Nome do Pokémon é obrigatório
-    if (!st.pokemonName.trim()) {
-      throw new Error("Digite o nome do Pokémon.");
+    const names = st.pokemonNames.filter((n) => n.trim());
+    if (names.length === 0) {
+      throw new Error("Digite ao menos um nome de Pokémon.");
     }
-    const baseQ = encodeURIComponent(
-      `name:"${st.pokemonName}" supertype:pokemon`
-    );
-    const combos = buildSetSeriesCombos(
-      st.selectedSets,
-      st.selectedSeries,
-      baseQ
-    );
-
+  
     let combined: MinimalCardData[] = [];
-    if (combos.length === 0) {
-      const globalUrl = `https://api.pokemontcg.io/v2/cards?q=${baseQ}&pageSize=500`;
-      const dataAll = await fetchApi(globalUrl);
-      combined.push(...dataAll);
-    } else {
-      for (const c of combos) {
-        const partial = await fetchApi(c);
-        combined.push(...partial);
+  
+    for (const name of names) {
+      const baseQ = encodeURIComponent(`name:"${name}" supertype:pokemon`);
+      const combos = buildSetSeriesCombos(
+        st.selectedSets,
+        st.selectedSeries,
+        baseQ
+      );
+  
+      if (combos.length === 0) {
+        const globalUrl = `https://api.pokemontcg.io/v2/cards?q=${baseQ}&pageSize=500`;
+        const dataAll = await fetchApi(globalUrl);
+        combined.push(...dataAll);
+      } else {
+        for (const c of combos) {
+          const partial = await fetchApi(c);
+          combined.push(...partial);
+        }
       }
     }
+  
     finalArr = unifyResults(combined);
-  } else if (st.binderType === "trainer") {
+  }
+   else if (st.binderType === "trainer") {
     let finalTrainers: MinimalCardData[] = [];
     if (st.trainerCategory === "all") {
       // combos p/ supertype:trainer e combos p/ supertype:energy
