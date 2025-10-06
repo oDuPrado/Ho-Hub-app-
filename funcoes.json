@@ -1,0 +1,843 @@
+[
+  {
+    "file": "app\\(auth)\\login.tsx",
+    "functions": [
+      "checkPasswordStrength",
+      "getPasswordStrengthColor",
+      "validateEmail",
+      "validatePassword",
+      "saveLoginData",
+      "getSavedLogin",
+      "LoginScreen",
+      "showModal",
+      "handleCloseModal",
+      "isUserBanned",
+      "changeLanguage",
+      "handleSignUp",
+      "handleSignIn",
+      "handleResetPassword",
+      "handleAutoLogin",
+      "clearSavedLogin",
+      "unsubscribe",
+      "renewToken",
+      "saveLoginData",
+      "getSavedLogin",
+      "isUserBanned",
+      "handleSignUp",
+      "handleSignIn",
+      "handleResetPassword",
+      "handleAutoLogin",
+      "clearSavedLogin"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Analise.tsx",
+    "functions": [
+      "Analise",
+      "handleGenerateNewAnalysis",
+      "generateAnalysis",
+      "getRandomGeneric",
+      "getRandomTip"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Cadastros.tsx",
+    "functions": [
+      "CadastrosScreen",
+      "loadTabData",
+      "switchTab",
+      "fetchPlayers",
+      "openCreatePlayerModal",
+      "openEditPlayerModal",
+      "handleSavePlayer",
+      "handleDeletePlayer",
+      "fetchLogins",
+      "openCreateLoginModal",
+      "openEditLoginModal",
+      "handleSaveLogin",
+      "handleDeleteLogin",
+      "fetchLeagues",
+      "openRolesModal",
+      "closeRolesModal",
+      "loadRoleData",
+      "switchRoleTab",
+      "handleAddRoleMember",
+      "handleRemoveRoleMember",
+      "openSelectPlayersModal",
+      "loadPlayersForLeague",
+      "handleSelectSearch",
+      "handleSelectPlayer",
+      "renderPlayersTab",
+      "renderLoginsTab",
+      "renderRolesTab",
+      "renderPlayerModal",
+      "renderLoginModal",
+      "renderRolesModal",
+      "renderSelectPlayersModal",
+      "renderRoleTabButton",
+      "renderRoleList",
+      "unique",
+      "loadTabData",
+      "fetchPlayers",
+      "handleSavePlayer",
+      "handleDeletePlayer",
+      "fetchLogins",
+      "handleSaveLogin",
+      "handleDeleteLogin",
+      "fetchLeagues",
+      "loadRoleData",
+      "handleAddRoleMember",
+      "handleRemoveRoleMember",
+      "loadPlayersForLeague"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\calendario.tsx",
+    "functions": [
+      "CalendarScreen",
+      "loadJudgeData",
+      "loadSetIdMap",
+      "isVip",
+      "loadTorneios",
+      "handleMaskDate",
+      "handleMaskTime",
+      "handlePrevMonth",
+      "handleNextMonth",
+      "openCreateModal",
+      "openEditModal",
+      "handleSaveTorneio",
+      "handleDeleteTorneio",
+      "handleInscrever",
+      "proceedToInscription",
+      "openEditInscricao",
+      "handleWaitlist",
+      "handleSalvarInscricao",
+      "loadUserInscricoes",
+      "handleOpenDetalhes",
+      "closeDetalhes",
+      "openInscricoesModal",
+      "closeInscricoesModal",
+      "handleExcluirInscricao",
+      "handleSubirListaEspera",
+      "sendNotificationToPlayer",
+      "confirmJudge",
+      "declineJudge",
+      "sendNotifToHost",
+      "deleteJudgeNotification",
+      "loadDeckCards",
+      "fetchCardImage",
+      "renderCard",
+      "renderJudgeSelectModal",
+      "renderHeadJudgeSelectModal",
+      "renderEventTypeSelectModal",
+      "formatIsoDate",
+      "bestSet",
+      "filtered",
+      "filtered",
+      "filtered",
+      "selectedDeck",
+      "imagePromises",
+      "loadJudgeData",
+      "loadSetIdMap",
+      "isVip",
+      "loadTorneios",
+      "openCreateModal",
+      "handleSaveTorneio",
+      "handleDeleteTorneio",
+      "handleInscrever",
+      "handleWaitlist",
+      "handleSalvarInscricao",
+      "loadUserInscricoes",
+      "openInscricoesModal",
+      "handleExcluirInscricao",
+      "handleSubirListaEspera",
+      "sendNotificationToPlayer",
+      "confirmJudge",
+      "declineJudge",
+      "sendNotifToHost",
+      "deleteJudgeNotification",
+      "loadDeckCards",
+      "fetchCardImage"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Cartas.tsx",
+    "functions": [
+      "CardsSearchScreen",
+      "searchCard",
+      "handleSearchChange",
+      "fetchCardsByCollection",
+      "addCardToBinder",
+      "askBinderName",
+      "confirmCreateBinder",
+      "openCollectionModal",
+      "closeCollectionModal",
+      "handleSelectCollection",
+      "clearCollectionFilter",
+      "handleLoadMore",
+      "openSortModal",
+      "closeSortModal",
+      "selectSortOption",
+      "sortCards",
+      "getFirstPrice",
+      "openCardModal",
+      "closeCardModal",
+      "handleHaveOrWant",
+      "closeCreateModal",
+      "handleSavePost",
+      "onPressHaveInGrid",
+      "onPressWantInGrid",
+      "handleConfirmAddCollection",
+      "handleCloseAddCollectionModal",
+      "getFormattedCost",
+      "updated",
+      "alreadyHas",
+      "filteredCollectionList",
+      "displayedCards",
+      "userPosts",
+      "selectedCollectionInfo",
+      "totalInCollection",
+      "original",
+      "searchCard",
+      "fetchCardsByCollection",
+      "addCardToBinder",
+      "confirmCreateBinder",
+      "handleSelectCollection",
+      "handleSavePost"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\chats.tsx",
+    "functions": [
+      "ChatsScreen",
+      "loadChatsFromStorage",
+      "saveChatsToStorage",
+      "loadMessagesLocal",
+      "saveMessagesLocal",
+      "generateChatId",
+      "handleSearchUser",
+      "handleCreateChatWithUser",
+      "openChat",
+      "closeChatModal",
+      "handleSend",
+      "handleDeleteChat",
+      "renderChatItem",
+      "newChats",
+      "newList",
+      "loadChatsFromStorage",
+      "saveChatsToStorage",
+      "loadMessagesLocal",
+      "saveMessagesLocal",
+      "handleSearchUser",
+      "handleCreateChatWithUser",
+      "openChat",
+      "handleSend",
+      "handleDeleteChat"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\classicos.tsx",
+    "functions": [
+      "ClassicosScreen",
+      "loadClassicosPage",
+      "getClassicsDocWithCache",
+      "loadPlayersByFilter",
+      "getAllClassicsDocsWithCache",
+      "buildAllDuoStats",
+      "getActiveClassicos",
+      "handleSetFilter",
+      "getFilteredOpponents",
+      "openClassicosModal",
+      "closeClassicosModal",
+      "openClassicosInfoModal",
+      "closeClassicosInfoModal",
+      "backAction",
+      "unique",
+      "arr",
+      "pObj",
+      "pAName",
+      "pBName",
+      "loadClassicosPage",
+      "getClassicsDocWithCache",
+      "loadPlayersByFilter",
+      "getAllClassicsDocsWithCache"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Colecao.tsx",
+    "functions": [
+      "getBinderColor",
+      "CollectionsScreen",
+      "handleImportBackup",
+      "handleExportBackup",
+      "handleForceSync",
+      "renderReorderItem",
+      "autoSortBinders",
+      "handleSaveToBackup",
+      "getPercColor",
+      "loadBindersFromStorage",
+      "saveBindersToStorage",
+      "loadCollections",
+      "openCreateBinderModal",
+      "closeCreateBinderModal",
+      "openBinderDetail",
+      "closeBinderDetail",
+      "handleDeleteBinder",
+      "openEditBinderModal",
+      "closeEditBinderModal",
+      "handleSaveBinderEdits",
+      "selectBinderType",
+      "goToStep",
+      "toggleRarity",
+      "openCollectionsModal",
+      "closeCollectionsModal",
+      "fetchCardsForBinder",
+      "handleCreateBinder",
+      "buildReference",
+      "incrementCardQuantity",
+      "decrementCardQuantity",
+      "removeCardFromBinder",
+      "setCoverForBinder",
+      "parseCardNumber",
+      "renderCardItem",
+      "openSortModal",
+      "closeSortModal",
+      "selectSortOption",
+      "MultiCollectionsModal",
+      "toggleSet",
+      "toggleSeries",
+      "doFetchWithMultiOptions",
+      "buildSetSeriesCombos",
+      "fetchApi",
+      "unifyResults",
+      "labelForSort",
+      "ArtistModal",
+      "toggleArtist",
+      "isSame",
+      "autoBackup",
+      "updated",
+      "updated",
+      "updated",
+      "col",
+      "newList",
+      "newList",
+      "newList",
+      "updatedList",
+      "binderDisplayCards",
+      "allSeries",
+      "filteredCollections",
+      "names",
+      "handleFetchArtists",
+      "filtered",
+      "handleForceSync",
+      "handleSaveToBackup",
+      "loadBindersFromStorage",
+      "saveBindersToStorage",
+      "loadCollections",
+      "handleSaveBinderEdits",
+      "fetchCardsForBinder",
+      "doFetchWithMultiOptions",
+      "fetchApi"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Decks.tsx",
+    "functions": [
+      "DecksScreen",
+      "getArchetypeIconUrl",
+      "loadSetIdMap",
+      "handleCreateDeck",
+      "handleDeleteDeck",
+      "openViewModal",
+      "closeViewModal",
+      "loadDeckImages",
+      "fetchCardImage",
+      "renderDeckItem",
+      "toggleStyleOption",
+      "RenderDeckTable",
+      "RenderDeckMosaic",
+      "parseDeckContentChunked",
+      "processBlock",
+      "parseSingleLine",
+      "convertFirestoreToCardLines",
+      "toFirestoreCard",
+      "formatDate",
+      "unsubscribe",
+      "filteredDecks",
+      "bestSet",
+      "imagePromises",
+      "totalPoke",
+      "totalTrea",
+      "totalEner",
+      "lines",
+      "loadSetIdMap",
+      "handleCreateDeck",
+      "handleDeleteDeck",
+      "loadDeckImages",
+      "fetchCardImage",
+      "parseDeckContentChunked"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\home.tsx",
+    "functions": [
+      "HomeScreen",
+      "computeTitlesProgress",
+      "calcProgress",
+      "handleRivalDetection",
+      "getRandomRivalPhrase",
+      "loadBattleMusic",
+      "stopBattleMusic",
+      "handleLogout",
+      "handleDonate",
+      "handleOpenCollections",
+      "fetchValidCollections",
+      "closeCollectionsModal",
+      "openFilterModal",
+      "closeFilterModal",
+      "fetchCities",
+      "fetchLeaguesByCity",
+      "handleSelectLeague",
+      "handleSaveFilter",
+      "renderStatCard",
+      "TitleProgressCard",
+      "found",
+      "all",
+      "lockedOnly",
+      "computeTitlesProgress",
+      "handleRivalDetection",
+      "loadBattleMusic",
+      "stopBattleMusic",
+      "fetchValidCollections",
+      "fetchCities",
+      "fetchLeaguesByCity",
+      "handleSaveFilter"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\jogador.tsx",
+    "functions": [
+      "PlayerScreen",
+      "loadPlayerData",
+      "computeLocalTitles",
+      "defineRecommendation",
+      "loadNPCMessage",
+      "flipAvatar",
+      "updatePlayerAvatar",
+      "updatePlayerTemplate",
+      "savePlayerMessage",
+      "saveTactileSetting",
+      "closeSearchOverlay",
+      "handleToggleSearch",
+      "handleSearchPlayers",
+      "fetchPlayersByFilter",
+      "handleCheckConfronto",
+      "handleOpenTitles",
+      "handleOpenHistory",
+      "onScrollEnd",
+      "goToPage",
+      "renderProfileSection",
+      "getLevelDecorationStyle",
+      "renderCustomizationSection",
+      "activeTemplate",
+      "found",
+      "foundAv",
+      "foundT",
+      "direct",
+      "activeTemplate",
+      "found",
+      "found",
+      "loadPlayerData",
+      "updatePlayerAvatar",
+      "updatePlayerTemplate",
+      "savePlayerMessage",
+      "saveTactileSetting",
+      "handleSearchPlayers",
+      "fetchPlayersByFilter",
+      "handleCheckConfronto"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Noticias.tsx",
+    "functions": [
+      "NoticiasScreen",
+      "fetchNewsAPINews",
+      "fetchNews",
+      "handleOpenLink",
+      "mapped",
+      "fetchNewsAPINews"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Sugestao.tsx",
+    "functions": [
+      "SuggestionScreen",
+      "canSendEmail",
+      "handleSendEmail"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\torneio.tsx",
+    "functions": [
+      "TorneioScreen",
+      "testConnection",
+      "handleRestart",
+      "handleShutdown",
+      "handleShowConsole",
+      "handleExecuteCommand",
+      "requestNotificationPermission",
+      "fetchTournamentData",
+      "checkIfHostFallback",
+      "checkRoundAndNotify",
+      "showErrorModal",
+      "handleCloseErrorModal",
+      "openVoteModal",
+      "handleOpenReport",
+      "roundKeys",
+      "testConnection",
+      "handleRestart",
+      "handleShutdown",
+      "handleShowConsole",
+      "handleExecuteCommand",
+      "requestNotificationPermission",
+      "fetchTournamentData",
+      "checkIfHostFallback",
+      "checkRoundAndNotify"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\trocas.tsx",
+    "functions": [
+      "UserTradeFeed",
+      "loadTradesForLeague",
+      "getFilteredPosts",
+      "openDetailModal",
+      "closeDetailModal",
+      "handleInterest",
+      "handleDeletePost",
+      "handleOpenChat",
+      "getTypeIconAndColor",
+      "renderItem",
+      "loadTradesForLeague",
+      "openDetailModal",
+      "handleInterest",
+      "handleDeletePost"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\Vitrine.tsx",
+    "functions": [
+      "RankingScreen",
+      "fetchPlayersByFilter",
+      "getSortedRanking",
+      "TabButton",
+      "RankCard",
+      "fetchPlayersByFilter"
+    ]
+  },
+  {
+    "file": "app\\(tabs)\\_layout.tsx",
+    "functions": [
+      "CustomDrawerContent",
+      "DrawerLayout",
+      "onPress",
+      "renderSection",
+      "filteredRoutes"
+    ]
+  },
+  {
+    "file": "app\\+not-found.tsx",
+    "functions": [
+      "NotFoundScreen"
+    ]
+  },
+  {
+    "file": "app\\classicosConfig.ts",
+    "functions": [
+      "getWinDifference",
+      "getWinRates",
+      "getActiveClassicosForDuo"
+    ]
+  },
+  {
+    "file": "app\\hosts.ts",
+    "functions": [
+      "fetchRoleMembers",
+      "addRoleMember",
+      "removeRoleMember",
+      "getFallbackList",
+      "fetchRoleMembers",
+      "addRoleMember",
+      "removeRoleMember",
+      "getFallbackList"
+    ]
+  },
+  {
+    "file": "app\\index.tsx",
+    "functions": [
+      "IndexScreen"
+    ]
+  },
+  {
+    "file": "app\\Teste_BC.tsx",
+    "functions": [
+      "TestIndicesScreen",
+      "testGlobalMatchesIndex",
+      "testLeaguesByCityIndex",
+      "testAggregatedStatsIndex",
+      "testRivalIndex",
+      "testGlobalMatchesIndex",
+      "testLeaguesByCityIndex",
+      "testAggregatedStatsIndex",
+      "testRivalIndex"
+    ]
+  },
+  {
+    "file": "app\\_layout.tsx",
+    "functions": [
+      "RootLayout",
+      "checkForUpdates",
+      "simulateProgress",
+      "interval",
+      "handleApplyUpdate",
+      "checkForUpdates"
+    ]
+  },
+  {
+    "file": "components\\AvatarModal.tsx",
+    "functions": [
+      "AvatarModal",
+      "isAvatarUnlocked"
+    ]
+  },
+  {
+    "file": "components\\BackupManager.tsx",
+    "functions": [
+      "useBackupManager",
+      "readBackup",
+      "ensureBinderIdsAndTimestamps",
+      "writeBackup",
+      "exportBackup",
+      "mergeBinders",
+      "importBackup",
+      "generateBackupFile",
+      "readBackupFromFile",
+      "syncBackup",
+      "getBindersFromBackupFile",
+      "bindersWithNow",
+      "readBackup",
+      "writeBackup",
+      "exportBackup",
+      "importBackup",
+      "generateBackupFile",
+      "readBackupFromFile",
+      "syncBackup",
+      "getBindersFromBackupFile"
+    ]
+  },
+  {
+    "file": "components\\ChallengesModal.tsx",
+    "functions": [
+      "ChallengesModal"
+    ]
+  },
+  {
+    "file": "components\\Collapsible.tsx",
+    "functions": [
+      "Collapsible"
+    ]
+  },
+  {
+    "file": "components\\ExternalLink.tsx",
+    "functions": [
+      "ExternalLink"
+    ]
+  },
+  {
+    "file": "components\\HapticTab.tsx",
+    "functions": [
+      "HapticTab"
+    ]
+  },
+  {
+    "file": "components\\HelloWave.tsx",
+    "functions": [
+      "HelloWave",
+      "animatedStyle"
+    ]
+  },
+  {
+    "file": "components\\HistoryModal.tsx",
+    "functions": [
+      "HistoryModal",
+      "loadHistory",
+      "loadHistory"
+    ]
+  },
+  {
+    "file": "components\\HostVoteModal.tsx",
+    "functions": [
+      "HostVoteModal",
+      "fetchTables",
+      "fetchPlayersForMesa",
+      "handleVote",
+      "roundKeys",
+      "roundKeys",
+      "fetchTables",
+      "fetchPlayersForMesa",
+      "handleVote"
+    ]
+  },
+  {
+    "file": "components\\ParallaxScrollView.tsx",
+    "functions": [
+      "ParallaxScrollView",
+      "headerAnimatedStyle"
+    ]
+  },
+  {
+    "file": "components\\SeasonModal.tsx",
+    "functions": [
+      "SeasonModal",
+      "levelsArray"
+    ]
+  },
+  {
+    "file": "components\\TemplateModal.tsx",
+    "functions": [
+      "TemplateModal",
+      "isTemplateUnlocked",
+      "hasTitle"
+    ]
+  },
+  {
+    "file": "components\\ThemeContext.tsx",
+    "functions": [
+      "useTheme",
+      "ThemeProvider",
+      "setTheme"
+    ]
+  },
+  {
+    "file": "components\\ThemedText.tsx",
+    "functions": [
+      "ThemedText"
+    ]
+  },
+  {
+    "file": "components\\ThemedView.tsx",
+    "functions": [
+      "ThemedView"
+    ]
+  },
+  {
+    "file": "components\\ThemeSelector.tsx",
+    "functions": [
+      "ThemeSelector"
+    ]
+  },
+  {
+    "file": "components\\TitlesModal.tsx",
+    "functions": [
+      "TitlesModal",
+      "handleFlip",
+      "renderTitlesList",
+      "renderCategory"
+    ]
+  },
+  {
+    "file": "components\\TorneioReportsScreen.tsx",
+    "functions": [
+      "TorneioReportsScreen",
+      "loadReports",
+      "checkIfHost",
+      "handleLimparResultados",
+      "handleClearResultForMesa",
+      "getVisualMesas",
+      "handleLimparTodosVotos",
+      "renderResultCard",
+      "backHandler",
+      "roundKeys",
+      "found",
+      "votes",
+      "loadReports",
+      "checkIfHost",
+      "handleLimparResultados",
+      "handleClearResultForMesa",
+      "handleLimparTodosVotos"
+    ]
+  },
+  {
+    "file": "components\\TorneioVoteScreen.tsx",
+    "functions": [
+      "TorneioVoteScreen",
+      "fetchUserPinFromStorage",
+      "fetchPlayerNames",
+      "sendVote",
+      "clearVote",
+      "fetchUserPinFromStorage",
+      "fetchPlayerNames",
+      "sendVote",
+      "clearVote"
+    ]
+  },
+  {
+    "file": "components\\Tutorials.tsx",
+    "functions": [
+      "Tutorials",
+      "handleNext",
+      "handleSkip",
+      "handleRepeat",
+      "handleFinish"
+    ]
+  },
+  {
+    "file": "components\\ui\\IconSymbol.ios.tsx",
+    "functions": [
+      "IconSymbol"
+    ]
+  },
+  {
+    "file": "components\\ui\\IconSymbol.tsx",
+    "functions": [
+      "IconSymbol"
+    ]
+  },
+  {
+    "file": "components\\ui\\TabBarBackground.ios.tsx",
+    "functions": [
+      "BlurTabBarBackground",
+      "useBottomTabOverflow"
+    ]
+  },
+  {
+    "file": "components\\ui\\TabBarBackground.tsx",
+    "functions": [
+      "useBottomTabOverflow"
+    ]
+  },
+  {
+    "file": "lib\\matchService.ts",
+    "functions": [
+      "fetchPlayerClassicsStats",
+      "fetchPlayerStatsAggregated",
+      "fetchPlayerRival",
+      "fetchAllMatches",
+      "fetchAllMatchesGlobal",
+      "fetchPlayerHistory",
+      "fetchActiveClassicosForDuo",
+      "fetchRivalByFilter",
+      "fetchAllStatsByFilter",
+      "tournaments",
+      "fetchPlayerClassicsStats",
+      "fetchPlayerStatsAggregated",
+      "fetchPlayerRival",
+      "fetchAllMatches",
+      "fetchAllMatchesGlobal",
+      "fetchPlayerHistory",
+      "fetchActiveClassicosForDuo",
+      "fetchRivalByFilter",
+      "fetchAllStatsByFilter"
+    ]
+  }
+]
