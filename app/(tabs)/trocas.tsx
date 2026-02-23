@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -17,18 +17,14 @@ import {
 import {
   collection,
   doc,
-  onSnapshot,
   deleteDoc,
   getDoc,
   updateDoc,
   arrayUnion,
-  getDocs
+  getDocs,
 } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import moment from "moment";
 import { db } from "../../lib/firebaseConfig";
-import { useTranslation } from "react-i18next";
-import { useRouter } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native"; // <-- Importado para foco
@@ -60,9 +56,6 @@ interface TradePost {
 }
 
 export default function UserTradeFeed() {
-  const { t } = useTranslation();
-  const router = useRouter();
-
   const [playerId, setPlayerId] = useState("");
   const [posts, setPosts] = useState<TradePost[]>([]);
   const [cachedPosts, setCachedPosts] = useState<TradePost[] | null>(null); // <-- Cache
@@ -201,7 +194,7 @@ async function loadTradesForLeague(lId: string, isActive: boolean, cache: TradeP
           } else {
             interestedNames.push(`Desconhecido ${pId}`);
           }
-        } catch (err) {
+        } catch {
           interestedNames.push(`Desconhecido ${pId}`);
         }
       }

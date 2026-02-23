@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -36,7 +36,6 @@ import {
 } from "firebase/firestore";
 
 // Tutoriais
-import Tutorials from "../../components/Tutorials";
 
 // ===== Importamos Titles e Stats originais =====
 import titles, { TitleItem, PlayerStats } from "../titlesConfig";
@@ -45,8 +44,6 @@ import titles, { TitleItem, PlayerStats } from "../titlesConfig";
 import {
   fetchAllStatsByFilter, // ✅ Busca stats agregadas por filtro (liga/cidade/todas)
   fetchRivalByFilter,    // ✅ Busca rival do backend baseado no filtro
-  RivalData as RivalBackendData,
-  PlayerStatsData as PlayerStatsBackend,
 } from "../../lib/matchService";
 
 
@@ -93,7 +90,6 @@ export default function HomeScreen() {
   const [userId, setUserId] = useState("");
   const [userName, setUserName] = useState("Jogador");
   const [avatarUri, setAvatarUri] = useState<any>(null);
-  const [tutorialFiltroVisible, setTutorialFiltroVisible] = useState(false);
 
   // Stats do FRONT (mesmo shape que Titles e Stats pedem)
   const [stats, setStats] = useState<PlayerStats>({
@@ -127,7 +123,6 @@ export default function HomeScreen() {
   const [leagues, setLeagues] = useState<any[]>([]);
   const [selectedCity, setSelectedCity] = useState<string>("");
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
-  const [fetchingLeagues, setFetchingLeagues] = useState(false);
   const [showAllLeagues, setShowAllLeagues] = useState(false);
 
   // Modal de Boas-Vindas
@@ -192,10 +187,8 @@ export default function HomeScreen() {
 
       // ✅ Agora carregar os dados normalmente
       const finalLeagueId = leagueId || (await AsyncStorage.getItem("@leagueId"));
-      const finalFilterType = filterType || (await AsyncStorage.getItem("@filterType")) || "all";
-
-      setSelectedLeagueId(finalLeagueId);
-      setSelectedCity(city);
+      setSelectedLeagueId(finalLeagueId || "");
+      setSelectedCity(city || "");
       
         // 3) Lê STATs AGREGADAS do backend (já somadas conforme o filtro)
         const aggregated = await fetchAllStatsByFilter(storedId);
@@ -231,18 +224,18 @@ export default function HomeScreen() {
         } else {
           setRivalInfo(null);
         }
-      } catch (err) {
+      } catch {
         Alert.alert("Erro", "Não foi possível carregar dados.");
       } finally {
         setLoading(false);
         // Verifica o tutorial depois que os dados já carregaram
       const alreadySeen = await AsyncStorage.getItem("tutorialFiltroLigas");
       if (!alreadySeen) {
-        setTutorialFiltroVisible(true);
+        // futuro: abrir tutorial
       }
     }
   })();
-}, [router]);
+}, [computeTitlesProgress, router]);
 
   // Música do Rival
   useEffect(() => {
@@ -253,12 +246,18 @@ export default function HomeScreen() {
     }
   }, [rivalModalVisible]);
 
+  useEffect(() => {
+    return () => {
+      stopBattleMusic();
+    };
+  }, []);
+
  
 
   // =============================
   // Funções para Títulos
   // =============================
-  async function computeTitlesProgress(st: PlayerStats) {
+  const computeTitlesProgress = useCallback(async (st: PlayerStats) => {
     setIsCalculating(true);
     const all = titles.map((t) => {
       const locked = !t.condition(st);
@@ -270,7 +269,7 @@ export default function HomeScreen() {
     const top3 = lockedOnly.slice(0, 3);
     setClosestTitles(top3);
     setIsCalculating(false);
-  }
+  }, []);
 
   function calcProgress(title: TitleItem, stats: PlayerStats): number {
     if (title.condition(stats)) return 1; // Se já desbloqueou, progresso é 100%
@@ -501,7 +500,6 @@ export default function HomeScreen() {
 
   async function fetchCities() {
     try {
-      setFetchingLeagues(true);
       const snapshot = await getDocs(collection(db, "leagues"));
       const citySet = new Set<string>();
       snapshot.forEach((docSnap) => {
@@ -512,13 +510,11 @@ export default function HomeScreen() {
     } catch (err) {
       console.log("Erro ao buscar cidades:", err);
     }
-    setFetchingLeagues(false);
   }
 
   async function fetchLeaguesByCity(cityName: string) {
     try {
       setSelectedCity(cityName);
-      setFetchingLeagues(true);
       const qCity = query(collection(db, "leagues"), where("city", "==", cityName));
       const citySnapshot = await getDocs(qCity);
       const leaguesList: any[] = [];
@@ -529,7 +525,6 @@ export default function HomeScreen() {
     } catch (err) {
       console.log("Erro ao buscar ligas da cidade:", err);
     }
-    setFetchingLeagues(false);
   }
 
   function handleSelectLeague(leagueId: string) {
@@ -1102,7 +1097,7 @@ function TitleProgressCard({
       easing: Easing.out(Easing.quad),
       useNativeDriver: false,
     }).start();
-  }, [item.progress]);
+  }, [item.progress, progressAnim]);
 
   const widthInterpolate = progressAnim.interpolate({
     inputRange: [0, 1],

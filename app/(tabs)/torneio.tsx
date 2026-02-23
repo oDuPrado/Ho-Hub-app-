@@ -23,7 +23,7 @@ import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import * as Animatable from "react-native-animatable";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Button, ActivityIndicator as PaperActivityIndicator } from "react-native-paper";
 
 import { fetchRoleMembers, HOST_PLAYER_IDS } from "../hosts";
@@ -122,7 +122,7 @@ export default function TorneioScreen() {
       });
       const json = await response.json();
       Alert.alert("Resposta", json.message || "Sem mensagem");
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível reiniciar o Raspberry");
     }
   }
@@ -134,7 +134,7 @@ export default function TorneioScreen() {
       });
       const json = await response.json();
       Alert.alert("Resposta", json.message || "Sem mensagem");
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível desligar o Raspberry");
     }
   }
@@ -144,7 +144,7 @@ export default function TorneioScreen() {
       const response = await fetch(`${RASPBERRY_API}/console`);
       const json = await response.json();
       setConsoleOutput(json.output || "Sem saída.");
-    } catch (error) {
+    } catch {
       setConsoleOutput("Erro ao obter console.");
     }
   }
@@ -168,7 +168,7 @@ export default function TorneioScreen() {
       } else {
         setConsoleOutput("Nenhuma saída retornada.");
       }
-    } catch (error) {
+    } catch {
       setConsoleOutput("Erro ao executar comando.");
     }
   }
@@ -207,7 +207,7 @@ export default function TorneioScreen() {
         Animated.timing(shapeAnim2, { toValue: 0, duration: 7000, useNativeDriver: false }),
       ])
     ).start();
-  }, []);
+  }, [adminIconSpin, fadeAnim, shapeAnim1, shapeAnim2]);
 
   useFocusEffect(
     useCallback(() => {
@@ -234,7 +234,7 @@ export default function TorneioScreen() {
           intervalRef.current = null; // Garante que o intervalo foi zerado
         }
       };
-    }, [])
+    }, [fetchTournamentData])
   );   
 
   useEffect(() => {
@@ -248,11 +248,11 @@ export default function TorneioScreen() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []);
+  }, [fetchTournamentData, requestNotificationPermission]);
 
   useEffect(() => {
     fetchTournamentData();
-  }, [fetchCount]);
+  }, [fetchCount, fetchTournamentData]);
 
   // 5) NOTIFICAÇÕES
   async function requestNotificationPermission() {
@@ -481,22 +481,6 @@ export default function TorneioScreen() {
   function openVoteModal() {
     setVoteModalVisible(true);
   }
-  function handleOpenReport() {
-    if (!linkReport) {
-      Alert.alert("Atenção", "Mesa não encontrada");
-      return;
-    }
-    try {
-      if (Platform.OS === "web") {
-        window.open(linkReport, "_blank");
-      } else {
-        Linking.openURL(linkReport);
-      }
-    } catch (err) {
-      console.log("Erro ao abrir link:", err);
-      Alert.alert("Erro", "Não foi possível abrir a página de report.");
-    }
-  }
 
   // 7) RENDER
   // Animação ícone admin
@@ -683,136 +667,134 @@ export default function TorneioScreen() {
         </Animatable.View>
       </Modal>
 
-     {/* ======= Header Custom ======= */}
-<View style={styles.customHeader}>
-  <Image
-    source={require("../../assets/images/logo.jpg")}
-    style={styles.logo}
-  />
+      <View style={styles.customHeader}>
+        <Image source={require("../../assets/images/logo.jpg")} style={styles.logo} />
 
-  {/* Botão de Atualizar */}
-  <TouchableOpacity onPress={fetchTournamentData} style={styles.refreshButton}>
-    <MaterialCommunityIcons name="refresh" size={28} color="white" />
-  </TouchableOpacity>
-
-  {/* Botão de Voto para Host (aparece apenas se isHost for true) */}
-  {isHost && (
-    <TouchableOpacity
-      onPress={() => setHostVoteModalVisible(true)}
-      style={[styles.refreshButton, { marginLeft: 6 }]}
-    >
-      <MaterialCommunityIcons name="account-check" size={28} color="white" />
-    </TouchableOpacity>
-  )}
-
-  <Text style={styles.headerUserName}>{userName}</Text>
-
-  {/* Botão Admin (se isAuthUser for true) */}
-  {isAuthUser && (
-    <TouchableOpacity onPress={() => setAdminPanelVisible(true)}>
-      <Animated.View style={{ transform: [{ rotate: spin }] }}>
-        <MaterialCommunityIcons
-          name="shield-lock"
-          size={32}
-          color="#FFD700"
-          style={{ marginLeft: 10 }}
-        />
-      </Animated.View>
-    </TouchableOpacity>
-  )}
-</View>
-
-{/* Caso não tenha torneio (somente se em foco) */}
-{noTournament && inFocus && (
-  <View style={styles.noTournamentContainer}>
-    <MaterialCommunityIcons name="alert" size={60} color={RED} />
-    <Text style={styles.noTournamentText}>
-      Nenhum torneio em andamento nesta liga.
-    </Text>
-    <TouchableOpacity
-      style={styles.noTournamentButton}
-      onPress={() => router.replace("/(tabs)/home")}
-    >
-      <Text style={styles.noTournamentButtonText}>Voltar</Text>
-    </TouchableOpacity>
-  </View>
-)}
-
-{/* Se há torneio... */}
-{!noTournament && (
-  <ScrollView style={styles.contentContainer}>
-    <Animatable.Text animation="fadeInDown" style={styles.leagueName}>
-      {leagueName}
-    </Animatable.Text>
-    <Animatable.Text animation="fadeIn" style={styles.leagueSub}>
-      Torneio em Andamento
-    </Animatable.Text>
-
-    {/* notPlaying */}
-    {notPlaying && (
-      <View style={styles.notPlayingContainer}>
-        <MaterialCommunityIcons name="alert" size={50} color={RED} />
-        <Text style={styles.notPlayingText}>
-          Você não está jogando nesta rodada.
-        </Text>
-        <TouchableOpacity
-          style={styles.noTournamentButton}
-          onPress={() => router.replace("/(tabs)/home")}
-        >
-          <Text style={styles.noTournamentButtonText}>Voltar</Text>
+        {/* Bot?o de Atualizar */}
+        <TouchableOpacity onPress={fetchTournamentData} style={styles.refreshButton}>
+          <MaterialCommunityIcons name="refresh" size={28} color="white" />
         </TouchableOpacity>
+
+        {/* Bot?o de Voto para Host (aparece apenas se isHost for true) */}
+        {isHost && (
+          <TouchableOpacity
+            onPress={() => setHostVoteModalVisible(true)}
+            style={[styles.refreshButton, { marginLeft: 6 }]}
+          >
+            <MaterialCommunityIcons name="account-check" size={28} color="white" />
+          </TouchableOpacity>
+        )}
+
+        <Text style={styles.headerUserName}>{userName}</Text>
+
+        {/* Bot?o Admin (se isAuthUser for true) */}
+        {isAuthUser && (
+          <TouchableOpacity onPress={() => setAdminPanelVisible(true)}>
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <MaterialCommunityIcons
+                name="shield-lock"
+                size={32}
+                color="#FFD700"
+                style={{ marginLeft: 10 }}
+              />
+            </Animated.View>
+          </TouchableOpacity>
+        )}
       </View>
-    )}
 
-    {/* Se estiver jogando */}
-    {!notPlaying && (
-      <>
-        <Animatable.View animation="fadeInUp" delay={100} style={styles.card}>
-          <MaterialCommunityIcons name="account" size={40} color={RED} />
-          <Text style={styles.cardTitle}>{userName}</Text>
-          <Text style={styles.cardSubtitle}>Jogador</Text>
-        </Animatable.View>
-
-        <Animatable.View animation="fadeInUp" delay={200} style={styles.card}>
-          <MaterialCommunityIcons name="sword-cross" size={40} color={RED} />
-          <Text style={styles.cardTitle}>{opponentName || "?"}</Text>
-          <Text style={styles.cardSubtitle}>Oponente</Text>
-        </Animatable.View>
-
-        <Animatable.View animation="fadeInUp" delay={300} style={styles.card}>
-          <MaterialCommunityIcons name="flag-checkered" size={40} color={RED} />
-          <Text style={styles.cardTitle}>
-            {currentRound ? currentRound : "?"}
+      {/* Caso n?o tenha torneio (somente se em foco) */}
+      {noTournament && inFocus && (
+        <View style={styles.noTournamentContainer}>
+          <MaterialCommunityIcons name="alert" size={60} color={RED} />
+          <Text style={styles.noTournamentText}>
+            Nenhum torneio em andamento nesta liga.
           </Text>
-          <Text style={styles.cardSubtitle}>Rodada Atual</Text>
-        </Animatable.View>
+          <TouchableOpacity
+            style={styles.noTournamentButton}
+            onPress={() => router.replace("/(tabs)/home")}
+          >
+            <Text style={styles.noTournamentButtonText}>Voltar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-        <Animatable.View animation="fadeInUp" delay={400} style={styles.card}>
-          <MaterialCommunityIcons name="table" size={40} color={RED} />
-          <Text style={styles.cardTitle}>{mesaNumber || "?"}</Text>
-          <Text style={styles.cardSubtitle}>Sua Mesa</Text>
-        </Animatable.View>
+      {/* Se h? torneio... */}
+      {!noTournament && (
+        <ScrollView style={styles.contentContainer}>
+          <Animatable.Text animation="fadeInDown" style={styles.leagueName}>
+            {leagueName}
+          </Animatable.Text>
+          <Animatable.Text animation="fadeIn" style={styles.leagueSub}>
+            Torneio em Andamento
+          </Animatable.Text>
 
-        {/* Botões */}
-        <View style={styles.buttonArea}>
-          <Animatable.View animation="pulse" iterationCount="infinite" style={styles.gradientButton}>
-            <TouchableOpacity onPress={openVoteModal}>
-              <Text style={styles.gradientButtonText}>Reportar Resultado</Text>
-            </TouchableOpacity>
-          </Animatable.View>
-
-          {isHost && (
-            <View style={[styles.gradientButton, { marginTop: 12 }]}>
-              <TouchableOpacity onPress={() => setReportsModalVisible(true)}>
-                <Text style={styles.gradientButtonText}>Ver Resultados</Text>
+          {/* notPlaying */}
+          {notPlaying && (
+            <View style={styles.notPlayingContainer}>
+              <MaterialCommunityIcons name="alert" size={50} color={RED} />
+              <Text style={styles.notPlayingText}>
+                Voc? n?o est? jogando nesta rodada.
+              </Text>
+              <TouchableOpacity
+                style={styles.noTournamentButton}
+                onPress={() => router.replace("/(tabs)/home")}
+              >
+                <Text style={styles.noTournamentButtonText}>Voltar</Text>
               </TouchableOpacity>
             </View>
           )}
-        </View>
-      </>
-    )}
-  </ScrollView>
-)}
+
+          {/* Se estiver jogando */}
+          {!notPlaying && (
+            <>
+              <Animatable.View animation="fadeInUp" delay={100} style={styles.card}>
+                <MaterialCommunityIcons name="account" size={40} color={RED} />
+                <Text style={styles.cardTitle}>{userName}</Text>
+                <Text style={styles.cardSubtitle}>Jogador</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={200} style={styles.card}>
+                <MaterialCommunityIcons name="sword-cross" size={40} color={RED} />
+                <Text style={styles.cardTitle}>{opponentName || "?"}</Text>
+                <Text style={styles.cardSubtitle}>Oponente</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={300} style={styles.card}>
+                <MaterialCommunityIcons name="flag-checkered" size={40} color={RED} />
+                <Text style={styles.cardTitle}>{currentRound ? currentRound : "?"}</Text>
+                <Text style={styles.cardSubtitle}>Rodada Atual</Text>
+              </Animatable.View>
+
+              <Animatable.View animation="fadeInUp" delay={400} style={styles.card}>
+                <MaterialCommunityIcons name="table" size={40} color={RED} />
+                <Text style={styles.cardTitle}>{mesaNumber || "?"}</Text>
+                <Text style={styles.cardSubtitle}>Sua Mesa</Text>
+              </Animatable.View>
+
+              {/* Bot?es */}
+              <View style={styles.buttonArea}>
+                <Animatable.View
+                  animation="pulse"
+                  iterationCount="infinite"
+                  style={styles.gradientButton}
+                >
+                  <TouchableOpacity onPress={openVoteModal}>
+                    <Text style={styles.gradientButtonText}>Reportar Resultado</Text>
+                  </TouchableOpacity>
+                </Animatable.View>
+
+                {isHost && (
+                  <View style={[styles.gradientButton, { marginTop: 12 }]}>
+                    <TouchableOpacity onPress={() => setReportsModalVisible(true)}>
+                      <Text style={styles.gradientButtonText}>Ver Resultados</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+        </ScrollView>
+      )}
     </Animated.View>
   );
 }
@@ -850,7 +832,6 @@ const styles = StyleSheet.create({
     bottom: 20,
   },
 
-  // Header Custom
   customHeader: {
     flexDirection: "row",
     alignItems: "center",

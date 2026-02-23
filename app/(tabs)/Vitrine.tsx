@@ -28,23 +28,14 @@ import {
   ScrollView,
   Alert,
   TouchableOpacity,
-  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  doc,
-  getDoc,
-  collection,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
-import { fetchAllStatsByFilter, PlayerStatsData } from "../../lib/matchService";
+import { fetchAllStatsByFilter } from "../../lib/matchService";
 import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
 
 // ==== Tipos para o Ranking
 interface RankingItem {
@@ -89,45 +80,42 @@ export default function RankingScreen() {
         const playersList = await fetchPlayersByFilter(filterType);
 
         // Monta array final
-        const finalArr: RankingItem[] = [];
-        for (const p of playersList) {
-          // Pega stats agregadas
-          const aggregated = await fetchAllStatsByFilter(p.id);
-          // Calcula campos
-          const w = aggregated.wins;
-          const d = aggregated.draws;
-          const l = aggregated.losses;
-          const total = aggregated.matchesTotal;
-          const points = w * 3 + d;
-          const wr = total > 0 ? (w / total) * 100 : 0;
+        const finalArr: RankingItem[] = await Promise.all(
+          playersList.map(async (p) => {
+            const aggregated = await fetchAllStatsByFilter(p.id);
+            const w = aggregated.wins;
+            const d = aggregated.draws;
+            const l = aggregated.losses;
+            const total = aggregated.matchesTotal;
+            const points = w * 3 + d;
+            const wr = total > 0 ? (w / total) * 100 : 0;
 
-          // Conta quantas vezes ficou em 2º lugar (vices)
-          let secondCount = 0;
-          // Contar torneios distintos
-          const uniqueTIDs = new Set<string>();
+            let secondCount = 0;
+            const uniqueTIDs = new Set<string>();
 
-          if (aggregated.tournamentPlacements?.length) {
-            aggregated.tournamentPlacements.forEach((tp) => {
-              if (tp.place === 2) {
-                secondCount++;
-              }
-              uniqueTIDs.add(tp.tournamentId);
-            });
-          }
+            if (aggregated.tournamentPlacements?.length) {
+              aggregated.tournamentPlacements.forEach((tp) => {
+                if (tp.place === 2) {
+                  secondCount++;
+                }
+                uniqueTIDs.add(tp.tournamentId);
+              });
+            }
 
-          finalArr.push({
-            playerId: p.id,
-            name: p.name,
-            wins: w,
-            draws: d,
-            losses: l,
-            matches: total,
-            points,
-            winRate: wr,
-            secondPlaces: secondCount,
-            distinctTournaments: uniqueTIDs.size,
-          });
-        }
+            return {
+              playerId: p.id,
+              name: p.name,
+              wins: w,
+              draws: d,
+              losses: l,
+              matches: total,
+              points,
+              winRate: wr,
+              secondPlaces: secondCount,
+              distinctTournaments: uniqueTIDs.size,
+            };
+          })
+        );
 
         setRankingData(finalArr);
       } catch (err) {
@@ -163,17 +151,21 @@ export default function RankingScreen() {
       // Pega ligas da cidade
       const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
       const snapCity = await getDocs(qCity);
-      for (const leagueDoc of snapCity.docs) {
-        const plRef = collection(db, `leagues/${leagueDoc.id}/players`);
-        const plSnap = await getDocs(plRef);
-        plSnap.forEach((pDoc) => {
-          const pData = pDoc.data();
-          arr.push({
-            id: pDoc.id,
-            name: pData.fullname || pDoc.id,
+      const leagueIds = snapCity.docs.map((d) => d.id);
+      const playersByLeague = await Promise.all(
+        leagueIds.map(async (lid) => {
+          const plRef = collection(db, `leagues/${lid}/players`);
+          const plSnap = await getDocs(plRef);
+          return plSnap.docs.map((pDoc) => {
+            const pData = pDoc.data();
+            return {
+              id: pDoc.id,
+              name: pData.fullname || pDoc.id,
+            };
           });
-        });
-      }
+        })
+      );
+      playersByLeague.flat().forEach((p) => arr.push(p));
     } else if (filterType === "league" && leagueStored) {
       const plRef = collection(db, `leagues/${leagueStored}/players`);
       const plSnap = await getDocs(plRef);

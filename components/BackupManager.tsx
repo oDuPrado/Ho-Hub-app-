@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -88,7 +88,7 @@ export default function useBackupManager(dataParaBackup: BackupData) {
    * Grava (salva) os dados de backup no localStorage ou AsyncStorage.
    * Antes de salvar, garante que cada binder tenha ID único e lastUpdatedAt atual.
    */
-  async function writeBackup(data: BackupData): Promise<void> {
+  const writeBackup = useCallback(async (data: BackupData): Promise<void> => {
     try {
       // Garante ID + timestamp para cada binder
       const bindersWithIds = ensureBinderIdsAndTimestamps(data.binders);
@@ -107,7 +107,7 @@ export default function useBackupManager(dataParaBackup: BackupData) {
     } catch (err) {
       console.log("Erro no writeBackup:", err);
     }
-  }
+  }, []);
 
   /**
    * Exporta o backup para um arquivo JSON.
@@ -291,7 +291,7 @@ export default function useBackupManager(dataParaBackup: BackupData) {
     } else {
       firstLoadRef.current = false;
     }
-  }, [dataParaBackup]);
+  }, [dataParaBackup, writeBackup]);
 
   /**
    * Gera um arquivo JSON de backup no sistema de arquivos, sem compartilhar.

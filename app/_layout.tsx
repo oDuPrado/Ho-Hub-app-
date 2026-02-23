@@ -1,5 +1,5 @@
 // RootLayout.tsx
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Stack } from "expo-router";
 import {
   DarkTheme,
@@ -17,14 +17,12 @@ import {
   TouchableOpacity,
   Image,
   Modal,
+  Platform,
 } from "react-native";
 import * as Updates from "expo-updates";
 
 // ==> Importamos o i18n para que seja inicializado antes de tudo
 import "../i18n";
-
-// (Opcional) Se quiser usar BAN_PLAYER_IDS em outro lugar do layout
-import { BAN_PLAYER_IDS } from "./hosts";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -38,6 +36,7 @@ export default function RootLayout() {
   const [progress, setProgress] = useState(0);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -45,12 +44,29 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
-  useEffect(() => {
-    checkForUpdates();
+  const simulateProgress = useCallback(() => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+    progressIntervalRef.current = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 1) {
+          if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+            progressIntervalRef.current = null;
+          }
+          return 1;
+        }
+        return prev + 0.1;
+      });
+    }, 500);
   }, []);
 
-  async function checkForUpdates() {
+  const checkForUpdates = useCallback(async () => {
     try {
+      if (Platform.OS === "web" || !Updates.isEnabled) {
+        return;
+      }
       console.log("Verificando atualizações...");
       setUpdateMessage("Verificando atualizações...");
       const update = await Updates.checkForUpdateAsync();
@@ -59,17 +75,16 @@ export default function RootLayout() {
         setUpdateMessage("Atualização disponível!");
         console.log("Atualização disponível. Baixando...");
         setUpdateAvailable(true);
+        setProgress(0);
 
-        const downloadProgress = Updates.fetchUpdateAsync();
-
-        // Simular barra de progresso
+        // Simular barra de progresso enquanto baixa
         simulateProgress();
 
-        downloadProgress.then(() => {
-          console.log("Atualização baixada com sucesso!");
-          setUpdateMessage(null);
-          setShowModal(true);
-        });
+        await Updates.fetchUpdateAsync();
+        console.log("Atualização baixada com sucesso!");
+        setProgress(1);
+        setUpdateMessage(null);
+        setShowModal(true);
       } else {
         console.log("Nenhuma atualização disponível.");
         setUpdateMessage(null);
@@ -77,20 +92,23 @@ export default function RootLayout() {
     } catch (error) {
       console.error("Erro ao verificar atualizações: ", error);
       setUpdateMessage("Erro ao verificar atualizações.");
+    } finally {
+      if (progressIntervalRef.current && progress >= 1) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
     }
-  }
+  }, [progress, simulateProgress]);
 
-  function simulateProgress() {
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 1) {
-          clearInterval(interval);
-          return 1;
-        }
-        return prev + 0.1;
-      });
-    }, 500);
-  }
+  useEffect(() => {
+    checkForUpdates();
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
+  }, [checkForUpdates]);
 
   const handleApplyUpdate = async () => {
     setShowModal(false);

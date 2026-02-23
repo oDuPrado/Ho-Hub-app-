@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import moment from "moment";
 import "moment/locale/pt-br";
 import {
@@ -25,6 +25,7 @@ import { TouchableWithoutFeedback } from "react-native-gesture-handler";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   collection,
+  collectionGroup,
   doc,
   addDoc,
   updateDoc,
@@ -39,17 +40,12 @@ import {
 } from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
 
-import {
-  vipPlayers,
-  HOST_PLAYER_IDS,
-  HEAD_JUDGE_PLAYER_IDS,
-  JUDGE_PLAYER_IDS,
-  fetchRoleMembers,
-} from "../hosts";
+import { HOST_PLAYER_IDS, fetchRoleMembers } from "../hosts";
 import { useFocusEffect } from "@react-navigation/native";
 
 interface Torneio {
   id: string;
+  leagueId?: string;
   name: string;
   date: string; // dd/mm/aaaa
   time: string; // hh:mm
@@ -100,6 +96,7 @@ export default function CalendarScreen() {
 
   // Dados
   const [torneios, setTorneios] = useState<Torneio[]>([]);
+  const [allTorneios, setAllTorneios] = useState<Torneio[]>([]);
   const [currentMonth, setCurrentMonth] = useState(moment());
 
   // Mapeamento de nomes
@@ -178,6 +175,10 @@ export default function CalendarScreen() {
   const [setIdMap, setSetIdMap] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState<boolean>(false);
 
+  const torneiosUnsubRef = useRef<ReturnType<typeof onSnapshot> | null>(null);
+  const inscricoesUnsubRef = useRef<ReturnType<typeof onSnapshot> | null>(null);
+  const esperaUnsubRef = useRef<ReturnType<typeof onSnapshot> | null>(null);
+
   //Torneios 
 interface InscricaoUserData {
   [tournamentId: string]: {
@@ -213,6 +214,23 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
     })();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (torneiosUnsubRef.current) {
+        torneiosUnsubRef.current();
+        torneiosUnsubRef.current = null;
+      }
+      if (inscricoesUnsubRef.current) {
+        inscricoesUnsubRef.current();
+        inscricoesUnsubRef.current = null;
+      }
+      if (esperaUnsubRef.current) {
+        esperaUnsubRef.current();
+        esperaUnsubRef.current = null;
+      }
+    };
+  }, []);
+
   useFocusEffect(
     React.useCallback(() => {
       (async () => {
@@ -230,8 +248,6 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
           console.log("📌 Novo Filter Type:", fType);
           console.log("📌 Nova League ID:", lStored);
           console.log("📌 Nova Cidade:", cStored);
-
-          loadTorneios();
         } catch (error) {
           console.log("❌ Erro ao atualizar filtros ao focar:", error);
         }
@@ -242,13 +258,60 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
   useEffect(() => {
     console.log("🔄 Atualizando torneios - Filtros:", filterType, leagueStored, cityStored);
     loadTorneios();
-  }, [currentMonth, filterType, cityStored, leagueStored]);
+  }, [cityStored, filterType, leagueStored, loadTorneios]);
+
+  useEffect(() => {
+    const start = currentMonth.clone().startOf("month");
+    const end = currentMonth.clone().endOf("month");
+    const filtered = allTorneios.filter((t) => {
+      const dt = moment(t.date, "DD/MM/YYYY");
+      return dt.isBetween(start, end, undefined, "[]");
+    });
+    setTorneios(filtered);
+  }, [currentMonth, allTorneios]);
 
   useEffect(() => {
     if (playerId && leagueStored) {
       loadUserInscricoes(playerId);
     }
-  }, [playerId, leagueStored]);
+  }, [leagueStored, loadUserInscricoes, playerId]);
+
+  useEffect(() => {
+    const pairs: { leagueId: string; userId: string }[] = [];
+    const seen = new Set<string>();
+
+    allTorneios.forEach((t) => {
+      if (!t.createdBy || !t.leagueId) return;
+      if (playerNameMap[t.createdBy]) return;
+      const key = `${t.leagueId}:${t.createdBy}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      pairs.push({ leagueId: t.leagueId, userId: t.createdBy });
+    });
+
+    if (pairs.length === 0) return;
+
+    Promise.all(
+      pairs.map(async ({ leagueId, userId }) => {
+        try {
+          const pRef = doc(db, "leagues", leagueId, "players", userId);
+          const pSnap = await getDoc(pRef);
+          const nm = pSnap.exists()
+            ? pSnap.data().fullname || `Jogador não cadastrado: ${userId}`
+            : `Jogador não cadastrado: ${userId}`;
+          setPlayerNameMap((prev) => {
+            if (prev[userId]) return prev;
+            return { ...prev, [userId]: nm };
+          });
+        } catch {
+          setPlayerNameMap((prev) => {
+            if (prev[userId]) return prev;
+            return { ...prev, [userId]: `Jogador não cadastrado: ${userId}` };
+          });
+        }
+      })
+    );
+  }, [allTorneios, playerNameMap]);
 
 
   // ============ FUNÇÕES DE AJUDA ============
@@ -327,21 +390,26 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
   }
 
   // ==================== LOAD TORNEIOS / FILTRO ====================
-  async function loadTorneios() {
+  const loadTorneios = useCallback(async () => {
     try {
-      const filterT = await AsyncStorage.getItem("@filterType");
-      const leagueSt = await AsyncStorage.getItem("@leagueId");
-      const citySt = await AsyncStorage.getItem("@selectedCity");
+      const filterT = filterType;
+      const leagueSt = leagueStored;
+      const citySt = cityStored;
+
+      if (torneiosUnsubRef.current) {
+        torneiosUnsubRef.current();
+        torneiosUnsubRef.current = null;
+      }
 
       if (filterT === "league" && leagueSt) {
-        // Liga específica
         const colRef = collection(db, "leagues", leagueSt, "calendar");
-        onSnapshot(colRef, (snap) => {
+        torneiosUnsubRef.current = onSnapshot(colRef, (snap) => {
           const arr: Torneio[] = [];
           snap.forEach((docSnap) => {
             const d = docSnap.data();
             arr.push({
               id: docSnap.id,
+              leagueId: leagueSt,
               name: d.name,
               date: d.date,
               time: d.time,
@@ -356,139 +424,93 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
               prioridadeVip: d.prioridadeVip || false,
               inscricoesVipAbertura: d.inscricoesVipAbertura || "",
               inscricoesVipFechamento: d.inscricoesVipFechamento || "",
-              // **Adiciona aqui os novos campos:**
               inscricoesDataInicio: d.inscricoesDataInicio || "",
               inscricoesDataFim: d.inscricoesDataFim || "",
             });
-          });          
-
-          const start = currentMonth.clone().startOf("month");
-          const end = currentMonth.clone().endOf("month");
-          const filtered = arr.filter((t) => {
-            const dt = moment(t.date, "DD/MM/YYYY");
-            return dt.isBetween(start, end, undefined, "[]");
           });
-          setTorneios(filtered);
-
-          filtered.forEach(async (tor) => {
-            if (tor.createdBy && !playerNameMap[tor.createdBy]) {
-              const pRef = doc(db, "leagues", leagueSt, "players", tor.createdBy);
-              const pSnap = await getDoc(pRef);
-              if (pSnap.exists()) {
-                const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
-                setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
-              }
-            }
-          });
+          setAllTorneios(arr);
         });
-      } else if (filterT === "city" && citySt) {
-        // Liga da cidade
+        return;
+      }
+
+      if (filterT === "city" && citySt) {
         const qCity = query(collection(db, "leagues"), where("city", "==", citySt));
         const citySnap = await getDocs(qCity);
-        let arrGlobal: Torneio[] = [];
-
-        for (const leagueDoc of citySnap.docs) {
-          const lId = leagueDoc.id;
-          const colRef = collection(db, "leagues", lId, "calendar");
-          const colSnap = await getDocs(colRef);
-          colSnap.forEach((docSnap) => {
-            const d = docSnap.data();
-            arrGlobal.push({
-              id: docSnap.id,
-              name: d.name,
-              date: d.date,
-              time: d.time,
-              createdBy: d.createdBy,
-              judge: d.judge || "",
-              headJudge: d.headJudge || "",
-              eventType: d.eventType || "Cup",
-              judgeAccepted: d.judgeAccepted || false,
-              maxVagas: d.maxVagas || null,
-              inscricoesAbertura: d.inscricoesAbertura || "",
-              inscricoesFechamento: d.inscricoesFechamento || "",
-              prioridadeVip: d.prioridadeVip || false,
-              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
-              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+        const leagueIds = citySnap.docs.map((d) => d.id);
+        const calendars = await Promise.all(
+          leagueIds.map(async (lId) => {
+            const colRef = collection(db, "leagues", lId, "calendar");
+            const colSnap = await getDocs(colRef);
+            return colSnap.docs.map((docSnap) => {
+              const d = docSnap.data();
+              return {
+                id: docSnap.id,
+                leagueId: lId,
+                name: d.name,
+                date: d.date,
+                time: d.time,
+                createdBy: d.createdBy,
+                judge: d.judge || "",
+                headJudge: d.headJudge || "",
+                eventType: d.eventType || "Cup",
+                judgeAccepted: d.judgeAccepted || false,
+                maxVagas: d.maxVagas || null,
+                inscricoesAbertura: d.inscricoesAbertura || "",
+                inscricoesFechamento: d.inscricoesFechamento || "",
+                prioridadeVip: d.prioridadeVip || false,
+                inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+                inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+                inscricoesDataInicio: d.inscricoesDataInicio || "",
+                inscricoesDataFim: d.inscricoesDataFim || "",
+              } as Torneio;
             });
-          });
-        }
-        const start = currentMonth.clone().startOf("month");
-        const end = currentMonth.clone().endOf("month");
-        const filtered = arrGlobal.filter((t) => {
-          const dt = moment(t.date, "DD/MM/YYYY");
-          return dt.isBetween(start, end, undefined, "[]");
-        });
-        setTorneios(filtered);
-
-        filtered.forEach(async (tor) => {
-          const lId = citySnap.docs[0]?.id || "";
-          if (tor.createdBy && !playerNameMap[tor.createdBy]) {
-            const pRef = doc(db, "leagues", lId, "players", tor.createdBy);
-            const pSnap = await getDoc(pRef);
-            if (pSnap.exists()) {
-              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
-              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
-            }
-          }
-        });
-      } else if (filterT === "all") {
-        // Todas as ligas
-        const leaguesSnap = await getDocs(collection(db, "leagues"));
-        let arrGlobal: Torneio[] = [];
-
-        for (const leagueDoc of leaguesSnap.docs) {
-          const lId = leagueDoc.id;
-          const colRef = collection(db, "leagues", lId, "calendar");
-          const colSnap = await getDocs(colRef);
-          colSnap.forEach((docSnap) => {
-            const d = docSnap.data();
-            arrGlobal.push({
-              id: docSnap.id,
-              name: d.name,
-              date: d.date,
-              time: d.time,
-              createdBy: d.createdBy,
-              judge: d.judge || "",
-              headJudge: d.headJudge || "",
-              eventType: d.eventType || "Cup",
-              judgeAccepted: d.judgeAccepted || false,
-              maxVagas: d.maxVagas || null,
-              inscricoesAbertura: d.inscricoesAbertura || "",
-              inscricoesFechamento: d.inscricoesFechamento || "",
-              prioridadeVip: d.prioridadeVip || false,
-              inscricoesVipAbertura: d.inscricoesVipAbertura || "",
-              inscricoesVipFechamento: d.inscricoesVipFechamento || "",
-            });
-          });
-        }
-        const start = currentMonth.clone().startOf("month");
-        const end = currentMonth.clone().endOf("month");
-        const filtered = arrGlobal.filter((t) => {
-          const dt = moment(t.date, "DD/MM/YYYY");
-          return dt.isBetween(start, end, undefined, "[]");
-        });
-        setTorneios(filtered);
-
-        filtered.forEach(async (tor) => {
-          const leaguesSnap2 = await getDocs(collection(db, "leagues"));
-          for (const lDoc of leaguesSnap2.docs) {
-            const pRef = doc(db, "leagues", lDoc.id, "players", tor.createdBy);
-            const pSnap = await getDoc(pRef);
-            if (pSnap.exists()) {
-              const nm = pSnap.data().fullname || `Jogador não cadastrado: ${tor.createdBy}`;
-              setPlayerNameMap((prev) => ({ ...prev, [tor.createdBy]: nm }));
-              break;
-            }
-          }
-        });
-      } else {
-        // Nenhum filtro
-        setTorneios([]);
+          })
+        );
+        setAllTorneios(calendars.flat());
+        return;
       }
+
+      if (filterT === "all") {
+        const leaguesSnap = await getDocs(collection(db, "leagues"));
+        const leagueIds = leaguesSnap.docs.map((d) => d.id);
+        const calendars = await Promise.all(
+          leagueIds.map(async (lId) => {
+            const colRef = collection(db, "leagues", lId, "calendar");
+            const colSnap = await getDocs(colRef);
+            return colSnap.docs.map((docSnap) => {
+              const d = docSnap.data();
+              return {
+                id: docSnap.id,
+                leagueId: lId,
+                name: d.name,
+                date: d.date,
+                time: d.time,
+                createdBy: d.createdBy,
+                judge: d.judge || "",
+                headJudge: d.headJudge || "",
+                eventType: d.eventType || "Cup",
+                judgeAccepted: d.judgeAccepted || false,
+                maxVagas: d.maxVagas || null,
+                inscricoesAbertura: d.inscricoesAbertura || "",
+                inscricoesFechamento: d.inscricoesFechamento || "",
+                prioridadeVip: d.prioridadeVip || false,
+                inscricoesVipAbertura: d.inscricoesVipAbertura || "",
+                inscricoesVipFechamento: d.inscricoesVipFechamento || "",
+                inscricoesDataInicio: d.inscricoesDataInicio || "",
+                inscricoesDataFim: d.inscricoesDataFim || "",
+              } as Torneio;
+            });
+          })
+        );
+        setAllTorneios(calendars.flat());
+        return;
+      }
+
+      setAllTorneios([]);
     } catch (err) {
       console.log("❌ Erro ao carregar torneios:", err);
     }
-  }
+  }, [cityStored, filterType, leagueStored]);
 
   // ===================== MÁSCARAS =====================
   function handleMaskDate(text: string, setFunc: (val: string) => void) {
@@ -611,7 +633,7 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
         });
       } else {
         // Criar
-        const docRef = await addDoc(colRef, {
+        await addDoc(colRef, {
           name: editName.trim(),
           date: editDate,
           time: editTime,
@@ -783,7 +805,7 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
   
         // Buscar decks do jogador
         const decksRef = collection(db, `players/${playerId}/decks`);
-        onSnapshot(decksRef, (resp) => {
+        getDocs(decksRef).then((resp) => {
           const arr: DeckData[] = [];
           resp.forEach((docSnap) => {
             arr.push({
@@ -808,7 +830,7 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
   
     // Buscando decks do jogador (igual no proceedToInscription)
     const decksRef = collection(db, `players/${playerId}/decks`);
-    onSnapshot(decksRef, (resp) => {
+    getDocs(decksRef).then((resp) => {
       const arr: DeckData[] = [];
       resp.forEach((docSnap) => {
         arr.push({
@@ -890,58 +912,32 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
     }
   }  
 
-  useEffect(() => {
-    moment.locale("pt-br");
-    (async () => {
-      try {
-        const pid = await AsyncStorage.getItem("@userId");
-        if (pid) {
-          setPlayerId(pid);
-          setIsHost(HOST_PLAYER_IDS.includes(pid));
-        }
-        loadTorneios();
-        loadUserInscricoes(pid); // Carregar inscrições do usuário
-      } catch (error) {
-        console.log("Erro no fetch inicial:", error);
-      }
-    })();
-  }, []);
-
-  async function loadUserInscricoes(userId: string | null) {
+  const loadUserInscricoes = useCallback(async (userId: string | null) => {
     if (!userId || !leagueStored) return;
     try {
-      const tournamentsRef = collection(db, "leagues", leagueStored, "calendar");
-      const tournamentsSnap = await getDocs(tournamentsRef);
-  
       const newInscriptions: InscricaoUserData = {};
-  
-      for (const tournamentDoc of tournamentsSnap.docs) {
-        const tournamentId = tournamentDoc.id;
-        // Verifica inscrição do usuário nesse torneio
-        const inscricaoRef = doc(
-          db,
-          "leagues",
-          leagueStored,
-          "calendar",
-          tournamentId,
-          "inscricoes",
-          userId
-        );
-        const snap = await getDoc(inscricaoRef);
-  
-        if (snap.exists()) {
-          newInscriptions[tournamentId] = {
-            deckId: snap.data().deckId,
-            createdAt: snap.data().createdAt,
-          };
-        }
-      }
-  
+      const cg = collectionGroup(db, "inscricoes");
+      const q = query(cg, where("userId", "==", userId));
+      const snap = await getDocs(q);
+      const prefix = `leagues/${leagueStored}/calendar/`;
+
+      snap.forEach((docSnap) => {
+        const path = docSnap.ref.path;
+        if (!path.startsWith(prefix)) return;
+        const parts = path.split("/");
+        const tournamentId = parts[3];
+        if (!tournamentId) return;
+        newInscriptions[tournamentId] = {
+          deckId: docSnap.data().deckId,
+          createdAt: docSnap.data().createdAt,
+        };
+      });
+
       setUserInscriptions(newInscriptions);
     } catch (error) {
       console.error("Erro ao carregar inscrições do usuário:", error);
     }
-  }
+  }, [leagueStored]);
   
   // ================== DETALHES ==================
   function handleOpenDetalhes(t: Torneio) {
@@ -960,7 +956,16 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
     if (!leagueStored) return;
     const colRef = collection(db, "leagues", leagueStored, "calendar", t.id, "inscricoes");
 
-    onSnapshot(colRef, async (snap) => {
+    if (inscricoesUnsubRef.current) {
+      inscricoesUnsubRef.current();
+      inscricoesUnsubRef.current = null;
+    }
+    if (esperaUnsubRef.current) {
+      esperaUnsubRef.current();
+      esperaUnsubRef.current = null;
+    }
+
+    inscricoesUnsubRef.current = onSnapshot(colRef, async (snap) => {
       const arr: Inscricao[] = [];
       snap.forEach((ds) => {
         arr.push({
@@ -976,7 +981,7 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
       const deckQueries: Promise<void>[] = [];
 
       arr.forEach((i) => {
-        if (i.deckId) {
+        if (i.deckId && !deckNameMap[i.deckId]) {
           deckQueries.push(
             (async () => {
               const playerDeckRef = doc(db, `players/${i.userId}/decks/${i.deckId}`);
@@ -1016,7 +1021,7 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
 
     // Lista de espera
     const waitColRef = collection(db, "leagues", leagueStored, "calendar", t.id, "espera");
-    onSnapshot(waitColRef, (wanp) => {
+    esperaUnsubRef.current = onSnapshot(waitColRef, (wanp) => {
       const arr: Espera[] = [];
       wanp.forEach((ds) => {
         arr.push({
@@ -1054,6 +1059,14 @@ const [userInscriptions, setUserInscriptions] = useState<InscricaoUserData>({});
   }
 
   function closeInscricoesModal() {
+    if (inscricoesUnsubRef.current) {
+      inscricoesUnsubRef.current();
+      inscricoesUnsubRef.current = null;
+    }
+    if (esperaUnsubRef.current) {
+      esperaUnsubRef.current();
+      esperaUnsubRef.current = null;
+    }
     setInscricoes([]);
     setEspera([]);
     setInscricoesModalVisible(false);

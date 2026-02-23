@@ -11,7 +11,6 @@ import {
   StyleSheet,
   Animated,
   Easing,
-  Dimensions,
   ScrollView,
 } from "react-native";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
@@ -36,8 +35,6 @@ type TitlesModalProps = {
 /**
  * Dimensões da tela, para eventuais cálculos de layout.
  */
-const { width, height } = Dimensions.get("window");
-
 /**
  * Este componente exibe os Títulos desbloqueados ou não, agrupados por categoria.
  */
@@ -60,7 +57,7 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
       fadeAnim.setValue(0);
       setSelectedTitle(null);
     }
-  }, [visible]);
+  }, [fadeAnim, visible]);
 
   // Se a lista estiver vazia, pedimos ao usuário para escolher uma liga no filtro.
   const isEmptyList = !titles || titles.length === 0;
@@ -114,7 +111,7 @@ export default function TitlesModal({ visible, onClose, titles }: TitlesModalPro
           })
         ).start();
       }
-    }, [item.category]);
+    }, [exclusiveAnim, item.category]);
 
     /* Interpolamos a rotação do ícone exclusivo
     const exclusiveRotate = exclusiveAnim.interpolate({

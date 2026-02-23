@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -29,11 +29,7 @@ export default function NoticiasScreen() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [errorLog, setErrorLog] = useState<string>("");
 
-  useEffect(() => {
-    fetchNews();
-  }, []);
-
-  const fetchNews = async () => {
+  const fetchNews = useCallback(async () => {
     setLoading(true);
     setErrorLog("");
     try {
@@ -49,7 +45,11 @@ export default function NoticiasScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t]);
+
+  useEffect(() => {
+    fetchNews();
+  }, [fetchNews]);
 
   const handleOpenLink = async (url: string) => {
     try {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -7,12 +7,9 @@ import {
   TouchableOpacity,
   Modal,
   BackHandler,
-  Alert,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import moment from "moment";
-import "moment/locale/pt-br";
 import * as Animatable from "react-native-animatable";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -51,7 +48,6 @@ type DisplayFilter = "normal" | "vejo" | "fregues" | "deixa";
 
 export default function ClassicosScreen() {
   // =============== ESTADOS ===============
-  const [userId, setUserId] = useState("");
   const [rivalName, setRivalName] = useState("Sem Rival");
   const [classicsData, setClassicsData] = useState<ClassicsDoc | null>(null);
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
@@ -62,10 +58,55 @@ export default function ClassicosScreen() {
   const [classicosInfoModalVisible, setClassicosInfoModalVisible] = useState(false);
 
   // ============ FOCUS E BACKHANDLER ============
+  const loadClassicosPage = useCallback(async () => {
+    try {
+      const storedUserId = await AsyncStorage.getItem("@userId");
+      if (!storedUserId) {
+        console.log("ID do usu?rio n?o encontrado.");
+        return;
+      }
+
+      const filterType = await AsyncStorage.getItem("@filterType");
+      const cityStored = await AsyncStorage.getItem("@selectedCity");
+      const leagueStored = await AsyncStorage.getItem("@leagueId");
+
+      if (filterType === "league" && leagueStored) {
+        const rivalDoc = await fetchRivalByFilter(storedUserId);
+        if (rivalDoc) {
+          setRivalName(rivalDoc.rivalName);
+        } else {
+          setRivalName("Sem Rival");
+        }
+      } else {
+        setRivalName("Rival indispon?vel (Somente no modo Liga)");
+      }
+
+      const userClassics = await getClassicsDocWithCache(
+        leagueStored,
+        storedUserId,
+        filterType || "all"
+      );
+      setClassicsData(userClassics);
+
+      const loadedPlayers = await loadPlayersByFilter(filterType, cityStored, leagueStored);
+      setPlayers(loadedPlayers);
+
+      const allClassicsData = await getAllClassicsDocsWithCache(
+        loadedPlayers,
+        leagueStored,
+        filterType || "all"
+      );
+      const combos = buildAllDuoStats(allClassicsData);
+      setDuoStatsList(combos);
+    } catch (err) {
+      console.log("Erro ao carregar tela Cl?ssicos:", err);
+    }
+  }, [getAllClassicsDocsWithCache, getClassicsDocWithCache, loadPlayersByFilter]);
+
   useFocusEffect(
     useCallback(() => {
       loadClassicosPage();
-    }, [])
+    }, [loadClassicosPage])
   );
 
   useEffect(() => {
@@ -84,58 +125,14 @@ export default function ClassicosScreen() {
     return () => subscription.remove();
   }, [classicosModalVisible, classicosInfoModalVisible]);
 
-  // ============ CARREGAR DADOS ============
-  async function loadClassicosPage() {
-    try {
-      const storedUserId = await AsyncStorage.getItem("@userId");
-      if (!storedUserId) {
-        console.log("ID do usuário não encontrado.");
-        return;
-      }
-      setUserId(storedUserId);
-
-      const filterType = await AsyncStorage.getItem("@filterType");
-      const cityStored = await AsyncStorage.getItem("@selectedCity");
-      const leagueStored = await AsyncStorage.getItem("@leagueId");
-
-      // 1) Rival
-      if (filterType === "league" && leagueStored) {
-        const rivalDoc = await fetchRivalByFilter(storedUserId);
-        if (rivalDoc) {
-          setRivalName(rivalDoc.rivalName);
-        } else {
-          setRivalName("Sem Rival");
-        }
-      } else {
-        setRivalName("Rival indisponível (Somente no modo Liga)");
-      }
-
-      // 2) ClassicsDoc do usuário
-      const userClassics = await getClassicsDocWithCache(leagueStored, storedUserId, filterType || "all");
-      setClassicsData(userClassics);
-
-      // 3) Carrega todos os players conforme o filtro
-      const loadedPlayers = await loadPlayersByFilter(filterType, cityStored, leagueStored);
-      setPlayers(loadedPlayers);
-
-      // 4) Lê docs /stats/classics de todos e monta combos
-      const allClassicsData = await getAllClassicsDocsWithCache(loadedPlayers, leagueStored, filterType || "all");
-      const combos = buildAllDuoStats(allClassicsData);
-      setDuoStatsList(combos);
-
-    } catch (err) {
-      console.log("Erro ao carregar tela Clássicos:", err);
-    }
-  }
-
-  // ============ FUNÇÕES DE LEITURA ============
+// ============ FUNÇÕES DE LEITURA ============
   async function getClassicsDocWithCache(
     leagueId: string | null,
     userId: string,
     filterType: string
   ): Promise<ClassicsDoc | null> {
     if (!leagueId) return null;
-    const cacheKey = `@classics_user_${userId}_${filterType}`;
+    const cacheKey = `@classics_user_${userId}_${filterType}_${leagueId}`;
     const cachedStr = await AsyncStorage.getItem(cacheKey);
     if (cachedStr) {
       const parsed = JSON.parse(cachedStr);
@@ -172,22 +169,25 @@ export default function ClassicosScreen() {
       leaguesToFetch.push(leagueStored);
     }
 
-    let allPlayers: PlayerInfo[] = [];
-    for (const lid of leaguesToFetch) {
-      const pSnap = await getDocs(collection(db, `leagues/${lid}/players`));
-      pSnap.forEach((ds) => {
-        const d = ds.data();
-        allPlayers.push({ id: ds.id, fullname: d.fullname || `User ${ds.id}` });
-      });
-    }
-    // remove duplicados
-    const seen = new Set<string>();
-    const unique = allPlayers.filter((p) => {
-      if (seen.has(p.id)) return false;
-      seen.add(p.id);
-      return true;
+    if (leaguesToFetch.length === 0) return [];
+
+    const playersByLeague = await Promise.all(
+      leaguesToFetch.map(async (lid) => {
+        const pSnap = await getDocs(collection(db, `leagues/${lid}/players`));
+        return pSnap.docs.map((ds) => {
+          const d = ds.data();
+          return { id: ds.id, fullname: d.fullname || `User ${ds.id}` };
+        });
+      })
+    );
+
+    const seen = new Map<string, PlayerInfo>();
+    playersByLeague.flat().forEach((p) => {
+      if (!seen.has(p.id)) {
+        seen.set(p.id, p);
+      }
     });
-    return unique;
+    return Array.from(seen.values());
   }
 
   async function getAllClassicsDocsWithCache(
@@ -196,7 +196,7 @@ export default function ClassicosScreen() {
     filterType: string
   ): Promise<Record<string, ClassicsDoc>> {
     if (!leagueId) return {};
-    const cacheKey = `@classics_all_${filterType}`;
+    const cacheKey = `@classics_all_${filterType}_${leagueId}`;
     const cachedStr = await AsyncStorage.getItem(cacheKey);
     if (cachedStr) {
       const parsed = JSON.parse(cachedStr);
@@ -207,15 +207,13 @@ export default function ClassicosScreen() {
     }
     console.log("🔎 Buscando documentos /stats/classics de todos os jogadores no Firestore...");
     const result: Record<string, ClassicsDoc> = {};
-    for (const p of playersArr) {
-      const docRef = doc(db, `leagues/${leagueId}/players/${p.id}/stats`, "classics");
-      const snap = await getDoc(docRef);
-      if (!snap.exists()) {
-        result[p.id] = { opponents: {} };
-      } else {
-        result[p.id] = snap.data() as ClassicsDoc;
-      }
-    }
+    await Promise.all(
+      playersArr.map(async (p) => {
+        const docRef = doc(db, `leagues/${leagueId}/players/${p.id}/stats`, "classics");
+        const snap = await getDoc(docRef);
+        result[p.id] = snap.exists() ? (snap.data() as ClassicsDoc) : { opponents: {} };
+      })
+    );
     await AsyncStorage.setItem(cacheKey, JSON.stringify({ data: result, timestamp: Date.now() }));
     return result;
   }
@@ -322,18 +320,6 @@ export default function ClassicosScreen() {
   }
 
   // ============ MODAIS ============
-  function openClassicosModal() {
-    setClassicosModalVisible(true);
-  }
-  function closeClassicosModal() {
-    setClassicosModalVisible(false);
-  }
-  function openClassicosInfoModal() {
-    setClassicosInfoModalVisible(true);
-  }
-  function closeClassicosInfoModal() {
-    setClassicosInfoModalVisible(false);
-  }
 
   // ============ RENDER ============
   const filteredOppIds = getFilteredOpponents();

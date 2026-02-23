@@ -17,7 +17,6 @@ import {
   ScrollView,
   Modal,
   ImageBackground,
-  Image,
   FlatList,
   Pressable,
   AppState,
@@ -328,7 +327,7 @@ export default function LoginScreen() {
     });
 
     return () => unsubscribe();
-  }, [stayLogged]);
+  }, [router, stayLogged, t]);
 
   // >>> Renovar token (foreground)
   useEffect(() => {
@@ -505,7 +504,7 @@ export default function LoginScreen() {
     try {
       await signInWithEmailAndPassword(auth, savedEmail, savedPassword);
       console.log("Login automático com:", savedEmail);
-    } catch (err) {
+    } catch {
       showModal("Erro", "Falha ao entrar automaticamente.");
     }
     setLoading(false);

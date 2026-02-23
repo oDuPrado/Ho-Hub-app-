@@ -1,5 +1,3 @@
-import { TitleItem } from "./titlesConfig";
-
 export interface TemplateItem {
   id: number;
   name: string;

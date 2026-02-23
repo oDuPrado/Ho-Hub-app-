@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -19,7 +19,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { collection, doc, getDocs, setDoc } from "firebase/firestore";
 import { db } from "../../lib/firebaseConfig";
 
-import { useTranslation } from "react-i18next";
 import * as Animatable from "react-native-animatable";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -155,8 +154,6 @@ type SortOption =
   | "releaseDate";
 
 export default function CardsSearchScreen() {
-  const { t } = useTranslation();
-
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredCards, setFilteredCards] = useState<CardData[]>([]);
   const [collections, setCollections] = useState<CollectionData[]>([]);
@@ -200,6 +197,7 @@ export default function CardsSearchScreen() {
   /** 3) Modal para ordenação (engrenagem) */
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>("none");
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   //Modal para renomear binder
   const [nameBinderModalVisible, setNameBinderModalVisible] = useState(false);
@@ -291,130 +289,150 @@ export default function CardsSearchScreen() {
     setUserWishlist(Array.from(wish));
   }, [binders]);
 
-  /** Busca cartas pelo query (nome, setCode, etc.) [original] */
-  async function searchCard(query: string) {
-    setLoading(true);
-    try {
-      const text = query.trim();
-      if (/^\d+$/.test(text)) {
-        setFilteredCards([]);
-        setLoading(false);
-        return;
+  useEffect(() => {
+    if (!searchQuery && !selectedCollectionId) {
+      return;
+    }
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      searchCard(searchQuery);
+    }, 350);
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+        searchDebounceRef.current = null;
       }
+    };
+  }, [searchCard, searchQuery, selectedCollectionId, showOnlyLegal]);
 
-      if (!text) {
-        // Se limpou a busca, mas há uma coleção selecionada, refaz o fetch
-        if (selectedCollectionId) {
-          await fetchCardsByCollection(selectedCollectionId);
+  /** Busca cartas pela coleção */
+  const fetchCardsByCollection = useCallback(
+    async (colId: string, page = 1, append = false) => {
+      if (!colId) return;
+      setLoading(true);
+      try {
+        const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${colId}"&page=${page}&pageSize=50`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (data && data.data) {
+          const onlyValid = showOnlyLegal
+            ? data.data.filter(
+                (c: any) => c.set?.legalities?.standard === "Legal"
+              )
+            : data.data;
+
+          if (append) {
+            setFilteredCards((prev) => [...prev, ...onlyValid]);
+          } else {
+            setFilteredCards(onlyValid);
+          }
+
+          // Se o retorno for menor que o limite, acabou as cartas
+          setHasMoreCards(data.data.length === 50);
         } else {
-          setFilteredCards([]);
+          if (!append) setFilteredCards([]);
+          setHasMoreCards(false);
         }
+      } catch (err) {
+        console.error("Erro ao buscar cartas da coleção:", err);
+        if (!append) setFilteredCards([]);
+      } finally {
         setLoading(false);
-        return;
       }
+    },
+    [showOnlyLegal]
+  );
 
-      /** Ex: "PGO 68" */
-      const parts = text.split(/\s+/);
-      if (parts.length === 2) {
-        const setCode = parts[0].toUpperCase();
-        const cardNumber = parts[1];
-        const matchedSet = collections.find(
-          (c) => (c.ptcgoCode || "").toUpperCase() === setCode
+  /** Busca cartas pelo query (nome, setCode, etc.) [original] */
+  const searchCard = useCallback(
+    async (query: string) => {
+      setLoading(true);
+      try {
+        const text = query.trim();
+        if (/^\d+$/.test(text)) {
+          setFilteredCards([]);
+          setLoading(false);
+          return;
+        }
+
+        if (!text) {
+          // Se limpou a busca, mas há uma coleção selecionada, refaz o fetch
+          if (selectedCollectionId) {
+            await fetchCardsByCollection(selectedCollectionId);
+          } else {
+            setFilteredCards([]);
+          }
+          setLoading(false);
+          return;
+        }
+
+        /** Ex: "PGO 68" */
+        const parts = text.split(/\s+/);
+        if (parts.length === 2) {
+          const setCode = parts[0].toUpperCase();
+          const cardNumber = parts[1];
+          const matchedSet = collections.find(
+            (c) => (c.ptcgoCode || "").toUpperCase() === setCode
+          );
+          if (matchedSet) {
+            const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${matchedSet.id}" number:"${cardNumber}"`;
+            const response = await fetch(url);
+            const data = await response.json();
+            if (data && data.data) setFilteredCards(data.data);
+            else setFilteredCards([]);
+            setLoading(false);
+            return;
+          }
+        }
+
+        /** Se digitou apenas o setCode (ex: "PGO") */
+        const up = text.toUpperCase();
+        const matchedSet2 = collections.find(
+          (c) => (c.ptcgoCode || "").toUpperCase() === up
         );
-        if (matchedSet) {
-          const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${matchedSet.id}" number:"${cardNumber}"`;
-          const response = await fetch(url);
-          const data = await response.json();
+        if (matchedSet2) {
+          const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${matchedSet2.id}"`;
+          const resp = await fetch(url);
+          const data = await resp.json();
           if (data && data.data) setFilteredCards(data.data);
           else setFilteredCards([]);
           setLoading(false);
           return;
         }
-      }
 
-      /** Se digitou apenas o setCode (ex: "PGO") */
-      const up = text.toUpperCase();
-      const matchedSet2 = collections.find(
-        (c) => (c.ptcgoCode || "").toUpperCase() === up
-      );
-      if (matchedSet2) {
-        const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${matchedSet2.id}"`;
-        const resp = await fetch(url);
-        const data = await resp.json();
-        if (data && data.data) setFilteredCards(data.data);
-        else setFilteredCards([]);
-        setLoading(false);
-        return;
-      }
-
-      /** Caso contrário, busca por nome */
-      const nameUrl = selectedCollectionId
-        ? `https://api.pokemontcg.io/v2/cards?q=set.id:"${selectedCollectionId}" name:"${encodeURIComponent(text)}"`
-        : `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
-      const resp2 = await fetch(nameUrl);
-      const data2 = await resp2.json();
-      if (data2 && data2.data) {
-        const onlyValid = showOnlyLegal
-          ? data2.data.filter(
-              (c: any) => c.set?.legalities?.standard === "Legal"
-            )
-          : data2.data;
-        setFilteredCards(onlyValid);
-      } else {
+        /** Caso contrário, busca por nome */
+        const nameUrl = selectedCollectionId
+          ? `https://api.pokemontcg.io/v2/cards?q=set.id:"${selectedCollectionId}" name:"${encodeURIComponent(text)}"`
+          : `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(text)}"`;
+        const resp2 = await fetch(nameUrl);
+        const data2 = await resp2.json();
+        if (data2 && data2.data) {
+          const onlyValid = showOnlyLegal
+            ? data2.data.filter(
+                (c: any) => c.set?.legalities?.standard === "Legal"
+              )
+            : data2.data;
+          setFilteredCards(onlyValid);
+        } else {
+          setFilteredCards([]);
+        }
+      } catch (error) {
+        console.error("Erro ao buscar cartas:", error);
         setFilteredCards([]);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error("Erro ao buscar cartas:", error);
-      setFilteredCards([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    [collections, fetchCardsByCollection, selectedCollectionId, showOnlyLegal]
+  );
 
   function handleSearchChange(txt: string) {
     setSearchQuery(txt);
-    searchCard(txt);
   }
 
-  /** Busca cartas pela coleção */
-  async function fetchCardsByCollection(
-    colId: string,
-    page = 1,
-    append = false
-  ) {
-    if (!colId) return;
-    setLoading(true);
-    try {
-      const url = `https://api.pokemontcg.io/v2/cards?q=set.id:"${colId}"&page=${page}&pageSize=50`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-
-      if (data && data.data) {
-        const onlyValid = showOnlyLegal
-          ? data.data.filter(
-              (c: any) => c.set?.legalities?.standard === "Legal"
-            )
-          : data.data;
-
-        if (append) {
-          setFilteredCards((prev) => [...prev, ...onlyValid]);
-        } else {
-          setFilteredCards(onlyValid);
-        }
-
-        // Se o retorno for menor que o limite, acabou as cartas
-        setHasMoreCards(data.data.length === 50);
-      } else {
-        if (!append) setFilteredCards([]);
-        setHasMoreCards(false);
-      }
-    } catch (err) {
-      console.error("Erro ao buscar cartas da coleção:", err);
-      if (!append) setFilteredCards([]);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   async function addCardToBinder(binderId: string, card: CardData) {
     try {
@@ -553,7 +571,7 @@ export default function CardsSearchScreen() {
   /**
    * Lógica de ordenação
    */
-  function sortCards(cards: CardData[]): CardData[] {
+  const sortCards = useCallback((cards: CardData[]): CardData[] => {
     if (!cards || cards.length === 0) return [];
     let sorted = [...cards];
 
@@ -605,7 +623,7 @@ export default function CardsSearchScreen() {
         break;
     }
     return sorted;
-  }
+  }, [sortOption]);
   function getFirstPrice(card: CardData): number | null {
     if (!card.tcgplayer || !card.tcgplayer.prices) return null;
     for (let rarityKey of Object.keys(card.tcgplayer.prices)) {
@@ -619,7 +637,7 @@ export default function CardsSearchScreen() {
   /** Cards exibidos = filteredCards + sortOption */
   const displayedCards = useMemo(() => {
     return sortCards(filteredCards);
-  }, [filteredCards, sortOption]);
+  }, [filteredCards, sortCards]);
 
   /**
    * Modal de detalhes (original)
@@ -730,30 +748,6 @@ export default function CardsSearchScreen() {
     setAddToCollectionModal({ visible: true, card, mode: "wish" });
   }
 
-  /** Confirmar no modal "Coleção" ou "Wishlist" */
-  function handleConfirmAddCollection(folder: string) {
-    if (!addToCollectionModal.card) return;
-    const id = addToCollectionModal.card.id;
-
-    if (addToCollectionModal.mode === "have") {
-      setUserOwnedCards((prev) => {
-        if (!prev.includes(id)) {
-          return [...prev, id];
-        }
-        return prev;
-      });
-      Alert.alert("Coleção", `Adicionado na pasta: ${folder}`);
-    } else {
-      setUserWishlist((prev) => {
-        if (!prev.includes(id)) {
-          return [...prev, id];
-        }
-        return prev;
-      });
-      Alert.alert("Wishlist", `Adicionado na Wishlist: ${folder}`);
-    }
-    setAddToCollectionModal({ visible: false, card: null, mode: "have" });
-  }
   function handleCloseAddCollectionModal() {
     setAddToCollectionModal({ visible: false, card: null, mode: "have" });
   }
@@ -791,17 +785,6 @@ export default function CardsSearchScreen() {
 
   const SCREEN_WIDTH = Dimensions.get("window").width;
   const CARD_GRID_WIDTH = (SCREEN_WIDTH - 48) / 3;
-
-  function getFormattedCost(costArray: string[]): string {
-    const countMap: Record<string, number> = {};
-    costArray.forEach((type) => {
-      countMap[type] = (countMap[type] || 0) + 1;
-    });
-
-    return Object.entries(countMap)
-      .map(([type, count]) => `${type} x${count}`)
-      .join(", ");
-  }
 
   return (
     <SafeAreaView style={styles.container}>

@@ -12,6 +12,7 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { db } from "./firebaseConfig";
+import { getActiveClassicosForDuo, PlayerVsPlayerStats } from "../app/classicosConfig";
 
 /** ==== INTERFACES ==== */
 
@@ -166,34 +167,40 @@ export async function fetchAllMatches(): Promise<MatchData[]> {
       return [];
     }
 
-    let allMatches: MatchData[] = [];
+    const allMatches: MatchData[] = [];
 
-    for (const lid of leaguesToFetch) {
-      const tournamentsRef = collection(db, `leagues/${lid}/tournaments`);
-      const tournamentsSnap = await getDocs(tournamentsRef);
+    await Promise.all(
+      leaguesToFetch.map(async (lid) => {
+        const tournamentsRef = collection(db, `leagues/${lid}/tournaments`);
+        const tournamentsSnap = await getDocs(tournamentsRef);
+        if (tournamentsSnap.empty) return;
 
-      if (tournamentsSnap.empty) continue;
+        await Promise.all(
+          tournamentsSnap.docs.map(async (tDoc) => {
+            const tId = tDoc.id;
+            const roundsRef = collection(db, `leagues/${lid}/tournaments/${tId}/rounds`);
+            const roundsSnap = await getDocs(roundsRef);
+            if (roundsSnap.empty) return;
 
-      for (const tDoc of tournamentsSnap.docs) {
-        const tId = tDoc.id;
-        const roundsRef = collection(db, `leagues/${lid}/tournaments/${tId}/rounds`);
-        const roundsSnap = await getDocs(roundsRef);
+            await Promise.all(
+              roundsSnap.docs.map(async (rDoc) => {
+                const matchesRef = collection(
+                  db,
+                  `leagues/${lid}/tournaments/${tId}/rounds/${rDoc.id}/matches`
+                );
+                const matchesSnap = await getDocs(matchesRef);
+                if (matchesSnap.empty) return;
 
-        if (roundsSnap.empty) continue;
-
-        for (const rDoc of roundsSnap.docs) {
-          const matchesRef = collection(db, `leagues/${lid}/tournaments/${tId}/rounds/${rDoc.id}/matches`);
-          const matchesSnap = await getDocs(matchesRef);
-
-          if (matchesSnap.empty) continue;
-
-          matchesSnap.forEach((mDoc) => {
-            const matchData = mDoc.data() as MatchData;
-            allMatches.push({ ...matchData, id: mDoc.id });
-          });
-        }
-      }
-    }
+                matchesSnap.forEach((mDoc) => {
+                  const matchData = mDoc.data() as MatchData;
+                  allMatches.push({ ...matchData, id: mDoc.id });
+                });
+              })
+            );
+          })
+        );
+      })
+    );
 
     return allMatches;
   } catch (error) {
@@ -205,36 +212,43 @@ export async function fetchAllMatches(): Promise<MatchData[]> {
 /** Igual ao anterior, mas ignora o filtro e pega TODAS as ligas. */
 export async function fetchAllMatchesGlobal(): Promise<MatchData[]> {
   try {
-    let allMatches: MatchData[] = [];
+    const allMatches: MatchData[] = [];
     const leaguesSnap = await getDocs(collection(db, "leagues"));
 
-    for (const leagueDoc of leaguesSnap.docs) {
-      const leagueId = leagueDoc.id;
-      const tournamentsRef = collection(db, `leagues/${leagueId}/tournaments`);
-      const tournamentsSnap = await getDocs(tournamentsRef);
+    await Promise.all(
+      leaguesSnap.docs.map(async (leagueDoc) => {
+        const leagueId = leagueDoc.id;
+        const tournamentsRef = collection(db, `leagues/${leagueId}/tournaments`);
+        const tournamentsSnap = await getDocs(tournamentsRef);
+        if (tournamentsSnap.empty) return;
 
-      if (tournamentsSnap.empty) continue;
+        await Promise.all(
+          tournamentsSnap.docs.map(async (tDoc) => {
+            const tId = tDoc.id;
+            const roundsRef = collection(db, `leagues/${leagueId}/tournaments/${tId}/rounds`);
+            const roundsSnap = await getDocs(roundsRef);
+            if (roundsSnap.empty) return;
 
-      for (const tDoc of tournamentsSnap.docs) {
-        const tId = tDoc.id;
-        const roundsRef = collection(db, `leagues/${leagueId}/tournaments/${tId}/rounds`);
-        const roundsSnap = await getDocs(roundsRef);
+            await Promise.all(
+              roundsSnap.docs.map(async (rDoc) => {
+                const matchesRef = collection(
+                  db,
+                  `leagues/${leagueId}/tournaments/${tId}/rounds/${rDoc.id}/matches`
+                );
+                const matchesSnap = await getDocs(matchesRef);
+                if (matchesSnap.empty) return;
 
-        if (roundsSnap.empty) continue;
+                matchesSnap.forEach((mDoc) => {
+                  const matchData = mDoc.data() as MatchData;
+                  allMatches.push({ ...matchData, id: mDoc.id });
+                });
+              })
+            );
+          })
+        );
+      })
+    );
 
-        for (const rDoc of roundsSnap.docs) {
-          const matchesRef = collection(db, `leagues/${leagueId}/tournaments/${tId}/rounds/${rDoc.id}/matches`);
-          const matchesSnap = await getDocs(matchesRef);
-
-          if (matchesSnap.empty) continue;
-
-          matchesSnap.forEach((mDoc) => {
-            const matchData = mDoc.data() as MatchData;
-            allMatches.push({ ...matchData, id: mDoc.id });
-          });
-        }
-      }
-    }
     return allMatches;
   } catch (error) {
     console.error("Erro em fetchAllMatchesGlobal:", error);
@@ -292,8 +306,6 @@ export async function fetchPlayerHistory(
  * NOVA FUNÇÃO que retorna uma lista de Clássicos ativos entre dois jogadores
  * usando os dados do /stats/classics do Player A.
  */
-import { getActiveClassicosForDuo, PlayerVsPlayerStats } from "../app/classicosConfig";
-
 export async function fetchActiveClassicosForDuo(
   leagueId: string,
   playerA: string,
@@ -356,6 +368,7 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
     }
 
     let topRivalId = "";
+    let topRivalLeagueId = "";
     let topScore = -Infinity;
     let finalStats = {
       matches: 0,
@@ -371,8 +384,6 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
     for (const lid of leaguesToFetch) {
       const classicsData = await fetchPlayerClassicsStats(lid, userId);
       if (!classicsData || !classicsData.opponents) continue;
-
-      updatedAt = classicsData.updatedAt || null;
 
       for (const oppId in classicsData.opponents) {
         const matchData = classicsData.opponents[oppId];
@@ -392,13 +403,15 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
         if (score > topScore) {
           topScore = score;
           topRivalId = oppId;
+          topRivalLeagueId = lid;
+          updatedAt = classicsData.updatedAt || null;
           finalStats = {
             matches: totalMatches,
             userWins,
             rivalWins,
             draws,
             lastWinner,
-            wrPercentage: ((userWins + (draws * 0.5)) / totalMatches) * 100
+            wrPercentage: totalMatches > 0 ? ((userWins + (draws * 0.5)) / totalMatches) * 100 : 0,
           };
         }
       }
@@ -409,7 +422,8 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
       return null;
     }
 
-    const rivalRef = doc(db, `leagues/${leaguesToFetch[0]}/players/${topRivalId}`);
+    const rivalLeagueId = topRivalLeagueId || leaguesToFetch[0];
+    const rivalRef = doc(db, `leagues/${rivalLeagueId}/players/${topRivalId}`);
     const rivalSnap = await getDoc(rivalRef);
     const rivalName = rivalSnap.exists()
       ? rivalSnap.data()?.fullname || `User ${topRivalId}`
@@ -428,6 +442,64 @@ export async function fetchRivalByFilter(userId: string): Promise<RivalData | nu
   } catch (err) {
     console.error("❌ Erro ao calcular rival com classics:", err);
     return null;
+  }
+}
+
+/**
+ * Retorna estatísticas de confronto entre dois jogadores
+ * usando /stats/classics, respeitando o filtro atual.
+ */
+export async function fetchConfrontoByFilter(
+  userId: string,
+  opponentId: string
+): Promise<{ matches: number; wins: number; losses: number; draws: number }> {
+  try {
+    const filterType = await AsyncStorage.getItem("@filterType");
+    const cityStored = await AsyncStorage.getItem("@selectedCity");
+    const leagueStored = await AsyncStorage.getItem("@leagueId");
+
+    let leaguesToFetch: string[] = [];
+
+    if (!filterType || filterType === "all") {
+      const leaguesSnap = await getDocs(collection(db, "leagues"));
+      leaguesSnap.forEach((docSnap) => {
+        leaguesToFetch.push(docSnap.id);
+      });
+    } else if (filterType === "city" && cityStored) {
+      const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
+      const citySnapshot = await getDocs(qCity);
+      citySnapshot.forEach((docSnap) => {
+        leaguesToFetch.push(docSnap.id);
+      });
+    } else if (filterType === "league" && leagueStored) {
+      leaguesToFetch.push(leagueStored);
+    } else {
+      return { matches: 0, wins: 0, losses: 0, draws: 0 };
+    }
+
+    if (leaguesToFetch.length === 0) {
+      return { matches: 0, wins: 0, losses: 0, draws: 0 };
+    }
+
+    let matches = 0;
+    let wins = 0;
+    let losses = 0;
+    let draws = 0;
+
+    for (const lid of leaguesToFetch) {
+      const classicsData = await fetchPlayerClassicsStats(lid, userId);
+      if (!classicsData || !classicsData.opponents[opponentId]) continue;
+      const stats = classicsData.opponents[opponentId];
+      matches += stats.matches;
+      wins += stats.wins;
+      losses += stats.losses;
+      draws += stats.draws;
+    }
+
+    return { matches, wins, losses, draws };
+  } catch (err) {
+    console.error("Erro ao buscar confronto por filtro:", err);
+    return { matches: 0, wins: 0, losses: 0, draws: 0 };
   }
 }
 
@@ -479,13 +551,13 @@ export async function fetchAllStatsByFilter(
   const cityStored = await AsyncStorage.getItem("@selectedCity");
   const leagueStored = await AsyncStorage.getItem("@leagueId");
 
-  const cacheKey = `@xpCache_${filterType}_${userId}`;
+  const cacheKey = `@xpCache_${filterType}_${cityStored || "all"}_${leagueStored || "all"}_${userId}`;
   const cachedDataString = await AsyncStorage.getItem(cacheKey);
   let cachedData: any = null;
   if (cachedDataString) {
     try {
       cachedData = JSON.parse(cachedDataString);
-    } catch (e) {
+    } catch {
       cachedData = null;
     }
   }
@@ -603,7 +675,6 @@ export async function fetchAllStatsByFilter(
   }
   const finalLevel = levelCounter - 1; // nível atual
   const xpProgress = totalXP - currentThreshold; // xp acumulado no nível atual
-  const xpForNext = nextThreshold - currentThreshold; // xp necessário para subir de nível
   const xpRemaining = nextThreshold - totalXP; // quanto falta para o próximo nível
 
   const result = {

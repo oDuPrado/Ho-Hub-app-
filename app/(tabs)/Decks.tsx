@@ -17,10 +17,8 @@ import {
 } from "react-native";
 import {
   collection,
-  query,
   onSnapshot,
   doc,
-  getDoc,
   addDoc,
   deleteDoc,
 } from "firebase/firestore";
@@ -108,15 +106,6 @@ export default function DecksScreen() {
   // Estados auxiliares de parse (criando deck) e imagem
   const [parsing, setParsing] = useState(false);
   const [setIdMap, setSetIdMap] = useState<SetIdMap>({});
-  const [deckCards, setDeckCards] = useState<
-    {
-      category: string;
-      quantity: number;
-      name: string;
-      expansion?: string;
-      cardNumber?: string;
-    }[]
-  >([]);
   const [cardImages, setCardImages] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState(false);
 
@@ -443,7 +432,6 @@ function getArchetypeIconUrl(archetype: string): string {
       })),
     ];
 
-    setDeckCards(allCards);
     setLoadingImages(true);
 
     const imagePromises = allCards.map(async (card) => {
@@ -926,8 +914,6 @@ function RenderDeckTable({
         <Text style={[styles.tableHeaderText, { flex: 1 }]}>Nº</Text>
       </View>
       {allCards.map((card, index) => {
-        const keyStr = `${card.name}__${card.expansion ?? ""}__${card.cardNumber ?? ""}`;
-        const imgUrl = cardImages[keyStr];
         return (
           <View
             key={`tab-${index}`}

@@ -13,7 +13,6 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
-  Pressable,
   Animated,
   Easing,
   ScrollView,
@@ -48,9 +47,7 @@ import TemplateModal from "../../components/TemplateModal";
 // 🔥 Importamos a função que calcula stats + XP
 import {
   fetchAllStatsByFilter,
-  PlayerStatsData,
-  fetchAllMatches,
-  MatchData,
+  fetchConfrontoByFilter,
 } from "../../lib/matchService";
 
 /** ================================ */
@@ -178,9 +175,6 @@ export default function PlayerScreen() {
   // Flag feedback tátil
   const [tactileEnabled, setTactileEnabled] = useState(true);
 
-  // Filtro
-  const [currentFilter, setCurrentFilter] = useState<string>("all");
-
   // Confronto Modal
   const [confrontModalVisible, setConfrontModalVisible] = useState(false);
   const [confrontStats, setConfrontStats] = useState<ConfrontoStats | null>(null);
@@ -203,7 +197,7 @@ export default function PlayerScreen() {
     useCallback(() => {
       loadPlayerData();
       loadNPCMessage();
-    }, [])
+    }, [loadPlayerData])
   );
 
   useEffect(() => {
@@ -224,7 +218,7 @@ export default function PlayerScreen() {
         }),
       ])
     ).start();
-  }, []);
+  }, [backgroundAnim]);
 
   // Animação épica no ícone do template
   useEffect(() => {
@@ -242,12 +236,12 @@ export default function PlayerScreen() {
       epicIconSpin.stopAnimation();
       epicIconSpin.setValue(0);
     }
-  }, [selectedTemplateId]);
+  }, [epicIconSpin, selectedTemplateId]);
 
   // ======================
   // CARREGAR DADOS
   // ======================
-  async function loadPlayerData() {
+  const loadPlayerData = useCallback(async () => {
     try {
       setLoading(true);
       const storedId = await AsyncStorage.getItem("@userId");
@@ -317,12 +311,12 @@ export default function PlayerScreen() {
       }
 
       defineRecommendation(adaptedStats);
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível carregar seus dados.");
     } finally {
       setLoading(false);
     }
-}
+  }, [router]);
 
   function computeLocalTitles(ps: PlayerStats): TitleItem[] {
     return titles.map((t) => {
@@ -401,7 +395,7 @@ export default function PlayerScreen() {
   async function updatePlayerAvatar(uId: string, avatarId: number) {
     try {
       await setDoc(doc(db, "players", uId), { avatarId }, { merge: true });
-    } catch (error) {
+    } catch {
       // ignore
     }
   }
@@ -409,7 +403,7 @@ export default function PlayerScreen() {
   async function updatePlayerTemplate(uId: string, templateId: number) {
     try {
       await setDoc(doc(db, "players", uId), { templateId }, { merge: true });
-    } catch (error) {
+    } catch {
       // ignore
     }
   }
@@ -502,18 +496,24 @@ export default function PlayerScreen() {
       } else if (filterType === "city" && cityStored) {
         const qCity = query(collection(db, "leagues"), where("city", "==", cityStored));
         const snapCity = await getDocs(qCity);
-        for (const leagueDoc of snapCity.docs) {
-          const leagueId = leagueDoc.id;
-          const playersRef = collection(db, `leagues/${leagueId}/players`);
-          const playersSnap = await getDocs(playersRef);
-          playersSnap.forEach((ds) => {
-            const data = ds.data();
-            const full = (data.fullname || ds.id).toLowerCase();
-            if (full.includes(searchTerm.toLowerCase())) {
-              arr.push({ userid: ds.id, fullname: data.fullname || ds.id });
-            }
-          });
-        }
+        const leagueIds = snapCity.docs.map((d) => d.id);
+        const playersByLeague = await Promise.all(
+          leagueIds.map(async (leagueId) => {
+            const playersRef = collection(db, `leagues/${leagueId}/players`);
+            const playersSnap = await getDocs(playersRef);
+            return playersSnap.docs.map((ds) => {
+              const data = ds.data();
+              const full = (data.fullname || ds.id).toLowerCase();
+              if (full.includes(searchTerm.toLowerCase())) {
+                return { userid: ds.id, fullname: data.fullname || ds.id };
+              }
+              return null;
+            });
+          })
+        );
+        playersByLeague.flat().forEach((p) => {
+          if (p) arr.push(p);
+        });
       } else if (filterType === "league" && leagueStored) {
         const playersRef = collection(db, `leagues/${leagueStored}/players`);
         const playersSnap = await getDocs(playersRef);
@@ -557,37 +557,13 @@ export default function PlayerScreen() {
       const foundT = templates.find((x) => x.id === oppTempId);
       setConfrontTemplate(foundT || null);
 
-      const allMatches = await fetchAllMatches();
-      const direct = allMatches.filter((mm) => {
-        if (!mm.outcomeNumber) return false;
-        const isUser1 = mm.player1_id === userId && mm.player2_id === opponentId;
-        const isUser2 = mm.player2_id === userId && mm.player1_id === opponentId;
-        return isUser1 || isUser2;
-      });
-
-      let userW = 0;
-      let userL = 0;
-      let userD = 0;
-      direct.forEach((mm) => {
-        const isUserP1 = mm.player1_id === userId;
-        if (mm.outcomeNumber === 1) {
-          if (isUserP1) userW++;
-          else userL++;
-        } else if (mm.outcomeNumber === 2) {
-          if (isUserP1) userL++;
-          else userW++;
-        } else if (mm.outcomeNumber === 3) {
-          userD++;
-        } else if (mm.outcomeNumber === 10) {
-          userL++;
-        }
-      });
+      const confronto = await fetchConfrontoByFilter(userId, opponentId);
 
       setConfrontStats({
-        matches: direct.length,
-        userWins: userW,
-        userLosses: userL,
-        userDraws: userD,
+        matches: confronto.matches,
+        userWins: confronto.wins,
+        userLosses: confronto.losses,
+        userDraws: confronto.draws,
       });
     } catch {
       Alert.alert("Erro", "Não foi possível calcular o confronto.");

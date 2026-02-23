@@ -14,19 +14,15 @@ import {
   Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useTranslation } from "react-i18next";
 import { auth, db } from "../../lib/firebaseConfig";
 import {
   collection,
-  doc,
   addDoc,
   onSnapshot,
   query,
   orderBy,
-  where,
   deleteDoc,
 } from "firebase/firestore";
-import { v4 as uuidv4 } from "uuid";
 
 // Interfaces
 interface UserData {
@@ -54,10 +50,7 @@ interface Message {
 // @chat_<chatId> => Message[]  (para cada chatId)
 
 export default function ChatsScreen() {
-  const { t } = useTranslation();
-
   const [myUid, setMyUid] = useState("");
-  const [myName, setMyName] = useState("Eu");
   const [chats, setChats] = useState<ChatItem[]>([]);
 
   // Modal para criar/iniciar chat
@@ -81,8 +74,7 @@ export default function ChatsScreen() {
 
     (async () => {
       // Se tiver "minhaName" local:
-      const myStoredName = await AsyncStorage.getItem("@userName");
-      if (myStoredName) setMyName(myStoredName);
+      await AsyncStorage.getItem("@userName");
 
       await loadChatsFromStorage();
     })();

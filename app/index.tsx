@@ -10,11 +10,14 @@ export default function IndexScreen() {
   useEffect(() => {
     // Exemplo: ver se user está logado c/ AsyncStorage, etc.
     // Se NÃO logado, push("/(auth)/login"). Se logado, push("/(tabs)/home").
-    setTimeout(() => {
-      router.push("/(auth)/login");
+    const timeoutId = setTimeout(() => {
+      router.replace("/(auth)/login");
       setIsChecking(false);
     }, 800);
-  }, []);
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [router]);
 
   if (isChecking) {
     return (

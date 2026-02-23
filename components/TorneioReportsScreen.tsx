@@ -1,5 +1,5 @@
 // ====================== TorneioReportsScreen.tsx ======================
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -14,7 +14,6 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Animatable from "react-native-animatable";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
-import { useTranslation } from "react-i18next";
 import CustomModal from "../components/CustomModal"; // Importa o modal estilizado
 
 // Se você usa essa função para buscar membros do role host
@@ -43,8 +42,6 @@ export default function TorneioReportsScreen({
   visible,
   onClose,
 }: TorneioReportsScreenProps) {
-  const { t } = useTranslation();
-
   const [loading, setLoading] = useState<boolean>(true);
   const [reports, setReports] = useState<ReportData>({ final: {}, partial: {} });
   const [mesaData, setMesaData] = useState<Record<string, any>>({});
@@ -67,13 +64,7 @@ const [showConfirmClearAllModal, setShowConfirmClearAllModal] = useState(false);
   }, [onClose]);
 
   // Carrega dados assim que o modal fica visível
-  useEffect(() => {
-    if (visible) {
-      loadReports();
-    }
-  }, [visible]);
-
-  async function loadReports() {
+  const loadReports = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMsg("");
@@ -185,11 +176,17 @@ const [showConfirmClearAllModal, setShowConfirmClearAllModal] = useState(false);
       }
   
       setLoading(false);
-    } catch (error: any) {
+    } catch {
       setErrorMsg("Falha ao carregar resultados do torneio.");
       setLoading(false);
     }
-  }  
+  }, []);
+
+  useEffect(() => {
+    if (visible) {
+      loadReports();
+    }
+  }, [loadReports, visible]);
 
   async function checkIfHost(leagueId: string) {
     try {
@@ -201,23 +198,8 @@ const [showConfirmClearAllModal, setShowConfirmClearAllModal] = useState(false);
       const hostMembers = await fetchRoleMembers(leagueId, "host");
       const found = hostMembers.find((h: any) => h.userId === userId);
       setIsHost(!!found);
-    } catch (err) {
+    } catch {
       setIsHost(false);
-    }
-  }
-
-  async function handleLimparResultados() {
-    try {
-      const firebaseToken = await AsyncStorage.getItem("@firebaseToken");
-      const res = await fetch("https://Doprado.pythonanywhere.com/limpar-resultados", {
-        method: "POST",
-        headers: { Authorization: firebaseToken ? `Bearer ${firebaseToken}` : "" },
-      });
-      const json = await res.json();
-      Alert.alert("Info", json.message || "Resultados limpos!");
-      await loadReports();
-    } catch (error) {
-      Alert.alert("Erro", "Falha ao limpar resultados.");
     }
   }
 
@@ -241,7 +223,7 @@ const [showConfirmClearAllModal, setShowConfirmClearAllModal] = useState(false);
       const json = await res.json();
       Alert.alert("Info", json.message || "Resultado limpo!");
       await loadReports();
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Falha ao limpar o resultado.");
     }
   }
@@ -273,7 +255,7 @@ const [showConfirmClearAllModal, setShowConfirmClearAllModal] = useState(false);
       const json = await res.json();
       Alert.alert("Info", json.message || "Todos os Reportes foram limpos.");
       await loadReports(); // Atualiza os resultados após a limpeza
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Falha ao limpar todos os Reportes.");
     }
   }  

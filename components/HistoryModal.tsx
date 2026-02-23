@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -32,16 +31,7 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
   const [cachedLeague, setCachedLeague] = useState<string>("");
   const [cachedHistory, setCachedHistory] = useState<TournamentHistoryItem[]>([]);
 
-  useEffect(() => {
-    if (visible) {
-      loadHistory();
-    } else {
-      setHistoryData([]);
-      setError("");
-    }
-  }, [visible]);
-
-  async function loadHistory() {
+  const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
       const leagueStored = await AsyncStorage.getItem("@leagueId");
@@ -60,8 +50,8 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
       console.log("Buscando histórico no Firestore...");
       const data = await fetchPlayerHistory(leagueStored, userId);
   
-  +   // Ordena do mais recente para o mais antigo
-  +   data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      // Ordena do mais recente para o mais antigo
+      data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   
       setHistoryData(data);
       setCachedLeague(leagueStored);
@@ -78,7 +68,16 @@ export default function HistoryModal({ visible, onClose, userId }: HistoryModalP
     } finally {
       setLoading(false);
     }
-  }  
+  }, [cachedHistory, cachedLeague, userId]);
+
+  useEffect(() => {
+    if (visible) {
+      loadHistory();
+    } else {
+      setHistoryData([]);
+      setError("");
+    }
+  }, [loadHistory, visible]);
 
   return (
     <Modal

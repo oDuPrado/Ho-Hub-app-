@@ -6,7 +6,6 @@ import {
 } from "@react-navigation/drawer";
 import { withLayoutContext } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useTranslation } from "react-i18next";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -73,7 +72,6 @@ const CustomDrawerItem: React.FC<CustomDrawerItemProps> = ({
 };
 
 function CustomDrawerContent(props: DrawerContentComponentProps) {
-  const { t } = useTranslation();
   const { state, navigation, descriptors } = props;
   const [userType, setUserType] = useState<"collection" | "tournament" | "both" | null>(null);
 
@@ -140,8 +138,6 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
 }
 
 function DrawerLayout() {
-  const { t } = useTranslation();
-
   return (
     <Drawer.Navigator
       drawerContent={(props) => <CustomDrawerContent {...props} />}

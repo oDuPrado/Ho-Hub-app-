@@ -2,7 +2,7 @@
 // ARQUIVO: TestIndicesScreen.tsx
 //////////////////////////////////////
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { collectionGroup, collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from "../lib/firebaseConfig";
 import AsyncStorage from "@react-native-async-storage/async-storage";

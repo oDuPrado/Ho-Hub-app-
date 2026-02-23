@@ -13,10 +13,8 @@ import {
   Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
-import { useTranslation } from "react-i18next";
 import CustomModal from "../components/CustomModal"; // Importa o modal estilizado
 
 const RED = "#E3350D";
@@ -48,9 +46,6 @@ export default function TorneioVoteScreen({
   p1Name,
   p2Name,
 }: VoteProps) {
-  const { t } = useTranslation();
-  const router = useRouter();
-
   // PIN do usuário, carregado automaticamente do AsyncStorage
   const [userPin, setUserPin] = useState("");
 

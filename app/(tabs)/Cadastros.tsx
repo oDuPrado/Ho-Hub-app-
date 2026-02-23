@@ -1,7 +1,7 @@
 //////////////////////////////////////
 // ARQUIVO: Cadastros.tsx
 //////////////////////////////////////
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -189,50 +189,42 @@ export default function CadastrosScreen() {
         let isHost = false;
         let isAuthuser = false;
 
-        // 1. Verifica se é host no Firebase
         try {
           const leaguesSnap = await getDocs(collection(db, "leagues"));
-          for (const leagueDoc of leaguesSnap.docs) {
-            const hostSnap = await getDocs(
-              collection(db, `leagues/${leagueDoc.id}/roles/host/members`)
-            );
-            if (hostSnap.docs.some((doc) => doc.id === storedId)) {
-              isHost = true;
-              break;
-            }
-          }
-        } catch (error) {
-          console.log("Erro ao buscar hosts no Firebase, fallback.", error);
+          const checks = await Promise.all(
+            leaguesSnap.docs.map(async (leagueDoc) => {
+              const hostSnap = await getDocs(
+                collection(db, `leagues/${leagueDoc.id}/roles/host/members`)
+              );
+              return hostSnap.docs.some((doc) => doc.id === storedId);
+            })
+          );
+          isHost = checks.some(Boolean);
+        } catch {
+          console.log("Erro ao buscar hosts no Firebase, fallback.");
         }
 
-        // 2. Fallback da lista estática
         if (!isHost) {
           isHost = HOST_PLAYER_IDS.includes(storedId);
         }
 
-        // 3. Verifica se é Authuser
         isAuthuser = Authuser.includes(storedId);
 
-        // 4. Define permissões
         if (!isHost && !isAuthuser) {
           setAccessDenied(true);
           return;
         }
         setUserId(storedId);
-
-        // Somente Authusers podem ver logins/roles
         setCanSeeLogins(isAuthuser);
-
-        await loadTabData();
-      } catch (error) {
+      } catch {
         Alert.alert("Erro", "Falha ao carregar cadastros.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [currentTab, router]);
+  }, [router]);
 
-  async function loadTabData() {
+  const loadTabData = useCallback(async () => {
     if (currentTab === "players") {
       await fetchPlayers();
     } else if (currentTab === "logins" && canSeeLogins) {
@@ -240,7 +232,12 @@ export default function CadastrosScreen() {
     } else if (currentTab === "roles" && canSeeLogins) {
       await fetchLeagues();
     }
-  }
+  }, [canSeeLogins, currentTab, fetchLeagues, fetchLogins, fetchPlayers]);
+
+  useEffect(() => {
+    if (!userId || accessDenied) return;
+    loadTabData();
+  }, [accessDenied, loadTabData, userId]);
 
   // ================ FUNÇÃO TROCAR ABA ================
   function switchTab(tab: "players" | "logins" | "roles") {
@@ -277,20 +274,22 @@ export default function CadastrosScreen() {
       let allPlayers: PlayerData[] = [];
       const term = searchTerm.toLowerCase();
 
-      for (const lid of leagueIds) {
-        const pRef = collection(db, `leagues/${lid}/players`);
-        const pSnap = await getDocs(pRef);
-        pSnap.forEach((docSnap) => {
-          const pd = docSnap.data() as PlayerData;
-          if (
-            !term ||
-            pd.fullname?.toLowerCase().includes(term) ||
-            pd.userid?.toLowerCase().includes(term)
-          ) {
-            allPlayers.push(pd);
-          }
-        });
-      }
+      const playersByLeague = await Promise.all(
+        leagueIds.map(async (lid) => {
+          const pRef = collection(db, `leagues/${lid}/players`);
+          const pSnap = await getDocs(pRef);
+          return pSnap.docs
+            .map((docSnap) => docSnap.data() as PlayerData)
+            .filter((pd) => {
+              return (
+                !term ||
+                pd.fullname?.toLowerCase().includes(term) ||
+                pd.userid?.toLowerCase().includes(term)
+              );
+            });
+        })
+      );
+      allPlayers = playersByLeague.flat();
 
       // Remove duplicados
       const seen = new Set();
@@ -300,7 +299,7 @@ export default function CadastrosScreen() {
         return true;
       });
       setPlayers(unique);
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível carregar jogadores.");
     } finally {
       setPlayersLoading(false);
@@ -357,7 +356,7 @@ export default function CadastrosScreen() {
           "Crie jogador apenas com liga específica selecionada."
         );
       }
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível salvar jogador.");
     }
   }
@@ -379,7 +378,7 @@ export default function CadastrosScreen() {
             await deleteDoc(docRef);
             Alert.alert("Sucesso", "Jogador excluído!");
             await fetchPlayers();
-          } catch (error) {
+          } catch {
             Alert.alert("Erro", "Não foi possível excluir jogador.");
           }
         },
@@ -409,7 +408,7 @@ export default function CadastrosScreen() {
         }
       });
       setLogins(arr);
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível carregar logins.");
     } finally {
       setLoginsLoading(false);
@@ -482,7 +481,7 @@ export default function CadastrosScreen() {
       );
       setLoginModalVisible(false);
       await fetchLogins();
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível salvar login.");
     }
   }
@@ -499,7 +498,7 @@ export default function CadastrosScreen() {
             await deleteDoc(docRef);
             Alert.alert("Sucesso", "Login excluído!");
             await fetchLogins();
-          } catch (err) {
+          } catch {
             Alert.alert("Erro", "Não foi possível excluir login.");
           }
         },
@@ -538,7 +537,7 @@ export default function CadastrosScreen() {
         }
       });
       setLeagues(arr);
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível carregar ligas.");
     } finally {
       setRolesLoading(false);
@@ -551,10 +550,6 @@ export default function CadastrosScreen() {
     setCurrentRoleTab("host");
     setRolesModalVisible(true);
     loadRoleData(item.leagueId);
-  }
-
-  function closeRolesModal() {
-    setRolesModalVisible(false);
   }
 
   async function loadRoleData(leagueId: string) {
@@ -571,7 +566,7 @@ export default function CadastrosScreen() {
       setHeadList(hd);
       setBanList(b);
       setVipList(v);
-    } catch (error) {
+    } catch {
       Alert.alert("Erro", "Não foi possível carregar dados de roles.");
     }
   }
@@ -590,7 +585,7 @@ export default function CadastrosScreen() {
       if (!selectedLeagueId) return;
       await addRoleMember(selectedLeagueId, roleName, userId, userName);
       await loadRoleData(selectedLeagueId);
-    } catch (err) {
+    } catch {
       Alert.alert("Erro", "Não foi possível adicionar membro.");
     }
   }
@@ -603,7 +598,7 @@ export default function CadastrosScreen() {
       if (!selectedLeagueId) return;
       await removeRoleMember(selectedLeagueId, roleName, userId);
       await loadRoleData(selectedLeagueId);
-    } catch (err) {
+    } catch {
       Alert.alert("Erro", "Não foi possível remover membro.");
     }
   }
@@ -639,7 +634,7 @@ export default function CadastrosScreen() {
         );
       }
       setSelectPlayers(arr);
-    } catch (err) {
+    } catch {
       Alert.alert("Erro", "Não foi possível carregar jogadores para seleção.");
     } finally {
       setSelectLoading(false);

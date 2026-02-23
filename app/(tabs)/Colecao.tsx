@@ -31,9 +31,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import useBackupManager from "../../components/BackupManager";
 import type { BackupData, BackupBinder } from "../../components/BackupManager";
-import DraggableFlatList, {
-  RenderItemParams,
-} from "react-native-draggable-flatlist";
+import DraggableFlatList from "react-native-draggable-flatlist";
 
 /** Tipos */
 type BinderType = "master" | "pokemon" | "trainer" | "artist" | "general";
@@ -144,7 +142,7 @@ export default function CollectionsScreen() {
     ) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
-  }, []);
+  }, [getBindersFromBackupFile, restoredData?.binders]);
   const [binders, setBinders] = useState<Binder[]>([]);
   const [reorderMode, setReorderMode] = useState(false);
   const [sortBindersOption, setSortBindersOption] = useState<
@@ -206,30 +204,6 @@ export default function CollectionsScreen() {
     await generateBackupFile();
     setBackupModalVisible(false);
     console.log("Sincronização completa.");
-  }
-
-  function renderReorderItem({
-    item,
-    drag,
-    isActive,
-  }: RenderItemParams<Binder>) {
-    return (
-      <TouchableOpacity
-        onLongPress={drag}
-        disabled={isActive}
-        style={[
-          styles.binderCard,
-          {
-            backgroundColor: getBinderColor(item.binderType),
-            opacity: isActive ? 0.8 : 1,
-            width: "100%",
-          },
-        ]}
-      >
-        <Text style={styles.binderName}>{item.name}</Text>
-        <Text style={styles.binderReference}>{item.reference}</Text>
-      </TouchableOpacity>
-    );
   }
 
   function autoSortBinders(option: "name" | "type" | "progress") {
@@ -343,7 +317,7 @@ export default function CollectionsScreen() {
       useNativeDriver: false,
       easing: Easing.out(Easing.ease),
     }).start();
-  }, [perc]);
+  }, [perc, progressAnim]);
 
   function getPercColor(p: number) {
     if (p < 40) return "#E53935";
@@ -392,18 +366,7 @@ export default function CollectionsScreen() {
   /**
    * Recarregar binders sempre que a tela estiver em foco.
    */
-  useFocusEffect(
-    useCallback(() => {
-      loadBindersFromStorage();
-    }, [])
-  );
-
-  useEffect(() => {
-    // Carrega coleções (API pokemontcg) 1x
-    loadCollections();
-  }, []);
-
-  async function loadBindersFromStorage() {
+  const loadBindersFromStorage = useCallback(async () => {
     try {
       const raw = await AsyncStorage.getItem("@userBinders");
   
@@ -450,7 +413,18 @@ export default function CollectionsScreen() {
     } catch (err) {
       console.log("Erro loadBinders:", err);
     }
-  }  
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBindersFromStorage();
+    }, [loadBindersFromStorage])
+  );
+
+  useEffect(() => {
+    // Carrega coleções (API pokemontcg) 1x
+    loadCollections();
+  }, []);
 
   async function saveBindersToStorage(updated: Binder[]) {
     setBinders(updated);
@@ -476,7 +450,7 @@ export default function CollectionsScreen() {
       };
       autoBackup();
     }
-  }, [binders]);
+  }, [binders, generateBackupFile, writeBackup]);
 
   async function loadCollections() {
     try {
@@ -626,12 +600,6 @@ export default function CollectionsScreen() {
   }
 
   /** Múltiplo sets e series */
-  function openCollectionsModal() {
-    setCollectionsModalVisible(true);
-  }
-  function closeCollectionsModal() {
-    setCollectionsModalVisible(false);
-  }
 
   async function fetchCardsForBinder() {
     setCreateBinderState((p) => ({
@@ -923,9 +891,6 @@ export default function CollectionsScreen() {
 
   function openSortModal() {
     setSortModalVisible(true);
-  }
-  function closeSortModal() {
-    setSortModalVisible(false);
   }
   function selectSortOption(opt: BinderSortOption) {
     setBinderSort(opt);

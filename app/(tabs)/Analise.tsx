@@ -1,5 +1,5 @@
 // ARQUIVO: Analise.tsx
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -12,12 +12,10 @@ import {
   Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getDocs, collectionGroup, doc, getDoc } from "firebase/firestore";
-import { db } from "../../lib/firebaseConfig";
 import * as Animatable from "react-native-animatable";
 
 // Importa as funções otimizadas do matchService
-import { fetchAllMatches, fetchAllStatsByFilter } from "../../lib/matchService";
+import { fetchAllStatsByFilter } from "../../lib/matchService";
 
 interface PlayerStats {
   wins: number;
@@ -27,11 +25,6 @@ interface PlayerStats {
   uniqueOpponents: number;
 }
 
-interface RivalData {
-  rivalId: string;
-  rivalName: string;
-  matches: number;
-}
 
 export default function Analise() {
   const [loading, setLoading] = useState(false);
@@ -122,10 +115,15 @@ export default function Analise() {
       "Estude a lista dos vencedores de torneios. Eles são exemplos claros do que funciona no meta atual.",
       "Lembre-se: a Liga Pokémon não é conquistada em um dia. Treine, ajuste e continue competindo!",
     ];
-    
-  const [welcomeIndex] = useState(
-    Math.floor(Math.random() * welcomeMessages.length)
-  );
+
+  const generateAnalysis = useCallback((st: PlayerStats) => {
+    const gen = getRandomGeneric();
+    const tip = getRandomTip(st);
+    const spec = `Você jogou um total de ${st.matchesTotal} partidas com ${st.wins} vitórias, ${st.losses} derrotas e ${st.draws} empates.`;
+    setAiMessageGeneric(gen);
+    setAiMessageTip(tip);
+    setAiMessageSpecific(spec);
+  }, [getRandomGeneric, getRandomTip]);
 
   useEffect(() => {
     (async () => {
@@ -157,7 +155,7 @@ export default function Analise() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [generateAnalysis]);
 
   useEffect(() => {
     if (generationCount >= 5) {
@@ -187,15 +185,6 @@ export default function Analise() {
       setLastGenerationTime(now);
       generateAnalysis(stats);
     }
-  }
-
-  function generateAnalysis(st: PlayerStats) {
-    const gen = getRandomGeneric();
-    const tip = getRandomTip(st);
-    const spec = `Você jogou um total de ${st.matchesTotal} partidas com ${st.wins} vitórias, ${st.losses} derrotas e ${st.draws} empates.`;
-    setAiMessageGeneric(gen);
-    setAiMessageTip(tip);
-    setAiMessageSpecific(spec);
   }
 
   function getRandomGeneric(): string {
@@ -240,24 +229,6 @@ export default function Analise() {
       "Tá perdendo tanto que até um Ditto teria vergonha de te imitar. Bora dar a volta por cima! 🟣",
       "Suas chances de vitória tão menores que um Joltik. Hora de crescer, treinador! 🕷️",
       "Tá mais derrotado que um Charizard numa piscina. Vamos sair dessa água fria! 🔥"
-    ];
-    
-    const arrDraws = [
-      "Empate é igual a ficar em cima do muro. Decide logo quem é melhor nessa briga! 🤼",
-      "Muitos empates? Falta um golpe final estilo 'Choque do Trovão' no deck! ⚡",
-      "Tá empatando mais que Snorlax bloqueando uma passagem. Hora de acordar e dominar! 💤",
-      "Empate é tipo Ditto: não sabe se transforma ou fica na forma original. Escolhe um lado! 🟣",
-      "Teus jogos tão mais equilibrados que Libra na balança. Que tal desempatar isso? ⚖️",
-      "Empatou de novo? Teu deck tá mais indeciso que um Eevee escolhendo evolução! 🦊",
-      "Tá empatando tanto que até o Team Rocket tá confuso se ganha ou perde! 🚀",
-      "Empate é bom em cabo de guerra, não em Pokémon TCG. Puxa mais forte! 💪",
-      "Teus jogos tão mais empatados que nó de marinheiro. Hora de desatar essa confusão! 🪢",
-      "Empate é tipo Splash do Magikarp: não faz nada. Bora evoluir pra Gyarados! 🐉",
-      "Tá empatando mais que Metapod vs Metapod. Cadê o Butterfree pra resolver isso? 🦋",
-      "Empate é que nem Pokébola vazia: não pega nada. Mira melhor na vitória! 🎯",
-      "Teus jogos tão mais empatados que batalha de Wobbuffet. Alguém tem que ceder! 🪞",
-      "Empate é tipo Poké-bolsa sem itens. Hora de encher de vitórias! 🎒",
-      "Tá mais indeciso que Psyduck com dor de cabeça. Escolhe logo: vitória ou derrota! 🦆"
     ];
     
     const arrNeutral = [

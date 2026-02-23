@@ -3,11 +3,10 @@
 import React from "react";
 import { View, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ThemeName } from "./themes";
 import { useTheme } from "./ThemeContext";
 
 export function ThemeSelector() {
-  const { themeName, setTheme, colors } = useTheme();
+  const { themeName, setTheme } = useTheme();
 
   return (
     <View style={styles.container}>
